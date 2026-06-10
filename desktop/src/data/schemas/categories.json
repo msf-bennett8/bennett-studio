@@ -1,0 +1,143 @@
+{
+  "name": "categories",
+  "type": "table",
+  "engine": "PostgreSQL",
+  "version": "16.2",
+  "row_count": 28,
+  "size": "64 KB",
+  "created_at": "2024-01-10T09:00:00Z",
+  "columns": [
+    {
+      "name": "id",
+      "type": "SERIAL",
+      "nullable": false,
+      "default": null,
+      "is_primary": true,
+      "is_foreign": false,
+      "references": null,
+      "description": "Category ID"
+    },
+    {
+      "name": "slug",
+      "type": "VARCHAR(100)",
+      "nullable": false,
+      "default": null,
+      "is_primary": false,
+      "is_foreign": false,
+      "references": null,
+      "description": "URL-friendly name",
+      "constraints": [
+        "UNIQUE"
+      ]
+    },
+    {
+      "name": "name",
+      "type": "VARCHAR(100)",
+      "nullable": false,
+      "default": null,
+      "is_primary": false,
+      "is_foreign": false,
+      "references": null,
+      "description": "Display name"
+    },
+    {
+      "name": "description",
+      "type": "TEXT",
+      "nullable": true,
+      "default": null,
+      "is_primary": false,
+      "is_foreign": false,
+      "references": null,
+      "description": "Category description"
+    },
+    {
+      "name": "parent_id",
+      "type": "INTEGER",
+      "nullable": true,
+      "default": null,
+      "is_primary": false,
+      "is_foreign": true,
+      "references": "categories.id",
+      "description": "Parent category",
+      "on_delete": "SET NULL"
+    },
+    {
+      "name": "sort_order",
+      "type": "INTEGER",
+      "nullable": false,
+      "default": "0",
+      "is_primary": false,
+      "is_foreign": false,
+      "references": null,
+      "description": "Display order"
+    },
+    {
+      "name": "is_active",
+      "type": "BOOLEAN",
+      "nullable": false,
+      "default": "TRUE",
+      "is_primary": false,
+      "is_foreign": false,
+      "references": null,
+      "description": "Category visibility"
+    },
+    {
+      "name": "created_at",
+      "type": "TIMESTAMP",
+      "nullable": false,
+      "default": "NOW()",
+      "is_primary": false,
+      "is_foreign": false,
+      "references": null,
+      "description": "Creation time"
+    }
+  ],
+  "indexes": [
+    {
+      "name": "idx_categories_slug",
+      "columns": [
+        "slug"
+      ],
+      "type": "btree",
+      "unique": true
+    },
+    {
+      "name": "idx_categories_parent",
+      "columns": [
+        "parent_id"
+      ],
+      "type": "btree",
+      "unique": false
+    }
+  ],
+  "constraints": [
+    {
+      "name": "pk_categories",
+      "type": "PRIMARY KEY",
+      "columns": [
+        "id"
+      ]
+    },
+    {
+      "name": "uq_categories_slug",
+      "type": "UNIQUE",
+      "columns": [
+        "slug"
+      ]
+    },
+    {
+      "name": "fk_categories_parent",
+      "type": "FOREIGN KEY",
+      "columns": [
+        "parent_id"
+      ],
+      "references": "categories.id"
+    }
+  ],
+  "relationships": {
+    "has_many": [
+      "products"
+    ],
+    "belongs_to": []
+  }
+}

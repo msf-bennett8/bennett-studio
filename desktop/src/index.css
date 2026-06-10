@@ -1,0 +1,184 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Default dark theme variables */
+    --bgPrimary: #0a0a0a;
+    --bgSecondary: #111111;
+    --bgTertiary: #1a1a1a;
+    --bgElevated: #222222;
+    --bgOverlay: rgba(0,0,0,0.8);
+    --surfaceDefault: #1a1a1a;
+    --surfaceHover: #252525;
+    --surfaceActive: #2a2a2a;
+    --surfaceDisabled: #0f0f0f;
+    --borderDefault: #2a2a2a;
+    --borderHover: #3a3a3a;
+    --borderFocus: #4a4a4a;
+    --borderError: #ff4444;
+    --textPrimary: #e0e0e0;
+    --textSecondary: #a0a0a0;
+    --textTertiary: #707070;
+    --textMuted: #505050;
+    --textInverse: #0a0a0a;
+    --accentPrimary: #00d4aa;
+    --accentPrimaryHover: #00e6b8;
+    --accentPrimaryActive: #00bf9a;
+    --accentSecondary: #6b8aff;
+    --accentSuccess: #00d4aa;
+    --accentWarning: #ffaa00;
+    --accentError: #ff4444;
+    --accentInfo: #6b8aff;
+    --terminalGreen: #00d4aa;
+    --terminalGreenDim: #008866;
+    --terminalCursor: #00d4aa;
+    --terminalSelection: rgba(0,212,170,0.2);
+    --syntaxKeyword: #ff7b72;
+    --syntaxString: #a5d6ff;
+    --syntaxNumber: #79c0ff;
+    --syntaxComment: #8b949e;
+    --syntaxFunction: #d2a8ff;
+    --syntaxType: #ffa657;
+    --syntaxVariable: #e0e0e0;
+    --syntaxOperator: #ff7b72;
+  }
+
+  * {
+    @apply transition-colors duration-150;
+  }
+
+  body {
+    background-color: var(--bgPrimary);
+    color: var(--textPrimary);
+    font-family: 'Inter', 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Scrollbar styling */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: var(--bgSecondary);
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: var(--borderDefault);
+    border-radius: 4px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--borderHover);
+  }
+
+  /* Selection */
+  ::selection {
+    background: var(--terminalSelection);
+    color: var(--textPrimary);
+  }
+
+  /* Terminal cursor blink */
+  @keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0; }
+  }
+
+  .terminal-cursor {
+    animation: blink 1s step-end infinite;
+  }
+
+  /* Focus ring */
+  *:focus-visible {
+    outline: 2px solid var(--accentPrimary);
+    outline-offset: 2px;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply px-4 py-2 rounded-lg font-medium transition-all;
+    background-color: var(--accentPrimary);
+    color: var(--textInverse);
+  }
+
+  .btn-primary:hover {
+    background-color: var(--accentPrimaryHover);
+  }
+
+  .btn-primary:active {
+    background-color: var(--accentPrimaryActive);
+  }
+
+  .btn-secondary {
+    @apply px-4 py-2 rounded-lg font-medium transition-all;
+    background-color: var(--surfaceDefault);
+    color: var(--textPrimary);
+    border: 1px solid var(--borderDefault);
+  }
+
+  .btn-secondary:hover {
+    background-color: var(--surfaceHover);
+    border-color: var(--borderHover);
+  }
+
+  .card {
+    @apply rounded-xl p-6;
+    background-color: var(--surfaceDefault);
+    border: 1px solid var(--borderDefault);
+  }
+
+  .input {
+    @apply px-4 py-2 rounded-lg w-full transition-all;
+    background-color: var(--bgSecondary);
+    color: var(--textPrimary);
+    border: 1px solid var(--borderDefault);
+  }
+
+  .input:focus {
+    border-color: var(--accentPrimary);
+    box-shadow: 0 0 0 3px var(--terminalSelection);
+  }
+
+  .input::placeholder {
+    color: var(--textMuted);
+  }
+
+  .sidebar-item {
+    @apply flex items-center gap-3 px-4 py-2 rounded-lg cursor-pointer transition-all;
+    color: var(--textSecondary);
+  }
+
+  .sidebar-item:hover {
+    background-color: var(--surfaceHover);
+    color: var(--textPrimary);
+  }
+
+  .sidebar-item.active {
+    background-color: var(--surfaceActive);
+    color: var(--accentPrimary);
+    border-right: 2px solid var(--accentPrimary);
+  }
+
+  /* SQL Editor specific */
+  .sql-editor {
+    font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+    font-size: 14px;
+    line-height: 1.6;
+    background-color: var(--bgSecondary);
+    color: var(--textPrimary);
+  }
+
+  .syntax-keyword { color: var(--syntaxKeyword); }
+  .syntax-string { color: var(--syntaxString); }
+  .syntax-number { color: var(--syntaxNumber); }
+  .syntax-comment { color: var(--syntaxComment); font-style: italic; }
+  .syntax-function { color: var(--syntaxFunction); }
+  .syntax-type { color: var(--syntaxType); }
+  .syntax-variable { color: var(--syntaxVariable); }
+  .syntax-operator { color: var(--syntaxOperator); }
+}

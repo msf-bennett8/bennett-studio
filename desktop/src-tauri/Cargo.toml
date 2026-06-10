@@ -1,0 +1,22 @@
+[package]
+name = "bennett-studio"
+version = "0.1.0"
+description = "Bennett Studio Desktop"
+authors = ["Bennett Studio"]
+license = "MIT"
+repository = "https://github.com/msf-bennett8/bennett-studio"
+edition = "2021"
+
+[workspace]
+
+[build-dependencies]
+tauri-build = { version = "1.5", features = [] }
+
+[dependencies]
+tauri = { version = "1.5", features = [ "window-show", "window-hide", "fs-remove-file", "dialog-ask", "dialog-message", "window-maximize", "fs-write-file", "fs-remove-dir", "fs-read-file", "dialog-open", "fs-create-dir", "dialog-confirm", "window-close", "fs-rename-file", "fs-exists", "window-unminimize", "fs-read-dir", "fs-copy-file", "window-unmaximize", "dialog-save", "window-minimize", "window-start-dragging", "shell-open", "notification-all", "process-relaunch", "process-exit"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]

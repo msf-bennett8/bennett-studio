@@ -1,0 +1,150 @@
+{
+  "name": "comments",
+  "type": "table",
+  "engine": "PostgreSQL",
+  "version": "16.2",
+  "row_count": 3421,
+  "size": "512 KB",
+  "created_at": "2024-03-15T13:00:00Z",
+  "columns": [
+    {
+      "name": "id",
+      "type": "SERIAL",
+      "nullable": false,
+      "default": null,
+      "is_primary": true,
+      "is_foreign": false,
+      "references": null,
+      "description": "Comment ID"
+    },
+    {
+      "name": "post_id",
+      "type": "INTEGER",
+      "nullable": false,
+      "default": null,
+      "is_primary": false,
+      "is_foreign": true,
+      "references": "posts.id",
+      "description": "Parent post",
+      "on_delete": "CASCADE"
+    },
+    {
+      "name": "user_id",
+      "type": "INTEGER",
+      "nullable": false,
+      "default": null,
+      "is_primary": false,
+      "is_foreign": true,
+      "references": "users.id",
+      "description": "Commenter",
+      "on_delete": "CASCADE"
+    },
+    {
+      "name": "parent_id",
+      "type": "INTEGER",
+      "nullable": true,
+      "default": null,
+      "is_primary": false,
+      "is_foreign": true,
+      "references": "comments.id",
+      "description": "Reply to",
+      "on_delete": "CASCADE"
+    },
+    {
+      "name": "content",
+      "type": "TEXT",
+      "nullable": false,
+      "default": null,
+      "is_primary": false,
+      "is_foreign": false,
+      "references": null,
+      "description": "Comment text"
+    },
+    {
+      "name": "is_approved",
+      "type": "BOOLEAN",
+      "nullable": false,
+      "default": "FALSE",
+      "is_primary": false,
+      "is_foreign": false,
+      "references": null,
+      "description": "Moderation status"
+    },
+    {
+      "name": "created_at",
+      "type": "TIMESTAMP",
+      "nullable": false,
+      "default": "NOW()",
+      "is_primary": false,
+      "is_foreign": false,
+      "references": null,
+      "description": "Creation time"
+    }
+  ],
+  "indexes": [
+    {
+      "name": "idx_comments_post",
+      "columns": [
+        "post_id"
+      ],
+      "type": "btree",
+      "unique": false
+    },
+    {
+      "name": "idx_comments_user",
+      "columns": [
+        "user_id"
+      ],
+      "type": "btree",
+      "unique": false
+    },
+    {
+      "name": "idx_comments_parent",
+      "columns": [
+        "parent_id"
+      ],
+      "type": "btree",
+      "unique": false
+    }
+  ],
+  "constraints": [
+    {
+      "name": "pk_comments",
+      "type": "PRIMARY KEY",
+      "columns": [
+        "id"
+      ]
+    },
+    {
+      "name": "fk_comments_post",
+      "type": "FOREIGN KEY",
+      "columns": [
+        "post_id"
+      ],
+      "references": "posts.id"
+    },
+    {
+      "name": "fk_comments_user",
+      "type": "FOREIGN KEY",
+      "columns": [
+        "user_id"
+      ],
+      "references": "users.id"
+    },
+    {
+      "name": "fk_comments_parent",
+      "type": "FOREIGN KEY",
+      "columns": [
+        "parent_id"
+      ],
+      "references": "comments.id"
+    }
+  ],
+  "relationships": {
+    "has_many": [],
+    "belongs_to": [
+      "posts",
+      "users"
+    ]
+  }
+}

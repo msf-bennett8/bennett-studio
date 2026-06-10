@@ -1,0 +1,211 @@
+{
+  "name": "users",
+  "type": "table",
+  "engine": "PostgreSQL",
+  "version": "16.2",
+  "row_count": 15420,
+  "size": "2.4 MB",
+  "created_at": "2024-01-15T08:00:00Z",
+  "columns": [
+    {
+      "name": "id",
+      "type": "SERIAL",
+      "nullable": false,
+      "default": null,
+      "is_primary": true,
+      "is_foreign": false,
+      "references": null,
+      "description": "Auto-increment primary key"
+    },
+    {
+      "name": "email",
+      "type": "VARCHAR(255)",
+      "nullable": false,
+      "default": null,
+      "is_primary": false,
+      "is_foreign": false,
+      "references": null,
+      "description": "Unique email address",
+      "constraints": [
+        "UNIQUE",
+        "NOT NULL"
+      ]
+    },
+    {
+      "name": "username",
+      "type": "VARCHAR(50)",
+      "nullable": false,
+      "default": null,
+      "is_primary": false,
+      "is_foreign": false,
+      "references": null,
+      "description": "Unique username",
+      "constraints": [
+        "UNIQUE"
+      ]
+    },
+    {
+      "name": "password_hash",
+      "type": "VARCHAR(255)",
+      "nullable": false,
+      "default": null,
+      "is_primary": false,
+      "is_foreign": false,
+      "references": null,
+      "description": "Bcrypt hashed password"
+    },
+    {
+      "name": "full_name",
+      "type": "VARCHAR(100)",
+      "nullable": true,
+      "default": null,
+      "is_primary": false,
+      "is_foreign": false,
+      "references": null,
+      "description": "Display name"
+    },
+    {
+      "name": "avatar_url",
+      "type": "TEXT",
+      "nullable": true,
+      "default": null,
+      "is_primary": false,
+      "is_foreign": false,
+      "references": null,
+      "description": "Profile image URL"
+    },
+    {
+      "name": "role",
+      "type": "ENUM('admin','user','guest')",
+      "nullable": false,
+      "default": "'user'",
+      "is_primary": false,
+      "is_foreign": false,
+      "references": null,
+      "description": "User role"
+    },
+    {
+      "name": "status",
+      "type": "ENUM('active','inactive','suspended')",
+      "nullable": false,
+      "default": "'active'",
+      "is_primary": false,
+      "is_foreign": false,
+      "references": null,
+      "description": "Account status"
+    },
+    {
+      "name": "email_verified",
+      "type": "BOOLEAN",
+      "nullable": false,
+      "default": "FALSE",
+      "is_primary": false,
+      "is_foreign": false,
+      "references": null,
+      "description": "Email verification status"
+    },
+    {
+      "name": "last_login_at",
+      "type": "TIMESTAMP",
+      "nullable": true,
+      "default": null,
+      "is_primary": false,
+      "is_foreign": false,
+      "references": null,
+      "description": "Last login timestamp"
+    },
+    {
+      "name": "created_at",
+      "type": "TIMESTAMP",
+      "nullable": false,
+      "default": "NOW()",
+      "is_primary": false,
+      "is_foreign": false,
+      "references": null,
+      "description": "Registration timestamp"
+    },
+    {
+      "name": "updated_at",
+      "type": "TIMESTAMP",
+      "nullable": false,
+      "default": "NOW()",
+      "is_primary": false,
+      "is_foreign": false,
+      "references": null,
+      "description": "Last update timestamp"
+    }
+  ],
+  "indexes": [
+    {
+      "name": "idx_users_email",
+      "columns": [
+        "email"
+      ],
+      "type": "btree",
+      "unique": true
+    },
+    {
+      "name": "idx_users_username",
+      "columns": [
+        "username"
+      ],
+      "type": "btree",
+      "unique": true
+    },
+    {
+      "name": "idx_users_role",
+      "columns": [
+        "role"
+      ],
+      "type": "btree",
+      "unique": false
+    },
+    {
+      "name": "idx_users_status",
+      "columns": [
+        "status"
+      ],
+      "type": "btree",
+      "unique": false
+    }
+  ],
+  "constraints": [
+    {
+      "name": "pk_users",
+      "type": "PRIMARY KEY",
+      "columns": [
+        "id"
+      ]
+    },
+    {
+      "name": "uq_users_email",
+      "type": "UNIQUE",
+      "columns": [
+        "email"
+      ]
+    },
+    {
+      "name": "uq_users_username",
+      "type": "UNIQUE",
+      "columns": [
+        "username"
+      ]
+    }
+  ],
+  "triggers": [
+    {
+      "name": "trg_users_updated_at",
+      "event": "UPDATE",
+      "timing": "BEFORE",
+      "definition": "SET NEW.updated_at = NOW()"
+    }
+  ],
+  "relationships": {
+    "has_many": [
+      "orders",
+      "posts",
+      "comments"
+    ],
+    "belongs_to": []
+  }
+}

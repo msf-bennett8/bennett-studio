@@ -1,0 +1,10 @@
+[workspace]
+members = ["engine", "cli", "relay"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["Bennett Studio"]
+license = "MIT"
+repository = "https://github.com/msf-bennett8/bennett-studio"

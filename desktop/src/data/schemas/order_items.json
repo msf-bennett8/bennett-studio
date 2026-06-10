@@ -1,0 +1,148 @@
+{
+  "name": "order_items",
+  "type": "table",
+  "engine": "PostgreSQL",
+  "version": "16.2",
+  "row_count": 24567,
+  "size": "3.2 MB",
+  "created_at": "2024-02-01T10:00:00Z",
+  "columns": [
+    {
+      "name": "id",
+      "type": "SERIAL",
+      "nullable": false,
+      "default": null,
+      "is_primary": true,
+      "is_foreign": false,
+      "references": null,
+      "description": "Line item ID"
+    },
+    {
+      "name": "order_id",
+      "type": "INTEGER",
+      "nullable": false,
+      "default": null,
+      "is_primary": false,
+      "is_foreign": true,
+      "references": "orders.id",
+      "description": "Parent order",
+      "on_delete": "CASCADE"
+    },
+    {
+      "name": "product_id",
+      "type": "INTEGER",
+      "nullable": false,
+      "default": null,
+      "is_primary": false,
+      "is_foreign": true,
+      "references": "products.id",
+      "description": "Product reference",
+      "on_delete": "RESTRICT"
+    },
+    {
+      "name": "quantity",
+      "type": "INTEGER",
+      "nullable": false,
+      "default": "1",
+      "is_primary": false,
+      "is_foreign": false,
+      "references": null,
+      "description": "Quantity ordered"
+    },
+    {
+      "name": "unit_price",
+      "type": "DECIMAL(10,2)",
+      "nullable": false,
+      "default": "0.00",
+      "is_primary": false,
+      "is_foreign": false,
+      "references": null,
+      "description": "Price at time of order"
+    },
+    {
+      "name": "discount_amount",
+      "type": "DECIMAL(10,2)",
+      "nullable": false,
+      "default": "0.00",
+      "is_primary": false,
+      "is_foreign": false,
+      "references": null,
+      "description": "Applied discount"
+    },
+    {
+      "name": "subtotal",
+      "type": "DECIMAL(10,2)",
+      "nullable": false,
+      "default": "0.00",
+      "is_primary": false,
+      "is_foreign": false,
+      "references": null,
+      "description": "Line total"
+    },
+    {
+      "name": "created_at",
+      "type": "TIMESTAMP",
+      "nullable": false,
+      "default": "NOW()",
+      "is_primary": false,
+      "is_foreign": false,
+      "references": null,
+      "description": "Creation time"
+    }
+  ],
+  "indexes": [
+    {
+      "name": "idx_order_items_order",
+      "columns": [
+        "order_id"
+      ],
+      "type": "btree",
+      "unique": false
+    },
+    {
+      "name": "idx_order_items_product",
+      "columns": [
+        "product_id"
+      ],
+      "type": "btree",
+      "unique": false
+    }
+  ],
+  "constraints": [
+    {
+      "name": "pk_order_items",
+      "type": "PRIMARY KEY",
+      "columns": [
+        "id"
+      ]
+    },
+    {
+      "name": "fk_order_items_order",
+      "type": "FOREIGN KEY",
+      "columns": [
+        "order_id"
+      ],
+      "references": "orders.id"
+    },
+    {
+      "name": "fk_order_items_product",
+      "type": "FOREIGN KEY",
+      "columns": [
+        "product_id"
+      ],
+      "references": "products.id"
+    },
+    {
+      "name": "chk_order_items_quantity",
+      "type": "CHECK",
+      "definition": "quantity > 0"
+    }
+  ],
+  "relationships": {
+    "has_many": [],
+    "belongs_to": [
+      "orders",
+      "products"
+    ]
+  }
+}

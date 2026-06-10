@@ -1,0 +1,23 @@
+{
+  "database_name": "bennett_ecommerce",
+  "engine": "PostgreSQL",
+  "version": "16.2",
+  "host": "localhost",
+  "port": 5433,
+  "total_tables": 7,
+  "total_size": "12.4 MB",
+  "total_rows": 52868,
+  "collation": "en_US.UTF-8",
+  "timezone": "UTC",
+  "created_at": "2024-01-01T00:00:00Z",
+  "last_backup": "2024-06-09T02:00:00Z",
+  "tables": [
+    "users",
+    "orders",
+    "products",
+    "categories",
+    "order_items",
+    "posts",
+    "comments"
+  ]
+}
