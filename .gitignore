@@ -68,3 +68,12 @@ docker-compose.override.yml
 .eslintcache
 .stylelintcache
 *.tsbuildinfo
+
+# --- Node.js ---
+node_modules/
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# --- Windows WSL Zone.Identifier files ---
+*:Zone.Identifier
