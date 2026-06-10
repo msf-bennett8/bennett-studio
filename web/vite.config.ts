@@ -30,7 +30,7 @@ export default defineConfig({
     host: true,
     proxy: {
       '/api': {
-        target: 'http://localhost:3000',
+        target: `http://localhost:${require('fs').readFileSync('/tmp/bennett-engine.port', 'utf8').trim() || 3001}`,
         changeOrigin: true,
       },
     },

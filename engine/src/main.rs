@@ -53,7 +53,22 @@ async fn main() {
         )
         .with_state(state);
 
-    let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
+    let port = std::env::var("BENNETT_ENGINE_PORT")
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or_else(|| {
+            // Try 3001 first, fallback to 3002, 3003, etc.
+            let base_port = 3001;
+            for offset in 0..10 {
+                let port = base_port + offset;
+                if std::net::TcpListener::bind(("0.0.0.0", port)).is_ok() {
+                    return port;
+                }
+            }
+            panic!("No available port found in range 3001-3010");
+        });
+
+    let addr = SocketAddr::from(([0, 0, 0, 0], port));
     info!("Bennett Engine starting on http://{}", addr);
     info!("API endpoints:");
     info!("  GET    /api/databases");

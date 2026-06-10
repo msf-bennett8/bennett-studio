@@ -1,12 +1,5 @@
 // src/services/dataService.ts
-import usersSchema from '../data/schemas/users.json';
-import ordersSchema from '../data/schemas/orders.json';
-import productsSchema from '../data/schemas/products.json';
-import categoriesSchema from '../data/schemas/categories.json';
-import orderItemsSchema from '../data/schemas/order_items.json';
-import postsSchema from '../data/schemas/posts.json';
-import commentsSchema from '../data/schemas/comments.json';
-import dbMetadata from '../data/schemas/metadata.json';
+// Schemas loaded via fetch to avoid Vite JSON import issues
 
 export interface ColumnSchema {
   name: string;
@@ -80,36 +73,51 @@ export interface DatabaseMetadata {
   tables: string[];
 }
 
-const schemas: Record<string, TableSchema> = {
-  users: usersSchema as TableSchema,
-  orders: ordersSchema as TableSchema,
-  products: productsSchema as TableSchema,
-  categories: categoriesSchema as TableSchema,
-  order_items: orderItemsSchema as TableSchema,
-  posts: postsSchema as TableSchema,
-  comments: commentsSchema as TableSchema,
-};
+const schemaCache: Record<string, TableSchema> = {};
+let metadataCache: DatabaseMetadata | null = null;
+
+const tableNames = ['users', 'orders', 'products', 'categories', 'order_items', 'posts', 'comments'];
 
 export const dataService = {
-  getAllTables(): TableSchema[] {
-    return Object.values(schemas);
+  async loadAllSchemas(): Promise<void> {
+    await Promise.all(tableNames.map(name => this.loadSchema(name)));
   },
 
-  getTable(name: string): TableSchema | undefined {
-    return schemas[name];
+  async loadSchema(name: string): Promise<TableSchema> {
+    if (schemaCache[name]) return schemaCache[name];
+
+    const response = await fetch(`/src/data/schemas/${name}.json`);
+    const schema = await response.json();
+    schemaCache[name] = schema;
+    return schema;
   },
 
-  getMetadata(): DatabaseMetadata {
-    return dbMetadata as DatabaseMetadata;
+  async getAllTables(): Promise<TableSchema[]> {
+    await this.loadAllSchemas();
+    return Object.values(schemaCache);
+  },
+
+  async getTable(name: string): Promise<TableSchema | undefined> {
+    await this.loadSchema(name);
+    return schemaCache[name];
+  },
+
+  async getMetadata(): Promise<DatabaseMetadata> {
+    if (metadataCache) return metadataCache;
+
+    const response = await fetch('/src/data/schemas/metadata.json');
+    metadataCache = await response.json();
+    return metadataCache;
   },
 
   getTableNames(): string[] {
-    return Object.keys(schemas);
+    return tableNames;
   },
 
-  searchTables(query: string): TableSchema[] {
+  async searchTables(query: string): Promise<TableSchema[]> {
     const q = query.toLowerCase();
-    return Object.values(schemas).filter(
+    const tables = await this.getAllTables();
+    return tables.filter(
       (table) =>
         table.name.toLowerCase().includes(q) ||
         table.columns.some((col) => col.name.toLowerCase().includes(q)) ||
@@ -117,28 +125,30 @@ export const dataService = {
     );
   },
 
-  getRelatedTables(tableName: string): { hasMany: TableSchema[]; belongsTo: TableSchema[] } {
-    const table = schemas[tableName];
+  async getRelatedTables(tableName: string): Promise<{ hasMany: TableSchema[]; belongsTo: TableSchema[] }> {
+    const table = await this.getTable(tableName);
     if (!table) return { hasMany: [], belongsTo: [] };
+
+    await this.loadAllSchemas();
 
     return {
       hasMany: table.relationships.has_many
-        .map((name) => schemas[name])
+        .map((name) => schemaCache[name])
         .filter(Boolean) as TableSchema[],
       belongsTo: table.relationships.belongs_to
-        .map((name) => schemas[name])
+        .map((name) => schemaCache[name])
         .filter(Boolean) as TableSchema[],
     };
   },
 
-  getColumnStats(tableName: string): {
+  async getColumnStats(tableName: string): Promise<{
     total: number;
     nullable: number;
     primary: number;
     foreign: number;
     withDefault: number;
-  } {
-    const table = schemas[tableName];
+  }> {
+    const table = await this.getTable(tableName);
     if (!table) return { total: 0, nullable: 0, primary: 0, foreign: 0, withDefault: 0 };
 
     return {
@@ -150,4 +160,3 @@ export const dataService = {
     };
   },
 };
-

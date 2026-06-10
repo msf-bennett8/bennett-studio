@@ -10,10 +10,10 @@ edition = "2021"
 [workspace]
 
 [build-dependencies]
-tauri-build = { version = "1.5", features = [] }
+tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "1.5", features = [ "window-show", "window-hide", "fs-remove-file", "dialog-ask", "dialog-message", "window-maximize", "fs-write-file", "fs-remove-dir", "fs-read-file", "dialog-open", "fs-create-dir", "dialog-confirm", "window-close", "fs-rename-file", "fs-exists", "window-unminimize", "fs-read-dir", "fs-copy-file", "window-unmaximize", "dialog-save", "window-minimize", "window-start-dragging", "shell-open", "notification-all", "process-relaunch", "process-exit"] }
+tauri = { version = "2", features = ["custom-protocol"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 

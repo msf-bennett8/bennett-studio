@@ -1,0 +1,68 @@
+#!/bin/bash
+
+PIDFILE="/tmp/bennett-desktop.pid"
+LOGFILE="/tmp/bennett-desktop.log"
+DESKTOP_DIR="/home/msf_bennett/studio.dev/bennett studio/desktop"
+
+start_desktop() {
+    if [ -f "$PIDFILE" ] && kill -0 $(cat "$PIDFILE") 2>/dev/null; then
+        echo "🖥️  Desktop already running (PID: $(cat $PIDFILE))"
+        exit 0
+    fi
+    echo "🖥️  Starting Desktop (Tauri dev) on http://localhost:5174..."
+    cd "$DESKTOP_DIR" || exit 1
+    nohup npm run tauri dev > "$LOGFILE" 2>&1 &
+    echo $! > "$PIDFILE"
+    sleep 5
+    echo "🖥️  Desktop started (PID: $(cat $PIDFILE))"
+}
+
+stop_desktop() {
+    if [ -f "$PIDFILE" ] && kill -0 $(cat "$PIDFILE") 2>/dev/null; then
+        echo "🖥️  Stopping Desktop (PID: $(cat $PIDFILE))..."
+        kill $(cat "$PIDFILE") 2>/dev/null
+        sleep 1
+        pkill -f "tauri.*dev" 2>/dev/null
+        pkill -f "vite.*bennett studio/desktop" 2>/dev/null
+        rm -f "$PIDFILE"
+        echo "🖥️  Desktop stopped"
+    else
+        echo "🖥️  Desktop not running"
+        rm -f "$PIDFILE"
+    fi
+}
+
+status_desktop() {
+    if [ -f "$PIDFILE" ] && kill -0 $(cat "$PIDFILE") 2>/dev/null; then
+        echo "🖥️  Desktop: RUNNING (PID: $(cat $PIDFILE), Port: 5174)"
+    else
+        echo "🖥️  Desktop: STOPPED"
+        rm -f "$PIDFILE" 2>/dev/null
+    fi
+}
+
+clear_desktop() {
+    rm -f "$LOGFILE"
+    rm -rf "$DESKTOP_DIR/node_modules/.vite"
+    rm -rf "$DESKTOP_DIR/node_modules/.cache"
+    rm -rf "$DESKTOP_DIR/src-tauri/target/debug"
+    echo "🖥️  Desktop cache cleared"
+}
+
+logs_desktop() {
+    if [ -f "$LOGFILE" ]; then
+        tail -f "$LOGFILE"
+    else
+        echo "🖥️  No log file. Start desktop first."
+    fi
+}
+
+case "$1" in
+    start)   start_desktop ;;
+    stop)    stop_desktop ;;
+    restart) stop_desktop; sleep 1; start_desktop ;;
+    status)  status_desktop ;;
+    clear)   clear_desktop ;;
+    logs)    logs_desktop ;;
+    *)       echo "Usage: $0 {start|stop|restart|status|clear|logs}"; exit 1 ;;
+esac

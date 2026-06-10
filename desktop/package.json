@@ -4,30 +4,28 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "concurrently \"npm run vite:dev\" \"npm run tauri:dev\"",
-    "vite:dev": "vite --host 0.0.0.0 --port 5174",
-    "tauri:dev": "tauri dev --no-watch",
+    "dev": "tauri dev",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri"
   },
   "dependencies": {
+    "@tauri-apps/api": "^2.0.0",
+    "lucide-react": "^0.378.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.23.1",
-    "zustand": "^4.5.2",
-    "lucide-react": "^0.378.0"
+    "zustand": "^4.5.2"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2.11.2",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.0",
-    "@tauri-apps/cli": "^1.5.0",
     "autoprefixer": "^10.4.19",
     "postcss": "^8.4.38",
     "tailwindcss": "^3.4.4",
     "typescript": "^5.4.5",
-    "vite": "^5.2.13",
-    "concurrently": "^8.2.2"
+    "vite": "^5.2.13"
   }
 }

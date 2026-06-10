@@ -1,0 +1,75 @@
+#!/bin/bash
+
+PIDFILE="/tmp/bennett-engine.pid"
+LOGFILE="/tmp/bennett-engine.log"
+ENGINE_DIR="/home/msf_bennett/studio.dev/bennett studio"
+
+start_engine() {
+    if [ -f "$PIDFILE" ] && kill -0 $(cat "$PIDFILE") 2>/dev/null; then
+        echo "🔧 Engine already running (PID: $(cat $PIDFILE))"
+        exit 0
+    fi
+    # Dynamic port: try 3001-3010
+    PORT=3001
+    for p in 3001 3002 3003 3004 3005 3006 3007 3008 3009 3010; do
+        if ! nc -z localhost $p 2>/dev/null; then
+            PORT=$p
+            break
+        fi
+    done
+    
+    echo "🔧 Starting Bennett Engine on http://0.0.0.0:${PORT}..."
+    cd "$ENGINE_DIR" || exit 1
+    export BENNETT_ENGINE_PORT=$PORT
+    echo $PORT > /tmp/bennett-engine.port
+    nohup cargo run -p bennett-engine > "$LOGFILE" 2>&1 &
+    echo $! > "$PIDFILE"
+    sleep 5
+    echo "🔧 Engine started (PID: $(cat $PIDFILE))"
+}
+
+stop_engine() {
+    if [ -f "$PIDFILE" ] && kill -0 $(cat "$PIDFILE") 2>/dev/null; then
+        echo "🔧 Stopping Engine (PID: $(cat $PIDFILE))..."
+        kill $(cat "$PIDFILE") 2>/dev/null
+        sleep 1
+        kill -0 $(cat "$PIDFILE") 2>/dev/null && kill -9 $(cat "$PIDFILE") 2>/dev/null
+        rm -f "$PIDFILE"
+        echo "🔧 Engine stopped"
+    else
+        echo "🔧 Engine not running"
+        rm -f "$PIDFILE"
+    fi
+}
+
+status_engine() {
+    if [ -f "$PIDFILE" ] && kill -0 $(cat "$PIDFILE") 2>/dev/null; then
+        echo "🔧 Engine: RUNNING (PID: $(cat $PIDFILE), Port: ${BENNETT_ENGINE_PORT:-3001})"
+    else
+        echo "🔧 Engine: STOPPED"
+        rm -f "$PIDFILE" 2>/dev/null
+    fi
+}
+
+clear_engine() {
+    rm -f "$LOGFILE"
+    echo "🔧 Engine logs cleared"
+}
+
+logs_engine() {
+    if [ -f "$LOGFILE" ]; then
+        tail -f "$LOGFILE"
+    else
+        echo "🔧 No log file. Start engine first."
+    fi
+}
+
+case "$1" in
+    start)   start_engine ;;
+    stop)    stop_engine ;;
+    restart) stop_engine; sleep 2; start_engine ;;
+    status)  status_engine ;;
+    clear)   clear_engine ;;
+    logs)    logs_engine ;;
+    *)       echo "Usage: $0 {start|stop|restart|status|clear|logs}"; exit 1 ;;
+esac

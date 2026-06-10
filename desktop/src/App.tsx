@@ -1,7 +1,6 @@
 import { useEffect } from 'react';
 import { HashRouter, Routes, Route } from 'react-router-dom';
 import { useThemeStore } from './stores/themeStore';
-import { initConsoleBranding } from './utils/consoleBranding';
 import { Layout } from './components/Layout';
 import { HomePage } from './pages/HomePage';
 import { DatabasePage } from './pages/DatabasePage';
@@ -15,7 +14,6 @@ function App() {
   const { theme, colors } = useThemeStore();
 
   useEffect(() => {
-    initConsoleBranding();
     const root = document.documentElement;
     Object.entries(colors).forEach(([key, value]) => {
       root.style.setProperty(`--${key}`, value);

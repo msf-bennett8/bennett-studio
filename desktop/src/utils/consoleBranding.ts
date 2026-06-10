@@ -1,5 +1,9 @@
+let hasBranded = false;
+
 export function initConsoleBranding() {
   if (typeof window === 'undefined') return;
+  if (hasBranded) return;
+  hasBranded = true;
 
   const titleStyle = [
     'color: #00d4aa',

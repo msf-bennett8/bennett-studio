@@ -10,7 +10,7 @@
   ],
   "scripts": {
     "dev:web": "cd web && npm run dev",
-    "dev:desktop": "cd desktop && npm run tauri dev",
+    "dev:desktop": "cd desktop && npm run dev",
     "build:web": "cd web && npm run build",
     "build:desktop": "cd desktop && npm run tauri build",
     "build:all": "npm run build:web && npm run build:desktop",

@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Table2, Columns, Key, Link2, Search, Database, Hash, Filter, ArrowRight } from 'lucide-react';
 import { dataService } from '../services/dataService';
 import type { TableSchema, ColumnSchema } from '../services/dataService';
@@ -8,15 +8,35 @@ export function SchemaPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState<'columns' | 'indexes' | 'constraints' | 'triggers' | 'relations'>('columns');
 
-  const tables = dataService.getAllTables();
-  const metadata = dataService.getMetadata();
-  const selectedTableData = dataService.getTable(selectedTable);
-  const relatedTables = selectedTableData ? dataService.getRelatedTables(selectedTable) : { hasMany: [], belongsTo: [] };
-  const columnStats = selectedTableData ? dataService.getColumnStats(selectedTable) : null;
+  const [tables, setTables] = useState([]);
+  const [metadata, setMetadata] = useState(null);
+  const [selectedTableData, setSelectedTableData] = useState(null);
+  const [relatedTables, setRelatedTables] = useState({ hasMany: [], belongsTo: [] });
+  const [columnStats, setColumnStats] = useState(null);
+
+  useEffect(() => {
+    dataService.getAllTables().then(setTables);
+    dataService.getMetadata().then(setMetadata);
+  }, []);
+
+  useEffect(() => {
+    if (selectedTable) {
+      dataService.getTable(selectedTable).then(table => {
+        setSelectedTableData(table || null);
+        if (table) {
+          dataService.getRelatedTables(selectedTable).then(setRelatedTables);
+          dataService.getColumnStats(selectedTable).then(setColumnStats);
+        }
+      });
+    }
+  }, [selectedTable]);
 
   const filteredTables = useMemo(() => {
     if (!searchQuery) return tables;
-    return dataService.searchTables(searchQuery);
+    return tables.filter(t => 
+      t.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      t.columns.some(c => c.name.toLowerCase().includes(searchQuery.toLowerCase()))
+    );
   }, [searchQuery, tables]);
 
   const getTypeColor = (type: string) => {
@@ -45,12 +65,12 @@ export function SchemaPage() {
         <div className="p-4 border-b" style={{ borderColor: 'var(--borderDefault)' }}>
           <div className="flex items-center gap-2 mb-2">
             <Database size={16} style={{ color: 'var(--accentPrimary)' }} />
-            <span className="text-sm font-semibold" style={{ color: 'var(--textPrimary)' }}>{metadata.database_name}</span>
+            <span className="text-sm font-semibold" style={{ color: 'var(--textPrimary)' }}>{metadata?.database_name}</span>
           </div>
           <div className="flex items-center gap-2 text-xs" style={{ color: 'var(--textMuted)' }}>
-            <span>{metadata.engine} {metadata.version}</span>
+            <span>{metadata?.engine} {metadata?.version}</span>
             <span>•</span>
-            <span>{metadata.total_tables} tables</span>
+            <span>{metadata?.total_tables} tables</span>
           </div>
         </div>
         <div className="p-3">
@@ -69,10 +89,10 @@ export function SchemaPage() {
                   <Table2 size={16} />
                   <span className="font-medium">{table.name}</span>
                 </div>
-                <span className="text-xs" style={{ color: 'var(--textMuted)' }}>{table.row_count.toLocaleString()}</span>
+                <span className="text-xs" style={{ color: 'var(--textMuted)' }}>{table?.row_count?.toLocaleString() ?? 0}</span>
               </div>
               <div className="flex items-center gap-2 mt-1">
-                <span className="text-xs" style={{ color: 'var(--textMuted)' }}>{table.columns.length} cols</span>
+                <span className="text-xs" style={{ color: 'var(--textMuted)' }}>{table?.columns?.length ?? 0} cols</span>
                 <span className="text-xs" style={{ color: 'var(--textMuted)' }}>{table.size}</span>
               </div>
             </button>
@@ -89,7 +109,7 @@ export function SchemaPage() {
                   <h1 className="text-2xl font-bold" style={{ color: 'var(--textPrimary)' }}>{selectedTableData.name}</h1>
                   <span className="text-xs px-2 py-1 rounded-full" style={{ backgroundColor: 'var(--bgTertiary)', color: 'var(--textSecondary)' }}>{selectedTableData.engine} {selectedTableData.version}</span>
                 </div>
-                <p className="text-sm" style={{ color: 'var(--textSecondary)' }}>{selectedTableData.row_count.toLocaleString()} rows • {selectedTableData.size} • {selectedTableData.columns.length} columns</p>
+                <p className="text-sm" style={{ color: 'var(--textSecondary)' }}>{selectedTableData?.row_count?.toLocaleString() ?? 0} rows • {selectedTableData?.size ?? '-'} • {selectedTableData?.columns?.length ?? 0} columns</p>
               </div>
               <div className="flex gap-2">
                 <button className="btn-secondary px-4 py-2 rounded-xl text-sm">View Data</button>
@@ -116,11 +136,11 @@ export function SchemaPage() {
 
             <div className="flex gap-1 mb-4 p-1 rounded-xl" style={{ backgroundColor: 'var(--bgSecondary)' }}>
               {[
-                { id: 'columns', label: 'Columns', count: selectedTableData.columns.length },
-                { id: 'indexes', label: 'Indexes', count: selectedTableData.indexes.length },
-                { id: 'constraints', label: 'Constraints', count: selectedTableData.constraints.length },
-                { id: 'triggers', label: 'Triggers', count: selectedTableData.triggers.length },
-                { id: 'relations', label: 'Relations', count: relatedTables.hasMany.length + relatedTables.belongsTo.length },
+                { id: 'columns', label: 'Columns', count: selectedTableData?.columns?.length ?? 0 },
+                { id: 'indexes', label: 'Indexes', count: selectedTableData?.indexes?.length ?? 0 },
+                { id: 'constraints', label: 'Constraints', count: selectedTableData?.constraints?.length ?? 0 },
+                { id: 'triggers', label: 'Triggers', count: selectedTableData?.triggers?.length ?? 0 },
+                { id: 'relations', label: 'Relations', count: (relatedTables?.hasMany?.length ?? 0) + (relatedTables?.belongsTo?.length ?? 0) },
               ].map((tab) => (
                 <button key={tab.id} onClick={() => setActiveTab(tab.id as any)} className="flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-all"
                   style={{ backgroundColor: activeTab === tab.id ? 'var(--surfaceActive)' : 'transparent', color: activeTab === tab.id ? 'var(--accentPrimary)' : 'var(--textSecondary)' }}>
@@ -293,7 +313,7 @@ export function SchemaPage() {
                           <div className="flex items-center gap-3">
                             <Table2 size={16} style={{ color: 'var(--accentSecondary)' }} />
                             <span className="text-sm font-medium" style={{ color: 'var(--textPrimary)' }}>{table.name}</span>
-                            <span className="text-xs" style={{ color: 'var(--textMuted)' }}>{table.row_count.toLocaleString()} rows</span>
+                            <span className="text-xs" style={{ color: 'var(--textMuted)' }}>{table?.row_count?.toLocaleString() ?? 0} rows</span>
                           </div>
                           <ArrowRight size={14} style={{ color: 'var(--textMuted)' }} />
                         </button>
@@ -310,7 +330,7 @@ export function SchemaPage() {
                           <div className="flex items-center gap-3">
                             <Table2 size={16} style={{ color: 'var(--accentPrimary)' }} />
                             <span className="text-sm font-medium" style={{ color: 'var(--textPrimary)' }}>{table.name}</span>
-                            <span className="text-xs" style={{ color: 'var(--textMuted)' }}>{table.row_count.toLocaleString()} rows</span>
+                            <span className="text-xs" style={{ color: 'var(--textMuted)' }}>{table?.row_count?.toLocaleString() ?? 0} rows</span>
                           </div>
                           <ArrowRight size={14} style={{ color: 'var(--textMuted)' }} />
                         </button>
