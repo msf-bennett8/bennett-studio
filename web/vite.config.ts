@@ -1,3 +1,4 @@
+import fs from 'fs'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'path'
@@ -30,7 +31,7 @@ export default defineConfig({
     host: true,
     proxy: {
       '/api': {
-        target: `http://localhost:${require('fs').readFileSync('/tmp/bennett-engine.port', 'utf8').trim() || 3001}`,
+        target: `http://localhost:${fs.readFileSync('/tmp/bennett-engine.port', 'utf8').trim() || 3001}`,
         changeOrigin: true,
       },
     },
