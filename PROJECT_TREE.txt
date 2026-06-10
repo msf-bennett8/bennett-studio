@@ -1,0 +1,441 @@
+bennett-studio/
+├── Cargo.toml
+├── package.json
+├── docker-compose.yml
+├── Makefile
+├── LICENSE-MIT
+├── LICENSE-ENTERPRISE
+├── CHANGELOG.md
+├── RESEARCH.md
+├── .github/
+│   ├── ISSUE_TEMPLATE/
+│   │   ├── bug_report.md
+│   │   ├── feature_request.md
+│   │   ├── sharing_issue.md
+│   │   ├── performance_issue.md
+│   ├── PULL_REQUEST_TEMPLATE/
+│   │   ├── pull_request_template.md
+│   ├── workflows/
+│   │   ├── ci.yml
+│   │   ├── release.yml
+│   │   ├── nightly.yml
+│   │   ├── deploy-relay.yml
+├── cli/
+│   ├── Cargo.toml
+│   ├── src/
+│   │   ├── main.rs
+│   │   ├── commands/
+│   │   │   ├── mod.rs
+│   │   │   ├── database.rs
+│   │   │   ├── query.rs
+│   │   │   ├── share.rs
+│   │   │   ├── config.rs
+│   │   │   ├── diagnose.rs
+├── desktop/
+│   ├── package.json
+│   ├── vite.config.ts
+│   ├── tsconfig.json
+│   ├── tailwind.config.js
+│   ├── index.html
+│   ├── public/
+│   │   ├── logo.svg
+│   │   ├── favicon.ico
+│   ├── src/
+│   │   ├── main.tsx
+│   │   ├── App.tsx
+│   │   ├── index.css
+│   ├── src-tauri/
+│   │   ├── Cargo.toml
+│   │   ├── build.rs
+│   │   ├── tauri.conf.json
+│   │   ├── src/
+│   │   │   ├── main.rs
+│   │   │   ├── lib.rs
+│   │   │   ├── commands/
+│   │   │   │   ├── mod.rs
+│   │   │   │   ├── database.rs
+│   │   │   │   ├── query.rs
+│   │   │   │   ├── sharing.rs
+│   │   │   │   ├── system.rs
+│   │   │   ├── engine/
+│   │   │   │   ├── mod.rs
+│   │   │   │   ├── launcher.rs
+│   │   │   │   ├── process.rs
+│   │   ├── components/
+│   │   │   ├── index.ts
+│   │   │   ├── database/
+│   │   │   │   ├── DatabaseList.tsx
+│   │   │   │   ├── DatabaseCard.tsx
+│   │   │   │   ├── DatabaseForm.tsx
+│   │   │   │   ├── DatabaseStatus.tsx
+│   │   │   ├── export/
+│   │   │   │   ├── ExportDialog.tsx
+│   │   │   │   ├── ExportProgress.tsx
+│   │   │   ├── query/
+│   │   │   │   ├── QueryEditor.tsx
+│   │   │   │   ├── QueryResults.tsx
+│   │   │   │   ├── QueryHistory.tsx
+│   │   │   │   ├── QueryPlan.tsx
+│   │   │   ├── schema/
+│   │   │   │   ├── SchemaTree.tsx
+│   │   │   │   ├── TableView.tsx
+│   │   │   │   ├── ColumnView.tsx
+│   │   │   │   ├── RelationshipView.tsx
+│   │   │   ├── sharing/
+│   │   │   │   ├── SharePanel.tsx
+│   │   │   │   ├── ShareLink.tsx
+│   │   │   │   ├── ShareSettings.tsx
+│   │   │   │   ├── GuestList.tsx
+│   │   │   ├── ui/
+│   │   │   │   ├── Button.tsx
+│   │   │   │   ├── Input.tsx
+│   │   │   │   ├── Modal.tsx
+│   │   │   │   ├── Toast.tsx
+│   │   │   │   ├── Table.tsx
+│   │   │   │   ├── Sidebar.tsx
+│   │   │   │   ├── Tabs.tsx
+│   │   │   │   ├── Dropdown.tsx
+│   │   ├── hooks/
+│   │   │   ├── useDatabase.ts
+│   │   │   ├── useQuery.ts
+│   │   │   ├── useSharing.ts
+│   │   │   ├── useConnection.ts
+│   │   │   ├── useExport.ts
+│   │   │   ├── useAuth.ts
+│   │   ├── pages/
+│   │   │   ├── HomePage.tsx
+│   │   │   ├── DatabasePage.tsx
+│   │   │   ├── QueryPage.tsx
+│   │   │   ├── SchemaPage.tsx
+│   │   │   ├── SettingsPage.tsx
+│   │   │   ├── SharePage.tsx
+│   │   ├── services/
+│   │   │   ├── api.ts
+│   │   │   ├── grpc.ts
+│   │   │   ├── websocket.ts
+│   │   │   ├── engine.ts
+│   │   ├── stores/
+│   │   │   ├── databaseStore.ts
+│   │   │   ├── queryStore.ts
+│   │   │   ├── uiStore.ts
+│   │   │   ├── authStore.ts
+│   │   ├── types/
+│   │   │   ├── index.ts
+│   │   ├── utils/
+│   │   │   ├── formatters.ts
+│   │   │   ├── validators.ts
+│   │   │   ├── crypto.ts
+│   ├── tests/
+│   │   ├── e2e.spec.ts
+├── docker/
+│   ├── Dockerfile.engine
+│   ├── Dockerfile.relay
+│   ├── Dockerfile.web
+│   ├── docker-compose.dev.yml
+│   ├── docker-compose.prod.yml
+├── docs/
+│   ├── adr/
+│   │   ├── template.md
+│   │   ├── adr-001-headless-engine.md
+│   │   ├── adr-002-rust-control-plane.md
+│   │   ├── adr-003-docker-runtime.md
+│   │   ├── adr-004-tauri-desktop.md
+│   │   ├── adr-005-reverse-tunnel.md
+│   │   ├── adr-006-schema-policy.md
+│   ├── api/
+│   │   ├── grpc-api.md
+│   │   ├── websocket-protocol.md
+│   │   ├── authentication.md
+│   ├── guides/
+│   │   ├── getting-started.md
+│   │   ├── architecture-overview.md
+│   │   ├── sharing-guide.md
+│   │   ├── plugin-development.md
+│   │   ├── self-hosted-relay.md
+│   ├── rfcs/
+│   │   ├── template.md
+├── e2e/
+│   ├── package.json
+│   ├── playwright.config.ts
+│   ├── fixtures/
+│   │   ├── sample-data.sql
+│   ├── tests/
+│   │   ├── install-database.spec.ts
+│   │   ├── run-query.spec.ts
+│   │   ├── share-database.spec.ts
+│   │   ├── export-data.spec.ts
+├── engine/
+│   ├── Cargo.toml
+│   ├── build.rs
+│   ├── benches/
+│   │   ├── query_benchmark.rs
+│   │   ├── connection_benchmark.rs
+│   ├── migrations/
+│   │   ├── 001_initial.sql
+│   ├── proto/
+│   │   ├── api.proto
+│   │   ├── database.proto
+│   │   ├── sharing.proto
+│   │   ├── auth.proto
+│   │   ├── telemetry.proto
+│   ├── src/
+│   │   ├── main.rs
+│   │   ├── lib.rs
+│   │   ├── api/
+│   │   │   ├── mod.rs
+│   │   │   ├── grpc.rs
+│   │   │   ├── http.rs
+│   │   │   ├── websocket.rs
+│   │   │   ├── middleware.rs
+│   │   ├── auth/
+│   │   │   ├── mod.rs
+│   │   │   ├── jwt.rs
+│   │   │   ├── rbac.rs
+│   │   │   ├── api_keys.rs
+│   │   │   ├── oauth.rs
+│   │   ├── config/
+│   │   │   ├── mod.rs
+│   │   │   ├── settings.rs
+│   │   │   ├── env.rs
+│   │   ├── control_plane/
+│   │   │   ├── mod.rs
+│   │   │   ├── connection/
+│   │   │   │   ├── mod.rs
+│   │   │   │   ├── pool.rs
+│   │   │   │   ├── manager.rs
+│   │   │   │   ├── health.rs
+│   │   │   ├── export/
+│   │   │   │   ├── mod.rs
+│   │   │   │   ├── orchestrator.rs
+│   │   │   │   ├── sql_dump.rs
+│   │   │   │   ├── csv_export.rs
+│   │   │   │   ├── json_export.rs
+│   │   │   │   ├── parquet_export.rs
+│   │   │   ├── migration/
+│   │   │   │   ├── mod.rs
+│   │   │   │   ├── runner.rs
+│   │   │   │   ├── migra.rs
+│   │   │   │   ├── skeema.rs
+│   │   │   │   ├── version.rs
+│   │   │   ├── query/
+│   │   │   │   ├── mod.rs
+│   │   │   │   ├── engine.rs
+│   │   │   │   ├── parser.rs
+│   │   │   │   ├── plan.rs
+│   │   │   │   ├── executor.rs
+│   │   │   ├── vault/
+│   │   │   │   ├── mod.rs
+│   │   │   │   ├── store.rs
+│   │   │   │   ├── rotation.rs
+│   │   │   │   ├── encryption.rs
+│   │   ├── errors/
+│   │   │   ├── mod.rs
+│   │   │   ├── api.rs
+│   │   │   ├── runtime.rs
+│   │   │   ├── sharing.rs
+│   │   ├── models/
+│   │   │   ├── mod.rs
+│   │   │   ├── database.rs
+│   │   │   ├── connection.rs
+│   │   │   ├── user.rs
+│   │   │   ├── share.rs
+│   │   │   ├── query.rs
+│   │   ├── plugins/
+│   │   │   ├── mod.rs
+│   │   │   ├── loader.rs
+│   │   │   ├── manifest.rs
+│   │   │   ├── registry.rs
+│   │   ├── runtime/
+│   │   │   ├── mod.rs
+│   │   │   ├── container/
+│   │   │   │   ├── mod.rs
+│   │   │   │   ├── docker.rs
+│   │   │   │   ├── podman.rs
+│   │   │   │   ├── image.rs
+│   │   │   ├── network/
+│   │   │   │   ├── mod.rs
+│   │   │   │   ├── isolation.rs
+│   │   │   ├── port/
+│   │   │   │   ├── mod.rs
+│   │   │   │   ├── allocator.rs
+│   │   │   │   ├── range.rs
+│   │   │   ├── process/
+│   │   │   │   ├── mod.rs
+│   │   │   │   ├── supervisor.rs
+│   │   │   │   ├── health.rs
+│   │   │   │   ├── limits.rs
+│   │   │   ├── volume/
+│   │   │   │   ├── mod.rs
+│   │   │   │   ├── manager.rs
+│   │   │   │   ├── backup.rs
+│   │   ├── sharing/
+│   │   │   ├── mod.rs
+│   │   │   ├── lan/
+│   │   │   │   ├── mod.rs
+│   │   │   │   ├── mdns.rs
+│   │   │   │   ├── discovery.rs
+│   │   │   │   ├── direct.rs
+│   │   │   ├── multiplex/
+│   │   │   │   ├── mod.rs
+│   │   │   │   ├── tunnel.rs
+│   │   │   │   ├── router.rs
+│   │   │   │   ├── buffer.rs
+│   │   │   ├── policy/
+│   │   │   │   ├── mod.rs
+│   │   │   │   ├── engine.rs
+│   │   │   │   ├── rewrite.rs
+│   │   │   │   ├── validate.rs
+│   │   │   ├── relay/
+│   │   │   │   ├── mod.rs
+│   │   │   │   ├── client.rs
+│   │   │   │   ├── protocol.rs
+│   │   │   │   ├── reconnect.rs
+│   │   │   ├── session/
+│   │   │   │   ├── mod.rs
+│   │   │   │   ├── manager.rs
+│   │   │   │   ├── uuid.rs
+│   │   │   │   ├── state.rs
+│   │   ├── telemetry/
+│   │   │   ├── mod.rs
+│   │   │   ├── tracing.rs
+│   │   │   ├── metrics.rs
+│   │   │   ├── logs.rs
+│   │   ├── utils/
+│   │   │   ├── mod.rs
+│   │   │   ├── crypto.rs
+│   │   │   ├── fs.rs
+│   │   │   ├── net.rs
+│   │   ├── wasm/
+│   │   │   ├── mod.rs
+│   │   │   ├── runtime.rs
+│   │   │   ├── host.rs
+│   ├── tests/
+│   │   ├── integration_tests.rs
+│   │   ├── fixtures/
+│   │   │   ├── sample-schema.sql
+│   │   │   ├── test-config.toml
+├── infra/
+│   ├── ansible/
+│   │   ├── playbook.yml
+│   │   ├── inventory.ini
+│   ├── k8s/
+│   │   ├── namespace.yaml
+│   │   ├── relay-deployment.yaml
+│   │   ├── relay-service.yaml
+│   │   ├── relay-ingress.yaml
+│   ├── terraform/
+│   │   ├── main.tf
+│   │   ├── variables.tf
+│   │   ├── outputs.tf
+│   │   ├── modules/
+│   │   │   ├── monitoring/
+│   │   │   │   ├── main.tf
+│   │   │   │   ├── variables.tf
+│   │   │   │   ├── outputs.tf
+│   │   │   ├── relay/
+│   │   │   │   ├── main.tf
+│   │   │   │   ├── variables.tf
+│   │   │   │   ├── outputs.tf
+├── plugins/
+│   ├── mysql-adapter/
+│   │   ├── manifest.json
+│   │   ├── Cargo.toml
+│   │   ├── src/
+│   │   │   ├── lib.rs
+│   ├── postgres-adapter/
+│   │   ├── manifest.json
+│   │   ├── Cargo.toml
+│   │   ├── src/
+│   │   │   ├── lib.rs
+├── relay/
+│   ├── Cargo.toml
+│   ├── Dockerfile
+│   ├── src/
+│   │   ├── main.rs
+│   │   ├── auth/
+│   │   │   ├── mod.rs
+│   │   │   ├── jwt.rs
+│   │   │   ├── rate_limit.rs
+│   │   ├── server/
+│   │   │   ├── mod.rs
+│   │   │   ├── websocket.rs
+│   │   │   ├── session.rs
+│   │   │   ├── multiplex.rs
+│   │   ├── telemetry/
+│   │   │   ├── mod.rs
+│   │   │   ├── metrics.rs
+│   │   │   ├── logs.rs
+├── scripts/
+│   ├── setup-dev.sh
+│   ├── setup-dev.ps1
+│   ├── build-all.sh
+│   ├── release.sh
+│   ├── install-docker.sh
+│   ├── run-e2e.sh
+├── shared/
+│   ├── proto/
+│   │   ├── api.proto
+│   │   ├── database.proto
+│   │   ├── sharing.proto
+│   │   ├── auth.proto
+│   │   ├── telemetry.proto
+│   ├── schemas/
+│   │   ├── meta-db.sql
+│   │   ├── audit-log.sql
+│   ├── types/
+│   │   ├── index.ts
+│   │   ├── database.ts
+│   │   ├── sharing.ts
+│   │   ├── api.ts
+├── vscode-ext/
+│   ├── package.json
+│   ├── tsconfig.json
+│   ├── src/
+│   │   ├── extension.ts
+│   │   ├── commands/
+│   │   │   ├── connect.ts
+│   │   │   ├── query.ts
+│   │   │   ├── export.ts
+│   │   ├── providers/
+│   │   │   ├── databaseTree.ts
+│   │   │   ├── queryResults.ts
+├── web/
+│   ├── package.json
+│   ├── vite.config.ts
+│   ├── tsconfig.json
+│   ├── tailwind.config.js
+│   ├── index.html
+│   ├── public/
+│   │   ├── logo.svg
+│   │   ├── favicon.ico
+│   ├── src/
+│   │   ├── main.tsx
+│   │   ├── App.tsx
+│   │   ├── index.css
+│   │   ├── components/
+│   │   │   ├── index.ts
+│   │   │   ├── database/
+│   │   │   │   ├── RemoteDatabaseList.tsx
+│   │   │   │   ├── ConnectionForm.tsx
+│   │   │   ├── query/
+│   │   │   │   ├── RemoteQueryEditor.tsx
+│   │   │   │   ├── RemoteQueryResults.tsx
+│   │   │   ├── sharing/
+│   │   │   │   ├── JoinShare.tsx
+│   │   │   │   ├── ShareSession.tsx
+│   │   │   ├── ui/
+│   │   │   │   ├── Button.tsx
+│   │   │   │   ├── Input.tsx
+│   │   │   │   ├── Modal.tsx
+│   │   │   │   ├── Toast.tsx
+│   │   ├── hooks/
+│   │   │   ├── useRemoteDatabase.ts
+│   │   │   ├── useRemoteQuery.ts
+│   │   │   ├── useShareSession.ts
+│   │   ├── pages/
+│   │   │   ├── HomePage.tsx
+│   │   │   ├── ConnectPage.tsx
+│   │   │   ├── QueryPage.tsx
+│   │   ├── services/
+│   │   │   ├── api.ts
+│   │   │   ├── websocket.ts
