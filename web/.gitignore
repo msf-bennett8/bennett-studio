@@ -1,0 +1,29 @@
+# =============================================================================
+# WEB APP (React + Vite)
+# =============================================================================
+
+# --- Dependencies ---
+/node_modules/
+/.pnp
+.pnp.js
+
+# --- Build Output ---
+/dist/
+/dist-ssr/
+/build/
+
+# --- Environment ---
+.env
+.env.local
+.env.*.local
+
+# --- Testing ---
+/coverage/
+/playwright-report/
+/test-results/
+
+# --- Vite ---
+*.local
+
+# --- TypeScript ---
+*.tsbuildinfo

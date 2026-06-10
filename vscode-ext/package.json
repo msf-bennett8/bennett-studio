@@ -1,0 +1,44 @@
+{
+  "name": "@bennett-studio/vscode-ext",
+  "displayName": "Bennett Studio",
+  "description": "Database workspace for VS Code",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Other"],
+  "activationEvents": [
+    "onCommand:bennett-studio.connect"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "bennett-studio.connect",
+        "title": "Connect to Database",
+        "category": "Bennett Studio"
+      },
+      {
+        "command": "bennett-studio.query",
+        "title": "Run Query",
+        "category": "Bennett Studio"
+      },
+      {
+        "command": "bennett-studio.export",
+        "title": "Export Data",
+        "category": "Bennett Studio"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.4.5"
+  }
+}

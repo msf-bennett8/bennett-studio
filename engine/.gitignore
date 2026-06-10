@@ -1,0 +1,24 @@
+# =============================================================================
+# ENGINE (Rust)
+# =============================================================================
+
+# --- Rust Build ---
+/target/
+/Cargo.lock
+**/*.rs.bk
+*.pdb
+
+# --- Benchmark Results ---
+/benches/results/
+
+# --- Test Artifacts ---
+/tests/output/
+/tests/fixtures/*.db
+/tests/fixtures/*.sqlite
+
+# --- Generated Proto ---
+/src/generated/
+
+# --- Profiling ---
+*.prof
+/flamegraph.svg

@@ -1,0 +1,31 @@
+{
+  "name": "bennett-studio",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Bennett Studio — The Database Workspace for Modern Developers",
+  "workspaces": [
+    "web",
+    "desktop",
+    "e2e"
+  ],
+  "scripts": {
+    "dev:web": "cd web && npm run dev",
+    "dev:desktop": "cd desktop && npm run tauri dev",
+    "build:web": "cd web && npm run build",
+    "build:desktop": "cd desktop && npm run tauri build",
+    "build:all": "npm run build:web && npm run build:desktop",
+    "test:web": "cd web && npm run test",
+    "test:e2e": "cd e2e && npm run test",
+    "lint": "cd web && npm run lint && cd ../desktop && npm run lint",
+    "type-check": "cd web && npm run type-check && cd ../desktop && npm run type-check",
+    "setup": "npm install && cd web && npm install && cd ../desktop && npm install && cd ../e2e && npm install",
+    "clean": "rm -rf node_modules web/node_modules desktop/node_modules e2e/node_modules"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=10.0.0"
+  }
+}

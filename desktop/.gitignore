@@ -1,0 +1,42 @@
+# =============================================================================
+# DESKTOP APP (Tauri + React)
+# =============================================================================
+
+# --- Dependencies ---
+/node_modules/
+/.pnp
+.pnp.js
+
+# --- Build Output ---
+/dist/
+/dist-ssr/
+/build/
+/src-tauri/target/
+/src-tauri/gen/
+/src-tauri/WixTools/
+
+# --- Tauri Specific ---
+/src-tauri/*.app
+/src-tauri/*.dmg
+/src-tauri/*.msi
+/src-tauri/*.deb
+/src-tauri/*.rpm
+/src-tauri/*.AppImage
+/src-tauri/*.snap
+
+# --- Environment ---
+.env
+.env.local
+.env.*.local
+
+# --- Testing ---
+/coverage/
+/playwright-report/
+/test-results/
+/tests/*.spec.ts-snapshots/
+
+# --- Vite ---
+*.local
+
+# --- TypeScript ---
+*.tsbuildinfo
