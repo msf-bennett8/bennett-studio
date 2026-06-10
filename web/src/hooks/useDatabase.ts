@@ -16,7 +16,6 @@ export function useDatabase() {
     databases: store.databases,
     loading: store.loading,
     error: store.error,
-    logs: store.logs,
     selectedDatabase: store.selectedDatabase,
     createDatabase: store.createDatabase,
     deleteDatabase: store.deleteDatabase,
@@ -24,7 +23,6 @@ export function useDatabase() {
     stopDatabase: store.stopDatabase,
     selectDatabase: store.selectDatabase,
     clearError: store.clearError,
-    addLog: store.addLog,
     refresh,
   };
 }

@@ -6,8 +6,8 @@ interface DatabaseState {
   loading: boolean;
   error: string | null;
   selectedDatabase: DatabaseInstance | null;
-  logs: string[];
   
+  // Actions
   fetchDatabases: () => Promise<void>;
   createDatabase: (req: CreateDatabaseRequest) => Promise<void>;
   deleteDatabase: (id: string) => Promise<void>;
@@ -15,7 +15,6 @@ interface DatabaseState {
   stopDatabase: (id: string) => Promise<void>;
   selectDatabase: (db: DatabaseInstance | null) => void;
   clearError: () => void;
-  addLog: (message: string) => void;
 }
 
 export const useDatabaseStore = create<DatabaseState>((set, get) => ({
@@ -23,7 +22,6 @@ export const useDatabaseStore = create<DatabaseState>((set, get) => ({
   loading: false,
   error: null,
   selectedDatabase: null,
-  logs: [],
 
   fetchDatabases: async () => {
     set({ loading: true, error: null });
@@ -37,64 +35,44 @@ export const useDatabaseStore = create<DatabaseState>((set, get) => ({
 
   createDatabase: async (req) => {
     set({ loading: true, error: null });
-    get().addLog(`Creating ${req.type} ${req.version} database "${req.name}"...`);
     try {
       await api.createDatabase(req);
-      get().addLog(`Database "${req.name}" created successfully`);
       await get().fetchDatabases();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed to create database';
-      set({ error: msg, loading: false });
-      get().addLog(`ERROR: ${msg}`);
+      set({ error: err instanceof Error ? err.message : 'Failed to create database', loading: false });
     }
   },
 
   deleteDatabase: async (id) => {
     set({ loading: true, error: null });
-    const db = get().databases.find(d => d.id === id);
-    get().addLog(`Deleting database "${db?.name || id}"...`);
     try {
       await api.deleteDatabase(id);
-      get().addLog(`Database "${db?.name}" deleted`);
       await get().fetchDatabases();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed to delete database';
-      set({ error: msg, loading: false });
-      get().addLog(`ERROR: ${msg}`);
+      set({ error: err instanceof Error ? err.message : 'Failed to delete database', loading: false });
     }
   },
 
   startDatabase: async (id) => {
     set({ loading: true, error: null });
-    const db = get().databases.find(d => d.id === id);
-    get().addLog(`Starting database "${db?.name}"...`);
     try {
       await api.startDatabase(id);
-      get().addLog(`Database "${db?.name}" started`);
       await get().fetchDatabases();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed to start database';
-      set({ error: msg, loading: false });
-      get().addLog(`ERROR: ${msg}`);
+      set({ error: err instanceof Error ? err.message : 'Failed to start database', loading: false });
     }
   },
 
   stopDatabase: async (id) => {
     set({ loading: true, error: null });
-    const db = get().databases.find(d => d.id === id);
-    get().addLog(`Stopping database "${db?.name}"...`);
     try {
       await api.stopDatabase(id);
-      get().addLog(`Database "${db?.name}" stopped`);
       await get().fetchDatabases();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed to stop database';
-      set({ error: msg, loading: false });
-      get().addLog(`ERROR: ${msg}`);
+      set({ error: err instanceof Error ? err.message : 'Failed to stop database', loading: false });
     }
   },
 
   selectDatabase: (db) => set({ selectedDatabase: db }),
   clearError: () => set({ error: null }),
-  addLog: (message) => set({ logs: [...get().logs.slice(-100), `[${new Date().toLocaleTimeString()}] ${message}`] }),
 }));
