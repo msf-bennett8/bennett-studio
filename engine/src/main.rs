@@ -29,6 +29,28 @@ async fn main() {
         std::process::exit(1);
     }
 
+    // Discover existing Bennett containers on startup
+    info!("Scanning for existing Bennett database containers...");
+    match state.docker.list_bennett_containers().await {
+        Ok(containers) => {
+            let mut db = state.databases.lock().unwrap();
+            for container in containers {
+                // Avoid duplicates (in case somehow already in state)
+                if !db.iter().any(|d| d.id == container.id) {
+                    info!(
+                        "Discovered existing database: {} (id: {}, type: {}, port: {}, status: {:?})",
+                        container.name, container.id, container.db_type, container.port, container.status
+                    );
+                    db.push(container);
+                }
+            }
+            info!("Loaded {} existing database(s) from Docker", db.len());
+        }
+        Err(e) => {
+            tracing::warn!("Failed to scan for existing containers: {}", e);
+        }
+    }
+
     let app = Router::new()
         .merge(routes())
         .layer(

@@ -330,10 +330,13 @@ pub async fn execute_query(
         }
     };
 
-    // Auto-connect if not connected
+    // Auto-connect if not connected, or reconnect if stale
     {
         let mut conn = state.connections.lock().await;
-        if !conn.is_connected(&id) {
+        if !conn.is_connected(&id) || !conn.health_check(&id).await {
+            if conn.is_connected(&id) {
+                conn.remove_stale(&id).await;
+            }
             if let Err(e) = conn.connect(&instance).await {
                 return Json(ApiResponse::error(format!("Connection failed: {}", e)));
             }
@@ -345,6 +348,269 @@ pub async fn execute_query(
         match conn.execute(&id, &req.sql).await {
             Ok(r) => Json(ApiResponse::success(r)),
             Err(e) => Json(ApiResponse::error(format!("Query failed: {}", e))),
+        }
+    };
+
+    result
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct TableDataRequest {
+    pub table: String,
+    pub limit: Option<i64>,
+    pub offset: Option<i64>,
+    pub order_by: Option<String>,
+    pub order_dir: Option<String>,
+    pub filter: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct TableDataResponse {
+    pub columns: Vec<String>,
+    pub rows: Vec<Vec<serde_json::Value>>,
+    pub row_count: usize,
+    pub total_count: usize,
+}
+
+pub async fn get_table_data(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+    Json(req): Json<TableDataRequest>,
+) -> Json<ApiResponse<TableDataResponse>> {
+    let instance = {
+        let db = state.databases.lock().unwrap();
+        match db.iter().find(|d| d.id == id).cloned() {
+            Some(i) => i,
+            None => return Json(ApiResponse::error(format!("Database {} not found", id))),
+        }
+    };
+
+    // Auto-connect if not connected
+    {
+        let mut conn = state.connections.lock().await;
+        if !conn.is_connected(&id) {
+            if let Err(e) = conn.connect(&instance).await {
+                return Json(ApiResponse::error(format!("Connection failed: {}", e)));
+            }
+        }
+    }
+
+    let limit = req.limit.unwrap_or(50).max(1).min(1000);
+    let offset = req.offset.unwrap_or(0).max(0);
+    let order_dir = req.order_dir.as_deref().unwrap_or("ASC");
+    let filter = req.filter.as_deref().unwrap_or("");
+
+    // Build safe query
+    let where_clause = if filter.is_empty() {
+        "".to_string()
+    } else {
+        format!("WHERE {}", filter)
+    };
+
+    let count_sql = if filter.is_empty() {
+        format!("SELECT COUNT(*) FROM \"{}\"", req.table)
+    } else {
+        format!("SELECT COUNT(*) FROM \"{}\" {}", req.table, where_clause)
+    };
+
+    // ORDER BY only when column specified; never default to "1" (that's a column name, not position)
+    let order_clause = req.order_by.as_deref().map(|col| {
+        if instance.db_type == "mysql" || instance.db_type == "mariadb" {
+            format!("ORDER BY `{}` {}", col, order_dir)
+        } else {
+            format!("ORDER BY \"{}\" {}", col, order_dir)
+        }
+    }).unwrap_or_default();
+
+    let data_sql = if instance.db_type == "mysql" || instance.db_type == "mariadb" {
+        format!(
+            "SELECT * FROM `{}` {} {} LIMIT {} OFFSET {}",
+            req.table, where_clause, order_clause, limit, offset
+        )
+    } else {
+        format!(
+            "SELECT * FROM \"{}\" {} {} LIMIT {} OFFSET {}",
+            req.table, where_clause, order_clause, limit, offset
+        )
+    };
+
+    let total_count = {
+        let conn = state.connections.lock().await;
+        match conn.execute(&id, &count_sql).await {
+            Ok(result) => {
+                if let Some(first_row) = result.rows.first() {
+                    if let Some(serde_json::Value::Number(n)) = first_row.first() {
+                        n.as_i64().unwrap_or(0) as usize
+                    } else {
+                        0
+                    }
+                } else {
+                    0
+                }
+            }
+            Err(_) => 0,
+        }
+    };
+
+    let result = {
+        let conn = state.connections.lock().await;
+        match conn.execute(&id, &data_sql).await {
+            Ok(r) => Json(ApiResponse::success(TableDataResponse {
+                columns: r.columns,
+                rows: r.rows,
+                row_count: r.row_count,
+                total_count,
+            })),
+            Err(e) => Json(ApiResponse::error(format!("Query failed: {}", e))),
+        }
+    };
+
+    result
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct UpdateRowRequest {
+    pub table: String,
+    pub primary_key: serde_json::Value,
+    pub primary_key_column: String,
+    pub data: std::collections::HashMap<String, serde_json::Value>,
+}
+
+pub async fn update_row(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+    Json(req): Json<UpdateRowRequest>,
+) -> Json<ApiResponse<serde_json::Value>> {
+    let instance = {
+        let db = state.databases.lock().unwrap();
+        match db.iter().find(|d| d.id == id).cloned() {
+            Some(i) => i,
+            None => return Json(ApiResponse::error(format!("Database {} not found", id))),
+        }
+    };
+
+    {
+        let mut conn = state.connections.lock().await;
+        if !conn.is_connected(&id) {
+            if let Err(e) = conn.connect(&instance).await {
+                return Json(ApiResponse::error(format!("Connection failed: {}", e)));
+            }
+        }
+    }
+
+    // Build SET clause
+    let mut set_clauses = Vec::new();
+    for (col, val) in &req.data {
+        let val_str = match val {
+            serde_json::Value::Null => "NULL".to_string(),
+            serde_json::Value::Bool(b) => b.to_string(),
+            serde_json::Value::Number(n) => n.to_string(),
+            serde_json::Value::String(s) => format!("'{}'", s.replace("'", "''")),
+            _ => format!("'{}'", val.to_string().replace("'", "''")),
+        };
+        
+        if instance.db_type == "mysql" || instance.db_type == "mariadb" {
+            set_clauses.push(format!("`{}` = {}", col, val_str));
+        } else {
+            set_clauses.push(format!("\"{}\" = {}", col, val_str));
+        }
+    }
+
+    let sql = if instance.db_type == "mysql" || instance.db_type == "mariadb" {
+        let pk_val = match &req.primary_key {
+            serde_json::Value::String(s) => format!("'{}'", s.replace("'", "''")),
+            serde_json::Value::Number(n) => n.to_string(),
+            _ => req.primary_key.to_string(),
+        };
+        format!(
+            "UPDATE `{}` SET {} WHERE `{}` = {}",
+            req.table,
+            set_clauses.join(", "),
+            req.primary_key_column,
+            pk_val
+        )
+    } else {
+        let pk_val = match &req.primary_key {
+            serde_json::Value::String(s) => format!("'{}'", s.replace("'", "''")),
+            serde_json::Value::Number(n) => n.to_string(),
+            _ => req.primary_key.to_string(),
+        };
+        format!(
+            "UPDATE \"{}\" SET {} WHERE \"{}\" = {}",
+            req.table,
+            set_clauses.join(", "),
+            req.primary_key_column,
+            pk_val
+        )
+    };
+
+    let result = {
+        let conn = state.connections.lock().await;
+        match conn.execute(&id, &sql).await {
+            Ok(_) => Json(ApiResponse::success(serde_json::json!({ "updated": true }))),
+            Err(e) => Json(ApiResponse::error(format!("Update failed: {}", e))),
+        }
+    };
+
+    result
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct DeleteRowRequest {
+    pub table: String,
+    pub primary_key: serde_json::Value,
+    pub primary_key_column: String,
+}
+
+pub async fn delete_row(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+    Json(req): Json<DeleteRowRequest>,
+) -> Json<ApiResponse<serde_json::Value>> {
+    let instance = {
+        let db = state.databases.lock().unwrap();
+        match db.iter().find(|d| d.id == id).cloned() {
+            Some(i) => i,
+            None => return Json(ApiResponse::error(format!("Database {} not found", id))),
+        }
+    };
+
+    {
+        let mut conn = state.connections.lock().await;
+        if !conn.is_connected(&id) {
+            if let Err(e) = conn.connect(&instance).await {
+                return Json(ApiResponse::error(format!("Connection failed: {}", e)));
+            }
+        }
+    }
+
+    let sql = if instance.db_type == "mysql" || instance.db_type == "mariadb" {
+        let pk_val = match &req.primary_key {
+            serde_json::Value::String(s) => format!("'{}'", s.replace("'", "''")),
+            serde_json::Value::Number(n) => n.to_string(),
+            _ => req.primary_key.to_string(),
+        };
+        format!(
+            "DELETE FROM `{}` WHERE `{}` = {}",
+            req.table, req.primary_key_column, pk_val
+        )
+    } else {
+        let pk_val = match &req.primary_key {
+            serde_json::Value::String(s) => format!("'{}'", s.replace("'", "''")),
+            serde_json::Value::Number(n) => n.to_string(),
+            _ => req.primary_key.to_string(),
+        };
+        format!(
+            "DELETE FROM \"{}\" WHERE \"{}\" = {}",
+            req.table, req.primary_key_column, pk_val
+        )
+    };
+
+    let result = {
+        let conn = state.connections.lock().await;
+        match conn.execute(&id, &sql).await {
+            Ok(_) => Json(ApiResponse::success(serde_json::json!({ "deleted": true }))),
+            Err(e) => Json(ApiResponse::error(format!("Delete failed: {}", e))),
         }
     };
 

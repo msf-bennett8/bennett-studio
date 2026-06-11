@@ -98,4 +98,43 @@ export const api = {
   // Schema introspection
   getSchema: (id: string) =>
     fetchApi<{ name: string; columns: { name: string; data_type: string; nullable: boolean }[] }[]>(`/api/databases/${id}/schema`),
+
+  getTableData: (id: string, req: {
+    table: string;
+    limit?: number;
+    offset?: number;
+    order_by?: string;
+    order_dir?: 'ASC' | 'DESC';
+    filter?: string;
+  }) =>
+    fetchApi<{
+      columns: string[];
+      rows: any[][];
+      row_count: number;
+      total_count: number;
+    }>(`/api/databases/${id}/data`, {
+      method: 'POST',
+      body: JSON.stringify(req),
+    }),
+
+  updateRow: (id: string, req: {
+    table: string;
+    primary_key: any;
+    primary_key_column: string;
+    data: Record<string, any>;
+  }) =>
+    fetchApi<{ updated: boolean }>(`/api/databases/${id}/rows/update`, {
+      method: 'POST',
+      body: JSON.stringify(req),
+    }),
+
+  deleteRow: (id: string, req: {
+    table: string;
+    primary_key: any;
+    primary_key_column: string;
+  }) =>
+    fetchApi<{ deleted: boolean }>(`/api/databases/${id}/rows/delete`, {
+      method: 'POST',
+      body: JSON.stringify(req),
+    }),
 };

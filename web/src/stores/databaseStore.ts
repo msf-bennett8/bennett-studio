@@ -6,6 +6,16 @@ interface DatabaseState {
   loading: boolean;
   error: string | null;
   selectedDatabase: DatabaseInstance | null;
+  selectedTable: string | null;
+  tableData: {
+    columns: string[];
+    rows: any[][];
+    row_count: number;
+    total_count: number;
+  } | null;
+  tableDataLoading: boolean;
+  editingRow: any | null;
+  logs: string[];
   
   // Actions
   fetchDatabases: () => Promise<void>;
@@ -14,6 +24,18 @@ interface DatabaseState {
   startDatabase: (id: string) => Promise<void>;
   stopDatabase: (id: string) => Promise<void>;
   selectDatabase: (db: DatabaseInstance | null) => void;
+  selectTable: (table: string | null) => void;
+  setEditingRow: (row: any | null) => void;
+  clearEditingRow: () => void;
+  fetchTableData: (dbId: string, table: string, options?: {
+    limit?: number;
+    offset?: number;
+    order_by?: string;
+    order_dir?: 'ASC' | 'DESC';
+    filter?: string;
+  }) => Promise<void>;
+  updateRow: (dbId: string, table: string, primaryKey: any, primaryKeyColumn: string, data: Record<string, any>) => Promise<void>;
+  deleteRow: (dbId: string, table: string, primaryKey: any, primaryKeyColumn: string) => Promise<void>;
   clearError: () => void;
 }
 
@@ -22,6 +44,11 @@ export const useDatabaseStore = create<DatabaseState>((set, get) => ({
   loading: false,
   error: null,
   selectedDatabase: null,
+  selectedTable: null,
+  tableData: null,
+  tableDataLoading: false,
+  editingRow: null,
+  logs: [],
 
   fetchDatabases: async () => {
     set({ loading: true, error: null });
@@ -74,5 +101,61 @@ export const useDatabaseStore = create<DatabaseState>((set, get) => ({
   },
 
   selectDatabase: (db) => set({ selectedDatabase: db }),
+  selectTable: (table) => set({ selectedTable: table, tableData: null, editingRow: null }),
+  setEditingRow: (row) => set({ editingRow: row }),
+  clearEditingRow: () => set({ editingRow: null }),
+
+  fetchTableData: async (dbId: string, table: string, options?: {
+    limit?: number;
+    offset?: number;
+    order_by?: string;
+    order_dir?: 'ASC' | 'DESC';
+    filter?: string;
+  }) => {
+    set({ tableDataLoading: true, error: null });
+    try {
+      const data = await api.getTableData(dbId, {
+        table,
+        limit: options?.limit ?? 50,
+        offset: options?.offset ?? 0,
+        order_by: options?.order_by,
+        order_dir: options?.order_dir,
+        filter: options?.filter,
+      });
+      set({ tableData: data, tableDataLoading: false });
+    } catch (err) {
+      set({
+        error: err instanceof Error ? err.message : 'Failed to fetch table data',
+        tableDataLoading: false,
+      });
+    }
+  },
+
+  updateRow: async (dbId: string, table: string, primaryKey: any, primaryKeyColumn: string, data: Record<string, any>) => {
+    set({ loading: true, error: null });
+    try {
+      await api.updateRow(dbId, { table, primary_key: primaryKey, primary_key_column: primaryKeyColumn, data });
+      set({ loading: false, editingRow: null });
+    } catch (err) {
+      set({
+        error: err instanceof Error ? err.message : 'Failed to update row',
+        loading: false,
+      });
+    }
+  },
+
+  deleteRow: async (dbId: string, table: string, primaryKey: any, primaryKeyColumn: string) => {
+    set({ loading: true, error: null });
+    try {
+      await api.deleteRow(dbId, { table, primary_key: primaryKey, primary_key_column: primaryKeyColumn });
+      set({ loading: false });
+    } catch (err) {
+      set({
+        error: err instanceof Error ? err.message : 'Failed to delete row',
+        loading: false,
+      });
+    }
+  },
+
   clearError: () => set({ error: null }),
 }));

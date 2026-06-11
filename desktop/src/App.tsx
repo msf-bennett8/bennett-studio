@@ -6,6 +6,7 @@ import { HomePage } from './pages/HomePage';
 import { DatabasePage } from './pages/DatabasePage';
 import { QueryPage } from './pages/QueryPage';
 import { SchemaPage } from './pages/SchemaPage';
+import { DataPage } from './pages/DataPage';
 import { SharePage } from './pages/SharePage';
 import { SettingsPage } from './pages/SettingsPage';
 import './index.css';
@@ -29,6 +30,7 @@ function App() {
           <Route path="/databases" element={<DatabasePage />} />
           <Route path="/query" element={<QueryPage />} />
           <Route path="/schema" element={<SchemaPage />} />
+          <Route path="/data" element={<DataPage />} />
           <Route path="/share" element={<SharePage />} />
           <Route path="/settings" element={<SettingsPage />} />
         </Routes>

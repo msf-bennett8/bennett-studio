@@ -25,6 +25,34 @@ impl ConnectionManager {
         self.pools.contains_key(id)
     }
 
+    pub async fn health_check(&self, id: &str) -> bool {
+        let Some(pool) = self.pools.get(id) else {
+            return false;
+        };
+        
+        let result = match pool {
+            DatabasePool::Postgres(p) => sqlx::query("SELECT 1").fetch_one(p).await.is_ok(),
+            DatabasePool::MySql(p) => sqlx::query("SELECT 1").fetch_one(p).await.is_ok(),
+            DatabasePool::Sqlite(p) => sqlx::query("SELECT 1").fetch_one(p).await.is_ok(),
+        };
+        
+        if !result {
+            tracing::warn!("Health check failed for pool {}", id);
+        }
+        result
+    }
+
+    pub async fn remove_stale(&mut self, id: &str) {
+        if let Some(pool) = self.pools.remove(id) {
+            match pool {
+                DatabasePool::Postgres(p) => p.close().await,
+                DatabasePool::MySql(p) => p.close().await,
+                DatabasePool::Sqlite(p) => p.close().await,
+            }
+            tracing::info!("Removed stale pool for {}", id);
+        }
+    }
+
     pub async fn connect(&mut self, instance: &DatabaseInstance) -> Result<(), sqlx::Error> {
         if self.pools.contains_key(&instance.id) {
             info!("Connection already exists for {}", instance.id);
@@ -289,6 +317,8 @@ fn pg_value_to_json(row: &sqlx::postgres::PgRow, i: usize) -> serde_json::Value 
         serde_json::json!(v)
     } else if let Ok(v) = row.try_get::<bool, _>(i) {
         serde_json::Value::Bool(v)
+    } else if let Ok(v) = row.try_get::<chrono::DateTime<chrono::Utc>, _>(i) {
+        serde_json::Value::String(v.to_rfc3339())
     } else if let Ok(v) = row.try_get::<chrono::NaiveDateTime, _>(i) {
         serde_json::Value::String(v.to_string())
     } else if let Ok(v) = row.try_get::<serde_json::Value, _>(i) {
@@ -307,6 +337,8 @@ fn mysql_value_to_json(row: &sqlx::mysql::MySqlRow, i: usize) -> serde_json::Val
         serde_json::json!(v)
     } else if let Ok(v) = row.try_get::<bool, _>(i) {
         serde_json::Value::Bool(v)
+    } else if let Ok(v) = row.try_get::<chrono::DateTime<chrono::Utc>, _>(i) {
+        serde_json::Value::String(v.to_rfc3339())
     } else if let Ok(v) = row.try_get::<chrono::NaiveDateTime, _>(i) {
         serde_json::Value::String(v.to_string())
     } else {

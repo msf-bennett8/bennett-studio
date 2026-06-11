@@ -1,11 +1,12 @@
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Database, Search, Table2, Share2, Settings, Home, Terminal, Cpu } from 'lucide-react';
+import { Database, Search, Table2, Share2, Settings, Home, Terminal, Cpu, Rows3 } from 'lucide-react';
 
 const navItems = [
   { icon: Home, label: 'Home', path: '/' },
   { icon: Database, label: 'Databases', path: '/databases' },
   { icon: Search, label: 'Query', path: '/query' },
   { icon: Table2, label: 'Schema', path: '/schema' },
+  { icon: Rows3, label: 'Data', path: '/data' },
   { icon: Share2, label: 'Share', path: '/share' },
   { icon: Settings, label: 'Settings', path: '/settings' },
 ];

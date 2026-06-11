@@ -200,7 +200,9 @@ impl DockerRuntime {
         Ok(logs)
     }
 
-    pub async fn list_bennett_containers(&self) -> Result<Vec<String>, DockerError> {
+    pub async fn list_bennett_containers(&self) -> Result<Vec<DatabaseInstance>, DockerError> {
+        use crate::models::database::{DatabaseInstance, DatabaseStatus};
+
         let options = ListContainersOptions {
             all: true,
             filters: {
@@ -217,10 +219,81 @@ impl DockerRuntime {
             .await
             .map_err(|e| DockerError::ContainerError(e.to_string()))?;
 
-        Ok(containers
-            .into_iter()
-            .filter_map(|c| c.id)
-            .collect())
+        let mut instances = Vec::new();
+
+        for container in containers {
+            let labels = container.labels.unwrap_or_default();
+            
+            // Stable ID from label (persists across restarts)
+            let id = labels
+                .get("bennett-id")
+                .cloned()
+                .or_else(|| container.id.clone())
+                .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+
+            let name = labels
+                .get("bennett-name")
+                .cloned()
+                .unwrap_or_else(|| {
+                    container.names.as_ref()
+                        .and_then(|n| n.first())
+                        .map(|n| n.trim_start_matches('/').to_string())
+                        .unwrap_or_else(|| "unknown".to_string())
+                });
+
+            let db_type = labels
+                .get("bennett-type")
+                .cloned()
+                .unwrap_or_else(|| "postgres".to_string());
+
+            // Extract host port from port bindings
+            let port = container
+                .ports
+                .as_ref()
+                .and_then(|ports| {
+                    ports.iter().find_map(|p| {
+                        p.public_port // This is the host port
+                    })
+                })
+                .unwrap_or(0);
+
+            // Determine status from container state
+            let status = container
+                .state
+                .as_deref()
+                .map(|s| {
+                    if s == "running" {
+                        DatabaseStatus::Running
+                    } else {
+                        DatabaseStatus::Stopped
+                    }
+                })
+                .unwrap_or(DatabaseStatus::Stopped);
+
+            // Extract version from image tag
+            let image = container.image.unwrap_or_default();
+            let version = image
+                .split(':')
+                .nth(1)
+                .unwrap_or("latest")
+                .to_string();
+
+            instances.push(DatabaseInstance {
+                id,
+                name,
+                db_type,
+                version,
+                status,
+                port,
+                size: "Unknown".to_string(),
+                created_at: chrono::Local::now().format("%Y-%m-%d").to_string(),
+                container_id: container.id,
+                volume_name: None,
+                env_vars: Vec::new(),
+            });
+        }
+
+        Ok(instances)
     }
 
     fn resolve_image(&self, db_type: &str, version: &str) -> String {
