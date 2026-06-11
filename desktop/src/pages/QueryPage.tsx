@@ -1,39 +1,49 @@
-import { useState } from 'react';
-import { Play, Copy, Check, Download, Clock, Save, FileText } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Play, Copy, Check, Download, Clock, Save, FileText, AlertCircle, Database } from 'lucide-react';
+import { api, DatabaseInstance } from '../services/api';
+import { useDatabaseStore } from '../stores/databaseStore';
 
 interface QueryResult {
   columns: string[]; rows: any[][]; executionTime: number; rowCount: number;
 }
 
-const mockResults: QueryResult = {
-  columns: ['id', 'name', 'email', 'created_at', 'status'],
-  rows: [
-    [1, 'Alice Johnson', 'alice@example.com', '2024-01-15', 'active'],
-    [2, 'Bob Smith', 'bob@example.com', '2024-02-20', 'active'],
-    [3, 'Charlie Brown', 'charlie@example.com', '2024-03-10', 'inactive'],
-    [4, 'Diana Prince', 'diana@example.com', '2024-04-05', 'active'],
-    [5, 'Eve Davis', 'eve@example.com', '2024-05-12', 'pending'],
-  ],
-  executionTime: 142, rowCount: 5,
-};
-
-const queryHistory = [
-  'SELECT * FROM users WHERE status = \'active\'',
-  'SELECT COUNT(*) FROM orders',
-  'UPDATE users SET status = \'active\' WHERE id = 3',
-  'CREATE INDEX idx_users_email ON users(email)',
-];
-
 export function QueryPage() {
-  const [query, setQuery] = useState('SELECT * FROM users WHERE status = \'active\';');
+  const { databases } = useDatabaseStore();
+  const runningDbs = databases.filter(d => d.status === 'running');
+  const [selectedDb, setSelectedDb] = useState<string>('');
+  const [query, setQuery] = useState('SELECT * FROM users LIMIT 10;');
   const [results, setResults] = useState<QueryResult | null>(null);
   const [isExecuting, setIsExecuting] = useState(false);
   const [copied, setCopied] = useState(false);
   const [savedQueries, setSavedQueries] = useState<string[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [queryHistory, setQueryHistory] = useState<string[]>([]);
 
-  const handleExecute = () => {
+  useEffect(() => {
+    if (runningDbs.length > 0 && !selectedDb) {
+      setSelectedDb(runningDbs[0].id);
+    }
+  }, [runningDbs]);
+
+  const handleExecute = async () => {
+    if (!selectedDb || !query.trim()) return;
     setIsExecuting(true);
-    setTimeout(() => { setResults(mockResults); setIsExecuting(false); }, 500);
+    setError(null);
+    const start = performance.now();
+    try {
+      const res = await api.executeQuery(selectedDb, query);
+      setResults({
+        columns: res.columns,
+        rows: res.rows,
+        rowCount: res.row_count,
+        executionTime: Math.round(performance.now() - start),
+      });
+      setQueryHistory(prev => [query, ...prev.slice(0, 49)]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Query failed');
+      setResults(null);
+    }
+    setIsExecuting(false);
   };
 
   const handleCopy = () => {
@@ -108,7 +118,18 @@ export function QueryPage() {
       <div className="flex-1 flex flex-col">
         <div className="flex items-center justify-between p-4 border-b" style={{ borderColor: 'var(--borderDefault)' }}>
           <div className="flex items-center gap-2">
-            <button onClick={handleExecute} disabled={isExecuting} className="btn-primary flex items-center gap-2 px-4 py-2 rounded-xl">
+            <select
+              className="input px-3 py-2 rounded-xl text-sm"
+              value={selectedDb}
+              onChange={e => setSelectedDb(e.target.value)}
+              disabled={runningDbs.length === 0}
+            >
+              {runningDbs.map(db => (
+                <option key={db.id} value={db.id}>{db.name} ({db.type})</option>
+              ))}
+              {runningDbs.length === 0 && <option>No running databases</option>}
+            </select>
+            <button onClick={handleExecute} disabled={isExecuting || !selectedDb} className="btn-primary flex items-center gap-2 px-4 py-2 rounded-xl">
               <Play size={16} /> {isExecuting ? 'Executing...' : 'Execute'}
             </button>
             <button onClick={handleCopy} className="btn-secondary flex items-center gap-2 px-3 py-2 rounded-xl">
@@ -128,6 +149,15 @@ export function QueryPage() {
           <textarea value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => { if (e.ctrlKey && e.key === 'Enter') handleExecute(); }}
             className="sql-editor flex-1 p-4 resize-none outline-none" placeholder="Write your SQL query here..." spellCheck={false} />
         </div>
+
+        {error && (
+          <div className="p-4 border-t" style={{ borderColor: 'var(--accentError)', backgroundColor: 'rgba(255,68,68,0.05)' }}>
+            <div className="flex items-center gap-2">
+              <AlertCircle size={16} style={{ color: 'var(--accentError)' }} />
+              <span className="text-sm" style={{ color: 'var(--accentError)' }}>{error}</span>
+            </div>
+          </div>
+        )}
 
         {results && (
           <div className="flex-1 border-t overflow-auto" style={{ borderColor: 'var(--borderDefault)' }}>

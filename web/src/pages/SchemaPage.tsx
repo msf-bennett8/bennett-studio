@@ -1,5 +1,7 @@
-import { useState } from 'react';
-import { Table2, Columns, Key, Link2 } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Table2, Columns, Key, Link2, AlertCircle, Database } from 'lucide-react';
+import { api, DatabaseInstance } from '../services/api';
+import { useDatabaseStore } from '../stores/databaseStore';
 
 interface ColumnInfo {
   name: string; type: string; nullable: boolean; default?: string;
@@ -10,52 +12,79 @@ interface TableInfo {
   name: string; columns: ColumnInfo[]; rowCount: number; size: string;
 }
 
-const mockTables: TableInfo[] = [
-  {
-    name: 'users', rowCount: 15420, size: '2.4 MB',
-    columns: [
-      { name: 'id', type: 'SERIAL', nullable: false, isPrimary: true, isForeign: false },
-      { name: 'email', type: 'VARCHAR(255)', nullable: false, isPrimary: false, isForeign: false },
-      { name: 'name', type: 'VARCHAR(100)', nullable: true, isPrimary: false, isForeign: false },
-      { name: 'created_at', type: 'TIMESTAMP', nullable: false, default: 'NOW()', isPrimary: false, isForeign: false },
-      { name: 'status', type: 'ENUM', nullable: false, default: 'active', isPrimary: false, isForeign: false },
-    ],
-  },
-  {
-    name: 'orders', rowCount: 8934, size: '1.8 MB',
-    columns: [
-      { name: 'id', type: 'SERIAL', nullable: false, isPrimary: true, isForeign: false },
-      { name: 'user_id', type: 'INTEGER', nullable: false, isPrimary: false, isForeign: true, references: 'users.id' },
-      { name: 'total', type: 'DECIMAL(10,2)', nullable: false, isPrimary: false, isForeign: false },
-      { name: 'status', type: 'VARCHAR(50)', nullable: false, default: 'pending', isPrimary: false, isForeign: false },
-      { name: 'created_at', type: 'TIMESTAMP', nullable: false, default: 'NOW()', isPrimary: false, isForeign: false },
-    ],
-  },
-  {
-    name: 'products', rowCount: 342, size: '456 KB',
-    columns: [
-      { name: 'id', type: 'SERIAL', nullable: false, isPrimary: true, isForeign: false },
-      { name: 'name', type: 'VARCHAR(200)', nullable: false, isPrimary: false, isForeign: false },
-      { name: 'price', type: 'DECIMAL(10,2)', nullable: false, isPrimary: false, isForeign: false },
-      { name: 'stock', type: 'INTEGER', nullable: false, default: '0', isPrimary: false, isForeign: false },
-      { name: 'category_id', type: 'INTEGER', nullable: true, isPrimary: false, isForeign: true, references: 'categories.id' },
-    ],
-  },
-];
-
 export function SchemaPage() {
-  const [selectedTable, setSelectedTable] = useState<string>('users');
-  const selectedTableInfo = mockTables.find(t => t.name === selectedTable);
+  const { databases } = useDatabaseStore();
+  const runningDbs = databases.filter(d => d.status === 'running');
+  const [selectedDb, setSelectedDb] = useState<string>('');
+  const [tables, setTables] = useState<TableInfo[]>([]);
+  const [selectedTable, setSelectedTable] = useState<string>('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (runningDbs.length > 0 && !selectedDb) {
+      setSelectedDb(runningDbs[0].id);
+    }
+  }, [runningDbs]);
+
+  useEffect(() => {
+    if (!selectedDb) return;
+    setLoading(true);
+    setError(null);
+    api.getSchema(selectedDb)
+      .then(res => {
+        const mapped: TableInfo[] = res.map(t => ({
+          name: t.name,
+          rowCount: 0,
+          size: '-',
+          columns: t.columns.map(c => ({
+            name: c.name,
+            type: c.data_type,
+            nullable: c.nullable,
+            isPrimary: false,
+            isForeign: false,
+          })),
+        }));
+        setTables(mapped);
+        if (mapped.length > 0) setSelectedTable(mapped[0].name);
+        setLoading(false);
+      })
+      .catch(err => {
+        setError(err instanceof Error ? err.message : 'Failed to load schema');
+        setLoading(false);
+      });
+  }, [selectedDb]);
+
+  const selectedTableInfo = tables.find(t => t.name === selectedTable);
 
   return (
     <div className="flex h-full">
       <div className="w-64 border-r flex flex-col" style={{ backgroundColor: 'var(--bgSecondary)', borderColor: 'var(--borderDefault)' }}>
         <div className="p-4 border-b" style={{ borderColor: 'var(--borderDefault)' }}>
+          <select
+            className="input w-full text-sm mb-3"
+            value={selectedDb}
+            onChange={e => setSelectedDb(e.target.value)}
+          >
+            {runningDbs.map(db => (
+              <option key={db.id} value={db.id}>{db.name} ({db.type})</option>
+            ))}
+            {runningDbs.length === 0 && <option>No running databases</option>}
+          </select>
           <h3 className="font-semibold text-sm" style={{ color: 'var(--textPrimary)' }}>Tables</h3>
-          <p className="text-xs mt-1" style={{ color: 'var(--textMuted)' }}>{mockTables.length} tables</p>
+          <p className="text-xs mt-1" style={{ color: 'var(--textMuted)' }}>{tables.length} tables</p>
         </div>
         <div className="flex-1 overflow-auto p-2 space-y-1">
-          {mockTables.map((table) => (
+          {loading && (
+            <div className="text-center py-4 text-xs" style={{ color: 'var(--textMuted)' }}>Loading...</div>
+          )}
+          {error && (
+            <div className="p-2 text-xs" style={{ color: 'var(--accentError)' }}>
+              <AlertCircle size={12} className="inline mr-1" />
+              {error}
+            </div>
+          )}
+          {tables.map((table) => (
             <button key={table.name} onClick={() => setSelectedTable(table.name)} className="w-full text-left p-3 rounded-xl text-sm transition-all"
               style={{ backgroundColor: selectedTable === table.name ? 'var(--surfaceActive)' : 'transparent', color: selectedTable === table.name ? 'var(--accentPrimary)' : 'var(--textSecondary)' }}>
               <div className="flex items-center justify-between">
@@ -77,9 +106,7 @@ export function SchemaPage() {
               <div>
                 <h1 className="text-2xl font-bold" style={{ color: 'var(--textPrimary)' }}>{selectedTableInfo.name}</h1>
                 <div className="flex items-center gap-4 mt-2">
-                  <span className="text-sm" style={{ color: 'var(--textSecondary)' }}>{selectedTableInfo.rowCount.toLocaleString()} rows</span>
-                  <span className="text-sm" style={{ color: 'var(--textMuted)' }}>{selectedTableInfo.size}</span>
-                  <span className="text-sm" style={{ color: 'var(--textMuted)' }}>{selectedTableInfo.columns.length} columns</span>
+                  <span className="text-sm" style={{ color: 'var(--textSecondary)' }}>{selectedTableInfo.columns.length} columns</span>
                 </div>
               </div>
               <button className="btn-secondary px-4 py-2 rounded-xl">View Data</button>

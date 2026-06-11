@@ -1,4 +1,4 @@
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
 export interface DatabaseInstance {
   id: string;
@@ -66,4 +66,13 @@ export const api = {
     fetchApi<DatabaseInstance>(`/api/databases/${id}/start`, { method: 'POST' }),
   stopDatabase: (id: string) =>
     fetchApi<DatabaseInstance>(`/api/databases/${id}/stop`, { method: 'POST' }),
+
+  executeQuery: (id: string, sql: string) =>
+    fetchApi<{ columns: string[]; rows: any[][]; row_count: number }>(`/api/databases/${id}/query`, {
+      method: 'POST',
+      body: JSON.stringify({ sql }),
+    }),
+
+  getSchema: (id: string) =>
+    fetchApi<{ name: string; columns: { name: string; data_type: string; nullable: boolean }[] }[]>(`/api/databases/${id}/schema`),
 };

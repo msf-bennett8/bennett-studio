@@ -1,12 +1,18 @@
 import { useState, useMemo, useEffect } from 'react';
-import { Table2, Columns, Key, Link2, Search, Database, Hash, Filter, ArrowRight } from 'lucide-react';
-import { dataService } from '../services/dataService';
-import type { TableSchema, ColumnSchema } from '../services/dataService';
+import { Table2, Columns, Key, Link2, Search, Database, Hash, Filter, ArrowRight, AlertCircle } from 'lucide-react';
+import { api } from '../services/api';
+import { useDatabaseStore } from '../stores/databaseStore';
+import type { ColumnSchema } from '../services/dataService';
 
 export function SchemaPage() {
-  const [selectedTable, setSelectedTable] = useState<string>('users');
+  const { databases } = useDatabaseStore();
+  const runningDbs = databases.filter(d => d.status === 'running');
+  const [selectedDb, setSelectedDb] = useState<string>('');
+  const [selectedTable, setSelectedTable] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState<'columns' | 'indexes' | 'constraints' | 'triggers' | 'relations'>('columns');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const [tables, setTables] = useState([]);
   const [metadata, setMetadata] = useState(null);
@@ -15,21 +21,65 @@ export function SchemaPage() {
   const [columnStats, setColumnStats] = useState(null);
 
   useEffect(() => {
-    dataService.getAllTables().then(setTables);
-    dataService.getMetadata().then(setMetadata);
-  }, []);
+    if (runningDbs.length > 0 && !selectedDb) {
+      setSelectedDb(runningDbs[0].id);
+    }
+  }, [runningDbs]);
 
   useEffect(() => {
-    if (selectedTable) {
-      dataService.getTable(selectedTable).then(table => {
-        setSelectedTableData(table || null);
-        if (table) {
-          dataService.getRelatedTables(selectedTable).then(setRelatedTables);
-          dataService.getColumnStats(selectedTable).then(setColumnStats);
+    if (!selectedDb) return;
+    setLoading(true);
+    setError(null);
+    api.getSchema(selectedDb)
+      .then(schema => {
+        const mapped = schema.map(t => ({
+          name: t.name,
+          engine: 'postgres',
+          version: '16',
+          row_count: 0,
+          size: '-',
+          columns: t.columns.map(c => ({
+            name: c.name,
+            type: c.data_type,
+            nullable: c.nullable,
+            is_primary: false,
+            is_foreign: false,
+            default: null,
+            constraints: c.nullable ? [] : ['NOT NULL'],
+            description: '',
+          })),
+          indexes: [],
+          constraints: [],
+          triggers: [],
+        }));
+        setTables(mapped);
+        if (mapped.length > 0) {
+          setSelectedTable(mapped[0].name);
+          setSelectedTableData(mapped[0]);
         }
+        setMetadata({ database_name: 'connected', engine: 'postgres', version: '16', total_tables: mapped.length });
+        setLoading(false);
+      })
+      .catch(err => {
+        setError(err instanceof Error ? err.message : 'Failed to load schema');
+        setLoading(false);
       });
+  }, [selectedDb]);
+
+  useEffect(() => {
+    if (selectedTable && tables.length > 0) {
+      const table = tables.find((t: any) => t.name === selectedTable);
+      setSelectedTableData(table || null);
+      setRelatedTables({ hasMany: [], belongsTo: [] });
+      setColumnStats(table ? {
+        total: table.columns.length,
+        nullable: table.columns.filter((c: any) => c.nullable).length,
+        primary: table.columns.filter((c: any) => c.is_primary).length,
+        foreign: table.columns.filter((c: any) => c.is_foreign).length,
+        withDefault: table.columns.filter((c: any) => c.default).length,
+      } : null);
     }
-  }, [selectedTable]);
+  }, [selectedTable, tables]);
 
   const filteredTables = useMemo(() => {
     if (!searchQuery) return tables;
@@ -63,9 +113,19 @@ export function SchemaPage() {
     <div className="flex h-full">
       <div className="w-72 border-r flex flex-col" style={{ backgroundColor: 'var(--bgSecondary)', borderColor: 'var(--borderDefault)' }}>
         <div className="p-4 border-b" style={{ borderColor: 'var(--borderDefault)' }}>
+          <select
+            className="input w-full text-sm mb-3"
+            value={selectedDb}
+            onChange={e => setSelectedDb(e.target.value)}
+          >
+            {runningDbs.map(db => (
+              <option key={db.id} value={db.id}>{db.name} ({db.type})</option>
+            ))}
+            {runningDbs.length === 0 && <option>No running databases</option>}
+          </select>
           <div className="flex items-center gap-2 mb-2">
             <Database size={16} style={{ color: 'var(--accentPrimary)' }} />
-            <span className="text-sm font-semibold" style={{ color: 'var(--textPrimary)' }}>{metadata?.database_name}</span>
+            <span className="text-sm font-semibold" style={{ color: 'var(--textPrimary)' }}>{metadata?.database_name || 'Database'}</span>
           </div>
           <div className="flex items-center gap-2 text-xs" style={{ color: 'var(--textMuted)' }}>
             <span>{metadata?.engine} {metadata?.version}</span>
@@ -79,8 +139,17 @@ export function SchemaPage() {
             <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search tables, columns..." className="input pl-9 text-sm" />
           </div>
         </div>
+        {loading && (
+          <div className="text-center py-4 text-xs" style={{ color: 'var(--textMuted)' }}>Loading...</div>
+        )}
+        {error && (
+          <div className="p-2 text-xs" style={{ color: 'var(--accentError)' }}>
+            <AlertCircle size={12} className="inline mr-1" />
+            {error}
+          </div>
+        )}
         <div className="flex-1 overflow-auto px-2 pb-2 space-y-1">
-          {filteredTables.map((table) => (
+          {filteredTables.map((table: any) => (
             <button key={table.name} onClick={() => { setSelectedTable(table.name); setActiveTab('columns'); }}
               className="w-full text-left p-3 rounded-xl text-sm transition-all"
               style={{ backgroundColor: selectedTable === table.name ? 'var(--surfaceActive)' : 'transparent', color: selectedTable === table.name ? 'var(--accentPrimary)' : 'var(--textSecondary)', borderRight: selectedTable === table.name ? '3px solid var(--accentPrimary)' : '3px solid transparent' }}>
@@ -109,7 +178,7 @@ export function SchemaPage() {
                   <h1 className="text-2xl font-bold" style={{ color: 'var(--textPrimary)' }}>{selectedTableData.name}</h1>
                   <span className="text-xs px-2 py-1 rounded-full" style={{ backgroundColor: 'var(--bgTertiary)', color: 'var(--textSecondary)' }}>{selectedTableData.engine} {selectedTableData.version}</span>
                 </div>
-                <p className="text-sm" style={{ color: 'var(--textSecondary)' }}>{selectedTableData?.row_count?.toLocaleString() ?? 0} rows • {selectedTableData?.size ?? '-'} • {selectedTableData?.columns?.length ?? 0} columns</p>
+                <p className="text-sm" style={{ color: 'var(--textSecondary)' }}>{selectedTableData?.columns?.length ?? 0} columns</p>
               </div>
               <div className="flex gap-2">
                 <button className="btn-secondary px-4 py-2 rounded-xl text-sm">View Data</button>
