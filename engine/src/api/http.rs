@@ -41,7 +41,6 @@ pub async fn create_database(
     State(state): State<AppState>,
     Json(req): Json<CreateDatabaseRequest>,
 ) -> Result<Json<ApiResponse<DatabaseInstance>>, StatusCode> {
-    // Check for duplicate name
     {
         let db = state.databases.lock().unwrap();
         if db.iter().any(|d| d.name == req.name) {
@@ -52,7 +51,6 @@ pub async fn create_database(
         }
     }
 
-    // Allocate port
     let port = match state.ports.allocate(&req.db_type) {
         Ok(p) => p,
         Err(e) => {
@@ -67,7 +65,6 @@ pub async fn create_database(
     let volume_name =
         crate::runtime::volume::manager::VolumeManager::generate_name(&req.db_type, &req.name);
 
-    // Create volume
     if let Err(e) = state.volumes.create(&volume_name).await {
         state.ports.release(port);
         return Ok(Json(ApiResponse::error(format!(
@@ -95,7 +92,6 @@ pub async fn create_database(
         req.name, req.db_type, req.version, port
     );
 
-    // Create container
     let container_id = match state.docker.create_container(&instance).await {
         Ok(cid) => cid,
         Err(e) => {
@@ -108,7 +104,6 @@ pub async fn create_database(
         }
     };
 
-    // Add to database list
     {
         let mut db = state.databases.lock().unwrap();
         let mut instance_with_container = instance.clone();
@@ -116,7 +111,6 @@ pub async fn create_database(
         db.push(instance_with_container);
     }
 
-    // Start container
     if let Err(e) = state.docker.start_container(&container_id).await {
         return Ok(Json(ApiResponse::error(format!(
             "Container start failed: {}",
@@ -124,7 +118,6 @@ pub async fn create_database(
         ))));
     }
 
-    // Update status to running
     let instance = {
         let mut db = state.databases.lock().unwrap();
         if let Some(d) = db.iter_mut().find(|d| d.id == id) {
@@ -168,7 +161,6 @@ pub async fn delete_database(
     Path(id): Path<String>,
     State(state): State<AppState>,
 ) -> Result<Json<ApiResponse<serde_json::Value>>, StatusCode> {
-    // Find instance
     let instance = {
         let db = state.databases.lock().unwrap();
         db.iter().find(|d| d.id == id).cloned()
@@ -184,21 +176,17 @@ pub async fn delete_database(
         }
     };
 
-    // Stop and remove container
     if let Some(ref container_id) = instance.container_id {
         let _ = state.docker.stop_container(container_id).await;
         let _ = state.docker.remove_container(container_id).await;
     }
 
-    // Release port
     state.ports.release(instance.port);
 
-    // Remove volume
     if let Some(ref volume_name) = instance.volume_name {
         let _ = state.volumes.remove(volume_name).await;
     }
 
-    // Remove from list
     {
         let mut db = state.databases.lock().unwrap();
         if let Some(pos) = db.iter().position(|d| d.id == id) {
@@ -218,7 +206,6 @@ pub async fn start_database(
     Path(id): Path<String>,
     State(state): State<AppState>,
 ) -> Result<Json<ApiResponse<DatabaseInstance>>, StatusCode> {
-    // Lookup instance
     let lookup = {
         let mut db = state.databases.lock().unwrap();
         match db.iter_mut().find(|d| d.id == id) {
@@ -247,7 +234,6 @@ pub async fn start_database(
     if let Some(cid) = container_id {
         match state.docker.start_container(&cid).await {
             Ok(_) => {
-                // Update status
                 let mut db = state.databases.lock().unwrap();
                 if let Some(instance) = db.iter_mut().find(|d| d.id == id) {
                     instance.status = DatabaseStatus::Running;
@@ -275,7 +261,6 @@ pub async fn stop_database(
     Path(id): Path<String>,
     State(state): State<AppState>,
 ) -> Result<Json<ApiResponse<DatabaseInstance>>, StatusCode> {
-    // Lookup instance
     let lookup = {
         let mut db = state.databases.lock().unwrap();
         match db.iter_mut().find(|d| d.id == id) {
@@ -304,7 +289,6 @@ pub async fn stop_database(
     if let Some(cid) = container_id {
         match state.docker.stop_container(&cid).await {
             Ok(_) => {
-                // Update status
                 let mut db = state.databases.lock().unwrap();
                 if let Some(instance) = db.iter_mut().find(|d| d.id == id) {
                     instance.status = DatabaseStatus::Stopped;
@@ -326,4 +310,76 @@ pub async fn stop_database(
             id
         ))))
     }
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct ExecuteQueryRequest {
+    pub sql: String,
+}
+
+pub async fn execute_query(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+    Json(req): Json<ExecuteQueryRequest>,
+) -> Json<ApiResponse<crate::control_plane::connection::manager::QueryResult>> {
+    let instance = {
+        let db = state.databases.lock().unwrap();
+        match db.iter().find(|d| d.id == id).cloned() {
+            Some(i) => i,
+            None => return Json(ApiResponse::error(format!("Database {} not found", id))),
+        }
+    };
+
+    // Auto-connect if not connected
+    {
+        let mut conn = state.connections.lock().await;
+        if !conn.is_connected(&id) {
+            if let Err(e) = conn.connect(&instance).await {
+                return Json(ApiResponse::error(format!("Connection failed: {}", e)));
+            }
+        }
+    }
+
+    let result = {
+        let conn = state.connections.lock().await;
+        match conn.execute(&id, &req.sql).await {
+            Ok(r) => Json(ApiResponse::success(r)),
+            Err(e) => Json(ApiResponse::error(format!("Query failed: {}", e))),
+        }
+    };
+
+    result
+}
+
+pub async fn get_schema(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+) -> Json<ApiResponse<Vec<crate::control_plane::connection::manager::TableInfo>>> {
+    let instance = {
+        let db = state.databases.lock().unwrap();
+        match db.iter().find(|d| d.id == id).cloned() {
+            Some(i) => i,
+            None => return Json(ApiResponse::error(format!("Database {} not found", id))),
+        }
+    };
+
+    // Auto-connect if not connected
+    {
+        let mut conn = state.connections.lock().await;
+        if !conn.is_connected(&id) {
+            if let Err(e) = conn.connect(&instance).await {
+                return Json(ApiResponse::error(format!("Connection failed: {}", e)));
+            }
+        }
+    }
+
+    let result = {
+        let conn = state.connections.lock().await;
+        match conn.get_schema(&id).await {
+            Ok(schema) => Json(ApiResponse::success(schema)),
+            Err(e) => Json(ApiResponse::error(format!("Schema query failed: {}", e))),
+        }
+    };
+
+    result
 }

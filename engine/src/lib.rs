@@ -16,6 +16,7 @@ use models::database::DatabaseInstance;
 use runtime::container::docker::DockerRuntime;
 use runtime::port::allocator::PortAllocator;
 use runtime::volume::manager::VolumeManager;
+use control_plane::connection::manager::ConnectionManager;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -23,6 +24,7 @@ pub struct AppState {
     pub docker: Arc<DockerRuntime>,
     pub ports: Arc<PortAllocator>,
     pub volumes: Arc<VolumeManager>,
+    pub connections: Arc<tokio::sync::Mutex<ConnectionManager>>,
 }
 
 impl AppState {
@@ -32,6 +34,7 @@ impl AppState {
             docker: Arc::new(DockerRuntime::new()?),
             ports: Arc::new(PortAllocator::new()),
             volumes: Arc::new(VolumeManager::new()?),
+            connections: Arc::new(tokio::sync::Mutex::new(ConnectionManager::new())),
         })
     }
 }
