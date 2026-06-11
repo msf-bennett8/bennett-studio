@@ -33,7 +33,7 @@ impl ProcessSupervisor {
                 if let Some(container_id) = &instance.container_id {
                     match self.docker.is_running(container_id).await {
                         Ok(true) => {
-                            // Healthy
+                            // Healthy - container is running
                         }
                         Ok(false) => {
                             warn!(
@@ -49,10 +49,44 @@ impl ProcessSupervisor {
                     }
                 }
             }
+            drop(db_list);
+
+            // Auto-restart logic (optional, can be configured per instance)
+            // Future: implement exponential backoff, max restart attempts
         }
     }
 
     pub async fn get_logs(&self, container_id: &str) -> Result<String, crate::runtime::container::docker::DockerError> {
         self.docker.get_logs(container_id).await
+    }
+
+    pub async fn stream_logs(
+        &self,
+        container_id: &str,
+        tx: tokio::sync::mpsc::Sender<String>,
+    ) -> Result<(), crate::runtime::container::docker::DockerError> {
+        let mut last_logs = String::new();
+        let mut ticker = interval(Duration::from_secs(2));
+
+        loop {
+            ticker.tick().await;
+            match self.docker.get_logs(container_id).await {
+                Ok(new_logs) => {
+                    if new_logs != last_logs {
+                        let diff = new_logs.chars().rev().take(1000).collect::<String>().chars().rev().collect::<String>();
+                        if !diff.is_empty() {
+                            let _ = tx.send(diff).await;
+                        }
+                        last_logs = new_logs;
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to get logs: {}", e);
+                    break;
+                }
+            }
+        }
+
+        Ok(())
     }
 }

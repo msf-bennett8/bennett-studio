@@ -1,4 +1,5 @@
 pub mod http;
+pub mod websocket;
 
 use axum::{
     routing::{get, post, put, delete},
@@ -7,6 +8,7 @@ use axum::{
 use crate::AppState;
 
 pub use http::*;
+pub use websocket::*;
 
 pub fn routes() -> Router<AppState> {
     Router::new()
@@ -19,5 +21,6 @@ pub fn routes() -> Router<AppState> {
         .route("/api/databases/:id/stop", post(http::stop_database))
         .route("/api/databases/:id/query", post(http::execute_query))
         .route("/api/databases/:id/schema", get(http::get_schema))
+        .route("/api/databases/:id/ws", get(websocket::ws_handler))
         .route("/api/health", get(http::health_check))
 }
