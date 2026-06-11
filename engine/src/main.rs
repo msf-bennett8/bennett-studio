@@ -1,12 +1,10 @@
 use axum::Router;
 use std::net::SocketAddr;
-use std::sync::{Arc, Mutex};
 use tower_http::cors::{Any, CorsLayer};
 use tracing::info;
 
 use bennett_engine::{
     api::routes,
-    models::database::{DatabaseInstance, DatabaseStatus},
     AppState,
 };
 
@@ -16,32 +14,20 @@ async fn main() {
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env().add_directive("bennett_engine=debug".parse().unwrap()))
         .init();
 
-    let state = AppState {
-        databases: Arc::new(Mutex::new(vec![
-            DatabaseInstance {
-                id: "1".to_string(),
-                name: "local-postgres".to_string(),
-                db_type: "postgres".to_string(),
-                version: "16.2".to_string(),
-                status: DatabaseStatus::Running,
-                port: 5433,
-                size: "245 MB".to_string(),
-                created_at: "2024-06-10".to_string(),
-                container_id: Some("pg-16-local".to_string()),
-            },
-            DatabaseInstance {
-                id: "2".to_string(),
-                name: "dev-mysql".to_string(),
-                db_type: "mysql".to_string(),
-                version: "8.0".to_string(),
-                status: DatabaseStatus::Stopped,
-                port: 3307,
-                size: "128 MB".to_string(),
-                created_at: "2024-06-09".to_string(),
-                container_id: None,
-            },
-        ])),
+    let state = match AppState::new() {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::error!("Failed to initialize engine: {}", e);
+            tracing::error!("Make sure Docker daemon is running");
+            std::process::exit(1);
+        }
     };
+
+    // Verify Docker is accessible
+    if let Err(e) = state.docker.verify().await {
+        tracing::error!("Docker verification failed: {}", e);
+        std::process::exit(1);
+    }
 
     let app = Router::new()
         .merge(routes())
@@ -57,7 +43,6 @@ async fn main() {
         .ok()
         .and_then(|p| p.parse().ok())
         .unwrap_or_else(|| {
-            // Try 3001 first, fallback to 3002, 3003, etc.
             let base_port = 3001;
             for offset in 0..10 {
                 let port = base_port + offset;
@@ -70,6 +55,7 @@ async fn main() {
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     info!("Bennett Engine starting on http://{}", addr);
+    info!("Docker runtime: connected");
     info!("API endpoints:");
     info!("  GET    /api/databases");
     info!("  POST   /api/databases");

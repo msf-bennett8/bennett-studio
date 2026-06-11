@@ -1,19 +1,21 @@
 use axum::{
-    extract::{Path, State, Json},
+    extract::{Path, State},
     http::StatusCode,
+    Json,
 };
 use tracing::info;
 
 use crate::AppState;
 use crate::models::database::{
-    DatabaseInstance, DatabaseStatus, CreateDatabaseRequest, UpdateDatabaseRequest, ApiResponse,
+    ApiResponse, CreateDatabaseRequest, DatabaseInstance, DatabaseStatus, UpdateDatabaseRequest,
 };
 
 pub async fn health_check() -> Json<ApiResponse<serde_json::Value>> {
     Json(ApiResponse::success(serde_json::json!({
         "status": "ok",
         "version": "0.1.0",
-        "engine": "bennett-engine"
+        "engine": "bennett-engine",
+        "docker": "connected"
     })))
 }
 
@@ -38,16 +40,42 @@ pub async fn get_database(
 pub async fn create_database(
     State(state): State<AppState>,
     Json(req): Json<CreateDatabaseRequest>,
-) -> Json<ApiResponse<DatabaseInstance>> {
-    let mut db = state.databases.lock().unwrap();
-    
-    if db.iter().any(|d| d.name == req.name) {
-        return Json(ApiResponse::error(format!("Database '{}' already exists", req.name)));
+) -> Result<Json<ApiResponse<DatabaseInstance>>, StatusCode> {
+    // Check for duplicate name
+    {
+        let db = state.databases.lock().unwrap();
+        if db.iter().any(|d| d.name == req.name) {
+            return Ok(Json(ApiResponse::error(format!(
+                "Database '{}' already exists",
+                req.name
+            ))));
+        }
     }
 
-    let id = format!("{}", db.len() + 1);
-    let port = 5432 + db.len() as u16 + 1;
-    
+    // Allocate port
+    let port = match state.ports.allocate(&req.db_type) {
+        Ok(p) => p,
+        Err(e) => {
+            return Ok(Json(ApiResponse::error(format!(
+                "Port allocation failed: {}",
+                e
+            ))))
+        }
+    };
+
+    let id = uuid::Uuid::new_v4().to_string();
+    let volume_name =
+        crate::runtime::volume::manager::VolumeManager::generate_name(&req.db_type, &req.name);
+
+    // Create volume
+    if let Err(e) = state.volumes.create(&volume_name).await {
+        state.ports.release(port);
+        return Ok(Json(ApiResponse::error(format!(
+            "Volume creation failed: {}",
+            e
+        ))));
+    }
+
     let instance = DatabaseInstance {
         id: id.clone(),
         name: req.name.clone(),
@@ -57,26 +85,63 @@ pub async fn create_database(
         port,
         size: "0 MB".to_string(),
         created_at: chrono::Local::now().format("%Y-%m-%d").to_string(),
-        container_id: Some(format!("{}-{}-{}", req.db_type, req.version, req.name)),
+        container_id: None,
+        volume_name: Some(volume_name.clone()),
+        env_vars: Vec::new(),
     };
 
-    info!("Creating database {} (type: {}, version: {})", req.name, req.db_type, req.version);
-    
-    db.push(instance.clone());
-    
-    let databases = state.databases.clone();
-    let instance_id = id.clone();
-    tokio::spawn(async move {
-        tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
-        let mut db = databases.lock().unwrap();
-        if let Some(d) = db.iter_mut().find(|d| d.id == instance_id) {
+    info!(
+        "Creating database {} (type: {}, version: {}, port: {})",
+        req.name, req.db_type, req.version, port
+    );
+
+    // Create container
+    let container_id = match state.docker.create_container(&instance).await {
+        Ok(cid) => cid,
+        Err(e) => {
+            state.ports.release(port);
+            let _ = state.volumes.remove(&volume_name).await;
+            return Ok(Json(ApiResponse::error(format!(
+                "Container creation failed: {}",
+                e
+            ))));
+        }
+    };
+
+    // Add to database list
+    {
+        let mut db = state.databases.lock().unwrap();
+        let mut instance_with_container = instance.clone();
+        instance_with_container.container_id = Some(container_id.clone());
+        db.push(instance_with_container);
+    }
+
+    // Start container
+    if let Err(e) = state.docker.start_container(&container_id).await {
+        return Ok(Json(ApiResponse::error(format!(
+            "Container start failed: {}",
+            e
+        ))));
+    }
+
+    // Update status to running
+    let instance = {
+        let mut db = state.databases.lock().unwrap();
+        if let Some(d) = db.iter_mut().find(|d| d.id == id) {
             d.status = DatabaseStatus::Running;
             d.size = "128 MB".to_string();
-            info!("Database {} is now running", instance_id);
+            info!("Database {} is now running on port {}", id, port);
         }
-    });
+        db.iter().find(|d| d.id == id).cloned()
+    };
 
-    Json(ApiResponse::success(instance))
+    match instance {
+        Some(inst) => Ok(Json(ApiResponse::success(inst))),
+        None => Ok(Json(ApiResponse::error(format!(
+            "Database {} not found after creation",
+            id
+        )))),
+    }
 }
 
 pub async fn update_database(
@@ -85,7 +150,7 @@ pub async fn update_database(
     Json(req): Json<UpdateDatabaseRequest>,
 ) -> Result<Json<ApiResponse<DatabaseInstance>>, StatusCode> {
     let mut db = state.databases.lock().unwrap();
-    
+
     if let Some(instance) = db.iter_mut().find(|d| d.id == id) {
         if let Some(name) = req.name {
             instance.name = name;
@@ -102,68 +167,163 @@ pub async fn update_database(
 pub async fn delete_database(
     Path(id): Path<String>,
     State(state): State<AppState>,
-) -> Json<ApiResponse<serde_json::Value>> {
-    let mut db = state.databases.lock().unwrap();
-    
-    if let Some(pos) = db.iter().position(|d| d.id == id) {
-        let name = db[pos].name.clone();
-        db.remove(pos);
-        info!("Deleted database {} ({})", id, name);
-        Json(ApiResponse::success(serde_json::json!({ "deleted": true, "id": id })))
-    } else {
-        Json(ApiResponse::error(format!("Database {} not found", id)))
+) -> Result<Json<ApiResponse<serde_json::Value>>, StatusCode> {
+    // Find instance
+    let instance = {
+        let db = state.databases.lock().unwrap();
+        db.iter().find(|d| d.id == id).cloned()
+    };
+
+    let instance = match instance {
+        Some(i) => i,
+        None => {
+            return Ok(Json(ApiResponse::error(format!(
+                "Database {} not found",
+                id
+            ))))
+        }
+    };
+
+    // Stop and remove container
+    if let Some(ref container_id) = instance.container_id {
+        let _ = state.docker.stop_container(container_id).await;
+        let _ = state.docker.remove_container(container_id).await;
     }
+
+    // Release port
+    state.ports.release(instance.port);
+
+    // Remove volume
+    if let Some(ref volume_name) = instance.volume_name {
+        let _ = state.volumes.remove(volume_name).await;
+    }
+
+    // Remove from list
+    {
+        let mut db = state.databases.lock().unwrap();
+        if let Some(pos) = db.iter().position(|d| d.id == id) {
+            let name = db[pos].name.clone();
+            db.remove(pos);
+            info!("Deleted database {} ({})", id, name);
+        }
+    }
+
+    Ok(Json(ApiResponse::success(serde_json::json!({
+        "deleted": true,
+        "id": id
+    }))))
 }
 
 pub async fn start_database(
     Path(id): Path<String>,
     State(state): State<AppState>,
-) -> Json<ApiResponse<DatabaseInstance>> {
-    let mut db = state.databases.lock().unwrap();
-    
-    if let Some(instance) = db.iter_mut().find(|d| d.id == id) {
-        if instance.status == DatabaseStatus::Running {
-            return Json(ApiResponse::error(format!("Database {} is already running", id)));
-        }
-        
-        instance.status = DatabaseStatus::Starting;
-        let name = instance.name.clone();
-        drop(db);
-
-        let databases = state.databases.clone();
-        let instance_id = id.clone();
-        tokio::spawn(async move {
-            tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-            let mut db = databases.lock().unwrap();
-            if let Some(d) = db.iter_mut().find(|d| d.id == instance_id) {
-                d.status = DatabaseStatus::Running;
-                info!("Started database {}", name);
+) -> Result<Json<ApiResponse<DatabaseInstance>>, StatusCode> {
+    // Lookup instance
+    let lookup = {
+        let mut db = state.databases.lock().unwrap();
+        match db.iter_mut().find(|d| d.id == id) {
+            Some(instance) => {
+                let already_running = instance.status == DatabaseStatus::Running;
+                let container_id = instance.container_id.clone();
+                let name = instance.name.clone();
+                Ok((already_running, container_id, name))
             }
-        });
+            None => Err(format!("Database {} not found", id)),
+        }
+    };
 
-        let db = state.databases.lock().unwrap();
-        let instance = db.iter().find(|d| d.id == id).unwrap().clone();
-        Json(ApiResponse::success(instance))
+    let (already_running, container_id, name) = match lookup {
+        Ok(t) => t,
+        Err(msg) => return Ok(Json(ApiResponse::error(msg))),
+    };
+
+    if already_running {
+        return Ok(Json(ApiResponse::error(format!(
+            "Database {} is already running",
+            id
+        ))));
+    }
+
+    if let Some(cid) = container_id {
+        match state.docker.start_container(&cid).await {
+            Ok(_) => {
+                // Update status
+                let mut db = state.databases.lock().unwrap();
+                if let Some(instance) = db.iter_mut().find(|d| d.id == id) {
+                    instance.status = DatabaseStatus::Running;
+                    info!("Started database {}", name);
+                    let inst = instance.clone();
+                    Ok(Json(ApiResponse::success(inst)))
+                } else {
+                    Ok(Json(ApiResponse::error(format!(
+                        "Database {} not found",
+                        id
+                    ))))
+                }
+            }
+            Err(e) => Ok(Json(ApiResponse::error(format!("Start failed: {}", e)))),
+        }
     } else {
-        Json(ApiResponse::error(format!("Database {} not found", id)))
+        Ok(Json(ApiResponse::error(format!(
+            "Database {} has no container",
+            id
+        ))))
     }
 }
 
 pub async fn stop_database(
     Path(id): Path<String>,
     State(state): State<AppState>,
-) -> Json<ApiResponse<DatabaseInstance>> {
-    let mut db = state.databases.lock().unwrap();
-    
-    if let Some(instance) = db.iter_mut().find(|d| d.id == id) {
-        if instance.status == DatabaseStatus::Stopped {
-            return Json(ApiResponse::error(format!("Database {} is already stopped", id)));
+) -> Result<Json<ApiResponse<DatabaseInstance>>, StatusCode> {
+    // Lookup instance
+    let lookup = {
+        let mut db = state.databases.lock().unwrap();
+        match db.iter_mut().find(|d| d.id == id) {
+            Some(instance) => {
+                let already_stopped = instance.status == DatabaseStatus::Stopped;
+                let container_id = instance.container_id.clone();
+                let name = instance.name.clone();
+                Ok((already_stopped, container_id, name))
+            }
+            None => Err(format!("Database {} not found", id)),
         }
-        
-        instance.status = DatabaseStatus::Stopped;
-        info!("Stopped database {}", instance.name);
-        Json(ApiResponse::success(instance.clone()))
+    };
+
+    let (already_stopped, container_id, name) = match lookup {
+        Ok(t) => t,
+        Err(msg) => return Ok(Json(ApiResponse::error(msg))),
+    };
+
+    if already_stopped {
+        return Ok(Json(ApiResponse::error(format!(
+            "Database {} is already stopped",
+            id
+        ))));
+    }
+
+    if let Some(cid) = container_id {
+        match state.docker.stop_container(&cid).await {
+            Ok(_) => {
+                // Update status
+                let mut db = state.databases.lock().unwrap();
+                if let Some(instance) = db.iter_mut().find(|d| d.id == id) {
+                    instance.status = DatabaseStatus::Stopped;
+                    info!("Stopped database {}", name);
+                    let inst = instance.clone();
+                    Ok(Json(ApiResponse::success(inst)))
+                } else {
+                    Ok(Json(ApiResponse::error(format!(
+                        "Database {} not found",
+                        id
+                    ))))
+                }
+            }
+            Err(e) => Ok(Json(ApiResponse::error(format!("Stop failed: {}", e)))),
+        }
     } else {
-        Json(ApiResponse::error(format!("Database {} not found", id)))
+        Ok(Json(ApiResponse::error(format!(
+            "Database {} has no container",
+            id
+        ))))
     }
 }

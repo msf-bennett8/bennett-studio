@@ -22,6 +22,9 @@ pub struct DatabaseInstance {
     pub created_at: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub container_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub volume_name: Option<String>,
+    pub env_vars: Vec<(String, String)>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

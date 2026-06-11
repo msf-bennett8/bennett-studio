@@ -7,4 +7,5 @@ pub struct ConnectionConfig {
     pub database: String,
     pub username: String,
     pub password: String,
+    pub ssl_mode: Option<String>,
 }
