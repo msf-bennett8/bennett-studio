@@ -137,4 +137,26 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(req),
     }),
+
+  getTableColumns: (id: string, table: string) =>
+    fetchApi<{
+      name: string;
+      data_type: string;
+      nullable: boolean;
+      has_default: boolean;
+      is_primary_key: boolean;
+      column_default: string | null;
+    }[]>(`/api/databases/${id}/columns`, {
+      method: 'POST',
+      body: JSON.stringify({ table }),
+    }),
+
+  insertRow: (id: string, req: {
+    table: string;
+    data: Record<string, any>;
+  }) =>
+    fetchApi<{ inserted: boolean }>(`/api/databases/${id}/rows/insert`, {
+      method: 'POST',
+      body: JSON.stringify(req),
+    }),
 };

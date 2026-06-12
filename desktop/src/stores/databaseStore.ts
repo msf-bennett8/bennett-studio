@@ -35,6 +35,7 @@ interface DatabaseState {
   }) => Promise<void>;
   updateRow: (dbId: string, table: string, primaryKey: any, primaryKeyColumn: string, data: Record<string, any>) => Promise<void>;
   deleteRow: (dbId: string, table: string, primaryKey: any, primaryKeyColumn: string) => Promise<void>;
+  insertRow: (dbId: string, table: string, data: Record<string, any>) => Promise<void>;
   clearError: () => void;
   addLog: (message: string) => void;
 }
@@ -171,6 +172,19 @@ export const useDatabaseStore = create<DatabaseState>((set, get) => ({
     } catch (err) {
       set({
         error: err instanceof Error ? err.message : 'Failed to delete row',
+        loading: false,
+      });
+    }
+  },
+
+  insertRow: async (dbId: string, table: string, data: Record<string, any>) => {
+    set({ loading: true, error: null });
+    try {
+      await api.insertRow(dbId, { table, data });
+      set({ loading: false });
+    } catch (err) {
+      set({
+        error: err instanceof Error ? err.message : 'Failed to insert row',
         loading: false,
       });
     }

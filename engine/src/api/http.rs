@@ -617,6 +617,160 @@ pub async fn delete_row(
     result
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ColumnMetadata {
+    pub name: String,
+    pub data_type: String,
+    pub nullable: bool,
+    pub has_default: bool,
+    pub is_primary_key: bool,
+    pub column_default: Option<String>,
+}
+
+pub async fn get_table_columns(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+    Json(req): Json<TableDataRequest>,
+) -> Json<ApiResponse<Vec<ColumnMetadata>>> {
+    let instance = {
+        let db = state.databases.lock().unwrap();
+        match db.iter().find(|d| d.id == id).cloned() {
+            Some(i) => i,
+            None => return Json(ApiResponse::error(format!("Database {} not found", id))),
+        }
+    };
+
+    {
+        let mut conn = state.connections.lock().await;
+        if !conn.is_connected(&id) {
+            if let Err(e) = conn.connect(&instance).await {
+                return Json(ApiResponse::error(format!("Connection failed: {}", e)));
+            }
+        }
+    }
+
+    let sql = if instance.db_type == "mysql" || instance.db_type == "mariadb" {
+        format!(
+            "SELECT column_name, data_type, is_nullable, column_default, extra 
+             FROM information_schema.columns 
+             WHERE table_schema = DATABASE() AND table_name = '{}' 
+             ORDER BY ordinal_position",
+            req.table
+        )
+    } else {
+        format!(
+            "SELECT column_name, data_type, is_nullable, column_default, 
+             CASE WHEN column_default IS NOT NULL THEN true ELSE false END as has_default
+             FROM information_schema.columns 
+             WHERE table_schema = 'public' AND table_name = '{}' 
+             ORDER BY ordinal_position",
+            req.table
+        )
+    };
+
+    let result = {
+        let conn = state.connections.lock().await;
+        match conn.execute(&id, &sql).await {
+            Ok(r) => {
+                let columns: Vec<ColumnMetadata> = r.rows.iter().map(|row| {
+                    let name = row.get(0).and_then(|v| v.as_str()).unwrap_or("").to_string();
+                    let data_type = row.get(1).and_then(|v| v.as_str()).unwrap_or("").to_string();
+                    let nullable = row.get(2).and_then(|v| v.as_str()).map(|s| s == "YES").unwrap_or(false);
+                    let has_default = row.get(3).map(|v| !v.is_null()).unwrap_or(false);
+                    let column_default = row.get(3).and_then(|v| v.as_str()).map(|s| s.to_string());
+                    
+                    // Detect PK: usually first column with sequence or named 'id'
+                    let is_pk = name == "user_id" || name == "id" || 
+                        column_default.as_ref().map(|d| d.contains("nextval")).unwrap_or(false);
+
+                    ColumnMetadata {
+                        name,
+                        data_type,
+                        nullable,
+                        has_default,
+                        is_primary_key: is_pk,
+                        column_default,
+                    }
+                }).collect();
+                Json(ApiResponse::success(columns))
+            }
+            Err(e) => Json(ApiResponse::error(format!("Failed to get columns: {}", e))),
+        }
+    };
+
+    result
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct InsertRowRequest {
+    pub table: String,
+    pub data: std::collections::HashMap<String, serde_json::Value>,
+}
+
+pub async fn insert_row(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+    Json(req): Json<InsertRowRequest>,
+) -> Json<ApiResponse<serde_json::Value>> {
+    let instance = {
+        let db = state.databases.lock().unwrap();
+        match db.iter().find(|d| d.id == id).cloned() {
+            Some(i) => i,
+            None => return Json(ApiResponse::error(format!("Database {} not found", id))),
+        }
+    };
+
+    {
+        let mut conn = state.connections.lock().await;
+        if !conn.is_connected(&id) {
+            if let Err(e) = conn.connect(&instance).await {
+                return Json(ApiResponse::error(format!("Connection failed: {}", e)));
+            }
+        }
+    }
+
+    if req.data.is_empty() {
+        return Json(ApiResponse::error("No data provided for insert".to_string()));
+    }
+
+    let columns: Vec<String> = req.data.keys().cloned().collect();
+    let values: Vec<String> = req.data.values().map(|val| {
+        match val {
+            serde_json::Value::Null => "NULL".to_string(),
+            serde_json::Value::Bool(b) => b.to_string(),
+            serde_json::Value::Number(n) => n.to_string(),
+            serde_json::Value::String(s) => format!("'{}'", s.replace("'", "''")),
+            _ => format!("'{}'", val.to_string().replace("'", "''")),
+        }
+    }).collect();
+
+    let sql = if instance.db_type == "mysql" || instance.db_type == "mariadb" {
+        format!(
+            "INSERT INTO `{}` ({}) VALUES ({})",
+            req.table,
+            columns.iter().map(|c| format!("`{}`", c)).collect::<Vec<_>>().join(", "),
+            values.join(", ")
+        )
+    } else {
+        format!(
+            "INSERT INTO \"{}\" ({}) VALUES ({})",
+            req.table,
+            columns.iter().map(|c| format!("\"{}\"", c)).collect::<Vec<_>>().join(", "),
+            values.join(", ")
+        )
+    };
+
+    let result = {
+        let conn = state.connections.lock().await;
+        match conn.execute(&id, &sql).await {
+            Ok(_) => Json(ApiResponse::success(serde_json::json!({ "inserted": true }))),
+            Err(e) => Json(ApiResponse::error(format!("Insert failed: {}", e))),
+        }
+    };
+
+    result
+}
+
 pub async fn get_schema(
     Path(id): Path<String>,
     State(state): State<AppState>,

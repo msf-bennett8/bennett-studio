@@ -24,6 +24,8 @@ pub fn routes() -> Router<AppState> {
         .route("/api/databases/:id/data", post(http::get_table_data))
         .route("/api/databases/:id/rows/update", post(http::update_row))
         .route("/api/databases/:id/rows/delete", post(http::delete_row))
+        .route("/api/databases/:id/columns", post(http::get_table_columns))
+        .route("/api/databases/:id/rows/insert", post(http::insert_row))
         .route("/api/databases/:id/ws", get(websocket::ws_handler))
         .route("/api/health", get(http::health_check))
 }
