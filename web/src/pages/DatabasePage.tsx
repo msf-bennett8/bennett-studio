@@ -107,7 +107,7 @@ export function DatabasePage() {
                       BnT
                     </span>
                   )}
-                  {db.source === 'local' && (
+                  {(db.source === 'local' || db.is_discovered) && (
                     <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ backgroundColor: 'var(--accentInfo)', color: 'var(--textInverse)' }}>
                       Local
                     </span>

@@ -72,9 +72,19 @@ impl ConnectionManager {
                 DatabasePool::Postgres(pool)
             }
             "mysql" | "mariadb" => {
+                // For discovered local DBs with port 0 (not running), skip connection
+                if instance.port == 0 {
+                    return Err(sqlx::Error::Configuration(
+                        "Database is not running — start the service first".into(),
+                    ));
+                }
+                // Use custom credentials if provided in env_vars, otherwise default
+                let username = instance.env_vars.iter().find(|(k, _)| k == "username").map(|(_, v)| v.clone()).unwrap_or_else(|| "bennett".to_string());
+                let password = instance.env_vars.iter().find(|(k, _)| k == "password").map(|(_, v)| v.clone()).unwrap_or_else(|| "bennett_secret".to_string());
+                let database = instance.env_vars.iter().find(|(k, _)| k == "database").map(|(_, v)| v.clone()).unwrap_or_else(|| "bennett".to_string());
                 let url = format!(
-                    "mysql://bennett:bennett_secret@localhost:{}/bennett",
-                    instance.port
+                    "mysql://{}:{}@localhost:{}/{}",
+                    username, password, instance.port, database
                 );
                 let pool = sqlx::mysql::MySqlPoolOptions::new()
                     .max_connections(5)

@@ -21,6 +21,7 @@ export interface DatabaseInstance {
   volume_name?: string;
   env_vars?: [string, string][];
   source?: DatabaseSource;
+  is_discovered?: boolean;
 }
 
 export interface CreateDatabaseRequest {

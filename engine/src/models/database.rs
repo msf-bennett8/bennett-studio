@@ -40,6 +40,8 @@ pub struct DatabaseInstance {
     pub env_vars: Vec<(String, String)>,
     #[serde(default)]
     pub source: DatabaseSource,
+    #[serde(default)]
+    pub is_discovered: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]

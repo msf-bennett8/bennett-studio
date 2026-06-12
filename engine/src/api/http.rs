@@ -160,6 +160,7 @@ pub async fn create_database(
         volume_name: if req.db_type == "sqlite" { None } else { Some(volume_name.clone()) },
         env_vars: Vec::new(),
         source: DatabaseSource::Bennett,
+        is_discovered: false,
     };
 
     info!(
@@ -430,14 +431,39 @@ pub async fn discover_local_databases(
     State(state): State<AppState>,
 ) -> Json<ApiResponse<Vec<DatabaseInstance>>> {
     let scanner = LocalScanner::new();
-    let discovered = scanner.scan().await;
+    let existing = {
+        let db = state.databases.lock().unwrap();
+        db.clone()
+    };
+    let discovered = scanner.scan(&existing).await;
 
     let mut db = state.databases.lock().unwrap();
     let mut added = Vec::new();
 
     for disc in discovered {
         let instance = scanner.to_instance(&disc);
-        // Avoid duplicates
+        
+        // If this port already has a Bennett DB, mark it as discovered instead of duplicating
+        if instance.port != 0 {
+            if let Some(existing) = db.iter_mut().find(|d| d.port == instance.port && d.source == DatabaseSource::Bennett) {
+                existing.is_discovered = true;
+                info!("Marked Bennett database {} on port {} as also discovered locally", existing.name, existing.port);
+                added.push(existing.clone());
+                continue;
+            }
+        }
+        
+        // Check for filesystem-discovered DBs that might match existing by name
+        if instance.port == 0 {
+            if let Some(existing) = db.iter_mut().find(|d| d.name == instance.name && d.source == DatabaseSource::Bennett) {
+                existing.is_discovered = true;
+                info!("Marked Bennett database {} (filesystem match) as also discovered", existing.name);
+                added.push(existing.clone());
+                continue;
+            }
+        }
+        
+        // New local-only database
         if !db.iter().any(|d| d.id == instance.id) {
             info!("Adding discovered local database: {} on port {}", instance.name, instance.port);
             db.push(instance.clone());

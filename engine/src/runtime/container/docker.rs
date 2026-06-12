@@ -291,6 +291,7 @@ impl DockerRuntime {
                 volume_name: None,
                 env_vars: Vec::new(),
                 source: crate::models::database::DatabaseSource::Bennett,
+                is_discovered: false,
             });
         }
 
