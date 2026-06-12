@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { api, DatabaseInstance, CreateDatabaseRequest } from '../services/api';
+import { api, DatabaseInstance, CreateDatabaseRequest, EnvFileSuggestion } from '../services/api';
 
 interface DatabaseState {
   databases: DatabaseInstance[];
@@ -17,6 +17,8 @@ interface DatabaseState {
   tableDataLoading: boolean;
   editingRow: any | null;
   logs: string[];
+  unlockedDatabases: Set<string>;
+  envSuggestions: Record<string, EnvFileSuggestion[]>;
 
   // Actions
   fetchDatabases: () => Promise<void>;
@@ -25,6 +27,9 @@ interface DatabaseState {
   deleteDatabase: (id: string) => Promise<void>;
   startDatabase: (id: string) => Promise<void>;
   stopDatabase: (id: string) => Promise<void>;
+  unlockDatabase: (id: string, username: string, password: string, database: string) => Promise<boolean>;
+  getDatabaseStatus: (id: string) => Promise<void>;
+  scanEnvFiles: (id: string) => Promise<void>;
   selectDatabase: (db: DatabaseInstance | null) => void;
   selectTable: (table: string | null) => void;
   setEditingRow: (row: any | null) => void;
@@ -53,6 +58,8 @@ export const useDatabaseStore = create<DatabaseState>((set, get) => ({
   tableDataLoading: false,
   editingRow: null,
   logs: [],
+  unlockedDatabases: new Set(),
+  envSuggestions: {},
 
   fetchDatabases: async () => {
     set({ loading: true, error: null });
@@ -184,6 +191,52 @@ export const useDatabaseStore = create<DatabaseState>((set, get) => ({
         error: err instanceof Error ? err.message : 'Failed to insert row',
         loading: false,
       });
+    }
+  },
+
+  unlockDatabase: async (id: string, username: string, password: string, database: string) => {
+    set({ loading: true, error: null });
+    try {
+      const result = await api.unlockDatabase(id, { username, password, database });
+      if (result.is_unlocked) {
+        set(state => ({
+          unlockedDatabases: new Set([...state.unlockedDatabases, id]),
+          loading: false,
+        }));
+        await get().fetchDatabases();
+        return true;
+      } else {
+        set({ error: 'Unlock failed', loading: false });
+        return false;
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to unlock database';
+      set({ error: msg, loading: false });
+      return false;
+    }
+  },
+
+  getDatabaseStatus: async (id: string) => {
+    try {
+      const status = await api.getDatabaseStatus(id);
+      if (status.is_unlocked) {
+        set(state => ({
+          unlockedDatabases: new Set([...state.unlockedDatabases, id]),
+        }));
+      }
+    } catch (err) {
+      // Silently fail
+    }
+  },
+
+  scanEnvFiles: async (id: string) => {
+    try {
+      const suggestions = await api.scanEnvFiles(id);
+      set(state => ({
+        envSuggestions: { ...state.envSuggestions, [id]: suggestions },
+      }));
+    } catch (err) {
+      // Silently fail
     }
   },
 

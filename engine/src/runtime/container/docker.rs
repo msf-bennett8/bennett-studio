@@ -292,6 +292,8 @@ impl DockerRuntime {
                 env_vars: Vec::new(),
                 source: crate::models::database::DatabaseSource::Bennett,
                 is_discovered: false,
+                credentials: None,
+                is_unlocked: false,
             });
         }
 

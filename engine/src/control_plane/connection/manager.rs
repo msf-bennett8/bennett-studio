@@ -6,7 +6,10 @@ use crate::models::database::DatabaseInstance;
 
 pub struct ConnectionManager {
     pools: HashMap<String, DatabasePool>,
+    credentials: HashMap<String, DatabaseCredentials>,
 }
+
+pub use crate::models::database::DatabaseCredentials;
 
 pub enum DatabasePool {
     Postgres(sqlx::PgPool),
@@ -18,6 +21,7 @@ impl ConnectionManager {
     pub fn new() -> Self {
         Self {
             pools: HashMap::new(),
+            credentials: HashMap::new(),
         }
     }
 
@@ -78,10 +82,17 @@ impl ConnectionManager {
                         "Database is not running — start the service first".into(),
                     ));
                 }
-                // Use custom credentials if provided in env_vars, otherwise default
-                let username = instance.env_vars.iter().find(|(k, _)| k == "username").map(|(_, v)| v.clone()).unwrap_or_else(|| "bennett".to_string());
-                let password = instance.env_vars.iter().find(|(k, _)| k == "password").map(|(_, v)| v.clone()).unwrap_or_else(|| "bennett_secret".to_string());
-                let database = instance.env_vars.iter().find(|(k, _)| k == "database").map(|(_, v)| v.clone()).unwrap_or_else(|| "bennett".to_string());
+                // Priority: 1) stored credentials, 2) instance credentials, 3) env_vars, 4) defaults
+                let (username, password, database) = if let Some(creds) = self.credentials.get(&instance.id) {
+                    (creds.username.clone(), creds.password.clone(), creds.database.clone())
+                } else if let Some(creds) = &instance.credentials {
+                    (creds.username.clone(), creds.password.clone(), creds.database.clone())
+                } else {
+                    let username = instance.env_vars.iter().find(|(k, _)| k == "username").map(|(_, v)| v.clone()).unwrap_or_else(|| "bennett".to_string());
+                    let password = instance.env_vars.iter().find(|(k, _)| k == "password").map(|(_, v)| v.clone()).unwrap_or_else(|| "bennett_secret".to_string());
+                    let database = instance.env_vars.iter().find(|(k, _)| k == "database").map(|(_, v)| v.clone()).unwrap_or_else(|| "bennett".to_string());
+                    (username, password, database)
+                };
                 let url = format!(
                     "mysql://{}:{}@localhost:{}/{}",
                     username, password, instance.port, database
@@ -129,6 +140,22 @@ impl ConnectionManager {
             }
             info!("Disconnected from {}", id);
         }
+    }
+
+    pub fn store_credentials(&mut self, id: &str, creds: DatabaseCredentials) {
+        self.credentials.insert(id.to_string(), creds);
+    }
+
+    pub fn clear_credentials(&mut self, id: &str) {
+        self.credentials.remove(id);
+    }
+
+    pub fn has_credentials(&self, id: &str) -> bool {
+        self.credentials.contains_key(id)
+    }
+
+    pub fn get_credentials(&self, id: &str) -> Option<&DatabaseCredentials> {
+        self.credentials.get(id)
     }
 
     pub async fn execute(

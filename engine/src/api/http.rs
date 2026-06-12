@@ -8,7 +8,7 @@ use tracing::info;
 use crate::AppState;
 use crate::models::database::{
     ApiResponse, CreateDatabaseRequest, DatabaseInstance, DatabaseStatus, UpdateDatabaseRequest,
-    DatabaseSource,
+    DatabaseSource, UnlockDatabaseRequest, DatabaseStatusResponse, DatabaseCredentials,
 };
 use crate::runtime::discovery::scanner::LocalScanner;
 
@@ -161,6 +161,8 @@ pub async fn create_database(
         env_vars: Vec::new(),
         source: DatabaseSource::Bennett,
         is_discovered: false,
+        credentials: None,
+        is_unlocked: false,
     };
 
     info!(
@@ -235,7 +237,7 @@ pub async fn update_database(
             if let Err(e) = validate_db_name(&name) {
                 return Ok(Json(ApiResponse::error(e)));
             }
-            instance.name = name;
+            instance.name = name.to_string();
         }
         if let Some(status) = req.status {
             instance.status = status;
@@ -421,6 +423,182 @@ pub async fn stop_database(
             id
         ))))
     }
+}
+
+// ============================================================================
+// Unlock / Credentials xxxx
+// ============================================================================
+
+pub async fn unlock_database(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+    Json(req): Json<UnlockDatabaseRequest>,
+) -> Json<ApiResponse<DatabaseStatusResponse>> {
+    let instance = {
+        let db = state.databases.lock().unwrap();
+        match db.iter().find(|d| d.id == id).cloned() {
+            Some(i) => i,
+            None => return Json(ApiResponse::error(format!("Database {} not found", id))),
+        }
+    };
+
+    // Test connection with provided credentials
+    {
+        let mut conn = state.connections.lock().await;
+        // Clear any existing stale credentials first
+        conn.clear_credentials(&id);
+        
+        let creds = DatabaseCredentials {
+            username: req.username.clone(),
+            password: req.password.clone(),
+            database: req.database.clone(),
+        };
+        conn.store_credentials(&id, creds);
+        
+        // Test the connection
+        if conn.is_connected(&id) {
+            conn.remove_stale(&id).await;
+        }
+        
+        match conn.connect(&instance).await {
+            Ok(_) => {
+                // Connection successful — update instance state
+                let mut db = state.databases.lock().unwrap();
+                if let Some(inst) = db.iter_mut().find(|d| d.id == id) {
+                    inst.is_unlocked = true;
+                    inst.credentials = Some(DatabaseCredentials {
+                        username: req.username,
+                        password: req.password,
+                        database: req.database,
+                    });
+                }
+                
+                Json(ApiResponse::success(DatabaseStatusResponse {
+                    id: id.clone(),
+                    is_connected: true,
+                    is_unlocked: true,
+                    has_credentials: true,
+                    last_error: None,
+                }))
+            }
+            Err(e) => {
+                // Connection failed — clear credentials
+                conn.clear_credentials(&id);
+                Json(ApiResponse::error(format!("Authentication failed: {}", e)))
+            }
+        }
+    }
+}
+
+pub async fn get_database_status(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+) -> Json<ApiResponse<DatabaseStatusResponse>> {
+    let instance = {
+        let db = state.databases.lock().unwrap();
+        match db.iter().find(|d| d.id == id).cloned() {
+            Some(i) => i,
+            None => return Json(ApiResponse::error(format!("Database {} not found", id))),
+        }
+    };
+
+    let is_connected = {
+        let conn = state.connections.lock().await;
+        conn.is_connected(&id) && conn.health_check(&id).await
+    };
+
+    let has_credentials = instance.credentials.is_some() || {
+        let conn = state.connections.lock().await;
+        conn.has_credentials(&id)
+    };
+
+    Json(ApiResponse::success(DatabaseStatusResponse {
+        id: id.clone(),
+        is_connected,
+        is_unlocked: instance.is_unlocked,
+        has_credentials,
+        last_error: None,
+    }))
+}
+
+// ============================================================================
+// .env File Scanner for Auto-Suggest
+// ============================================================================
+
+use std::path::PathBuf;
+
+pub async fn scan_env_files(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+) -> Json<ApiResponse<Vec<serde_json::Value>>> {
+    let instance = {
+        let db = state.databases.lock().unwrap();
+        match db.iter().find(|d| d.id == id).cloned() {
+            Some(i) => i,
+            None => return Json(ApiResponse::error(format!("Database {} not found", id))),
+        }
+    };
+
+    let mut suggestions = Vec::new();
+    
+    // Common locations to scan for .env files
+    let scan_paths = [
+        std::env::var("HOME").map(|h| PathBuf::from(h)).unwrap_or_else(|_| PathBuf::from(".")),
+    ];
+    
+    // Subdirectories to check
+    let subdirs = ["oshocks", "oshocks/backend", "backend", ".", ".."];
+    
+    let home = scan_paths[0].clone();
+    
+    for subdir in &subdirs {
+        let env_path = home.join(subdir).join(".env");
+        if env_path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&env_path) {
+                let mut username = None;
+                let mut password = None;
+                let mut database = None;
+                let mut host = None;
+                let mut port = None;
+                
+                for line in content.lines() {
+                    let line = line.trim();
+                    if line.starts_with("DB_USERNAME=") || line.starts_with("DB_USER=") {
+                        username = line.splitn(2, '=').nth(1).map(|s| s.trim().trim_matches('"').trim_matches('\''));
+                    }
+                    if line.starts_with("DB_PASSWORD=") || line.starts_with("DB_PASS=") {
+                        password = line.splitn(2, '=').nth(1).map(|s| s.trim().trim_matches('"').trim_matches('\''));
+                    }
+                    if line.starts_with("DB_DATABASE=") || line.starts_with("DB_NAME=") || line.starts_with("DB_DB=") {
+                        database = line.splitn(2, '=').nth(1).map(|s| s.trim().trim_matches('"').trim_matches('\''));
+                    }
+                    if line.starts_with("DB_HOST=") {
+                        host = line.splitn(2, '=').nth(1).map(|s| s.trim().trim_matches('"').trim_matches('\''));
+                    }
+                    if line.starts_with("DB_PORT=") {
+                        port = line.splitn(2, '=').nth(1).map(|s| s.trim().trim_matches('"').trim_matches('\''));
+                    }
+                }
+                
+                // Only suggest if port matches or host is localhost/127.0.0.1
+                let port_matches = port.map(|p| p == instance.port.to_string()).unwrap_or(true);
+                let host_matches = host.map(|h| h == "localhost" || h == "127.0.0.1").unwrap_or(true);
+                
+                if port_matches && host_matches && (username.is_some() || database.is_some()) {
+                    suggestions.push(serde_json::json!({
+                        "source": env_path.to_string_lossy(),
+                        "username": username,
+                        "password": password,
+                        "database": database,
+                        "host": host,
+                        "port": port,
+                    }));
+                }
+            }
+        }
+    }
+
+    Json(ApiResponse::success(suggestions))
 }
 
 // ============================================================================

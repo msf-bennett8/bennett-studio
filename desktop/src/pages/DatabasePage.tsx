@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
-import { Database, Plus, Play, Square, Trash2, RefreshCw, CheckCircle, XCircle, Clock, AlertCircle, FolderOpen, ScanLine } from 'lucide-react';
+import { Database, Plus, Play, Square, Trash2, RefreshCw, CheckCircle, XCircle, Clock, AlertCircle, FolderOpen, ScanLine, Lock, Unlock } from 'lucide-react';
 import { useDatabaseStore } from '../stores/databaseStore';
+import { UnlockDatabaseModal } from '../components/database/UnlockDatabaseModal';
 
 const dbTypes = [
   { id: 'postgres', name: 'PostgreSQL', versions: ['16.2', '15.6', '14.11'] },
@@ -12,15 +13,16 @@ const dbTypes = [
 
 export function DatabasePage() {
   const {
-    databases, loading, error, logs, clearError,
+    databases, loading, error, logs, clearError, unlockedDatabases,
     fetchDatabases, discoverLocalDatabases, createDatabase, deleteDatabase,
-    startDatabase, stopDatabase,
+    startDatabase, stopDatabase, unlockDatabase, scanEnvFiles,
   } = useDatabaseStore();
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [selectedType, setSelectedType] = useState('postgres');
   const [selectedVersion, setSelectedVersion] = useState('16.2');
   const [dbName, setDbName] = useState('');
+  const [showUnlockModal, setShowUnlockModal] = useState<string | null>(null);
 
   useEffect(() => {
     fetchDatabases();
@@ -47,6 +49,18 @@ export function DatabasePage() {
 
   const handleDelete = async (id: string) => {
     await deleteDatabase(id);
+  };
+
+  const handleUnlock = async (id: string, username: string, password: string, database: string) => {
+    const success = await unlockDatabase(id, username, password, database);
+    if (success) {
+      setShowUnlockModal(null);
+    }
+  };
+
+  const handleOpenUnlock = (id: string) => {
+    scanEnvFiles(id);
+    setShowUnlockModal(id);
   };
 
   const handleToggle = async (id: string, status: string) => {
@@ -121,22 +135,42 @@ export function DatabasePage() {
                       Local
                     </span>
                   )}
+                  {(db.source === 'local' || db.is_discovered) && !unlockedDatabases.has(db.id) && (
+                    <span className="text-xs px-2 py-0.5 rounded-full font-medium flex items-center gap-1" style={{ backgroundColor: 'var(--accentWarning)', color: 'var(--textInverse)' }}>
+                      <Lock size={10} /> Locked
+                    </span>
+                  )}
+                  {(db.source === 'local' || db.is_discovered) && unlockedDatabases.has(db.id) && (
+                    <span className="text-xs px-2 py-0.5 rounded-full font-medium flex items-center gap-1" style={{ backgroundColor: 'var(--accentSuccess)', color: 'var(--textInverse)' }}>
+                      <Unlock size={10} /> Unlocked
+                    </span>
+                  )}
                   <span className="text-xs" style={{ color: 'var(--textMuted)' }}>port:{db.port}</span>
                   <span className="text-xs" style={{ color: 'var(--textMuted)' }}>{db.size}</span>
                   {db.container_id && (
                     <span className="text-xs font-mono" style={{ color: 'var(--textMuted)' }}>{db.container_id}</span>
                   )}
-                </div>
+                  </div>
                 </div>
               </div>
               <div className="flex items-center gap-3">
+                {(db.source === 'local' || db.is_discovered) && !unlockedDatabases.has(db.id) && (
+                  <button
+                    onClick={() => handleOpenUnlock(db.id)}
+                    className="p-2 rounded-lg transition-all"
+                    style={{ backgroundColor: 'var(--accentWarning)', color: 'var(--textInverse)' }}
+                    title="Unlock database"
+                  >
+                    <Lock size={16} />
+                  </button>
+                )}
                 <div className="flex items-center gap-2 px-3 py-1 rounded-full" style={{
-                  backgroundColor: db.status === 'running' ? 'rgba(0,212,170,0.1)' : 
+                  backgroundColor: db.status === 'running' ? 'rgba(0,212,170,0.1)' :
                     db.status === 'starting' ? 'rgba(255,170,0,0.1)' : 'rgba(255,68,68,0.1)'
                 }}>
                   {getStatusIcon(db.status)}
                   <span className="text-xs font-medium" style={{
-                    color: db.status === 'running' ? 'var(--accentSuccess)' : 
+                    color: db.status === 'running' ? 'var(--accentSuccess)' :
                       db.status === 'starting' ? 'var(--accentWarning)' : 'var(--accentError)'
                   }}>
                     {db.status}
@@ -264,9 +298,17 @@ export function DatabasePage() {
             </div>
           </div>
         )}
+        {/* Unlock Modal */}
+        {showUnlockModal && (
+          <UnlockDatabaseModal
+            databaseId={showUnlockModal}
+            databaseName={databases.find(d => d.id === showUnlockModal)?.name || ''}
+            onClose={() => setShowUnlockModal(null)}
+            onUnlock={handleUnlock}
+            envSuggestions={useDatabaseStore.getState().envSuggestions[showUnlockModal] || []}
+          />
+        )}
       </div>
-
-      {/* Logs Panel */}
       <div className="w-80 border-l flex flex-col" style={{ backgroundColor: 'var(--bgSecondary)', borderColor: 'var(--borderDefault)' }}>
         <div className="p-4 border-b flex items-center justify-between" style={{ borderColor: 'var(--borderDefault)' }}>
           <h3 className="font-semibold text-sm" style={{ color: 'var(--textPrimary)' }}>Engine Logs</h3>

@@ -202,6 +202,8 @@ impl LocalScanner {
             env_vars: Vec::new(),
             source: DatabaseSource::Local,
             is_discovered: true,
+            credentials: None,
+            is_unlocked: false,
         }
     }
 }

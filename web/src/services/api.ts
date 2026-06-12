@@ -1,7 +1,7 @@
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
-import { DatabaseInstance, CreateDatabaseRequest, DatabaseSource } from '@bennett/shared';
-export type { DatabaseInstance, CreateDatabaseRequest, DatabaseSource };
+import { DatabaseInstance, CreateDatabaseRequest, DatabaseSource, DatabaseStatusResponse, EnvFileSuggestion } from '@bennett/shared';
+export type { DatabaseInstance, CreateDatabaseRequest, DatabaseSource, DatabaseStatusResponse, EnvFileSuggestion };
 
 export interface ApiResponse<T> {
   success: boolean;
@@ -149,4 +149,17 @@ export const api = {
     fetchApi<DatabaseInstance[]>('/api/databases/discover', {
       method: 'POST',
     }),
+
+      unlockDatabase: (id: string, req: { username: string; password: string; database: string }) =>
+    fetchApi<DatabaseStatusResponse>(`/api/databases/${id}/unlock`, {
+      method: 'POST',
+      body: JSON.stringify(req),
+    }),
+
+  getDatabaseStatus: (id: string) =>
+    fetchApi<DatabaseStatusResponse>(`/api/databases/${id}/status`),
+
+  scanEnvFiles: (id: string) =>
+    fetchApi<EnvFileSuggestion[]>(`/api/databases/${id}/env-scan`),
+
 };

@@ -8,6 +8,12 @@ export type DatabaseSource = 'bennett' | 'local';
 // Database Instance
 // ============================================================================
 
+export interface DatabaseCredentials {
+  username: string;
+  password: string;
+  database: string;
+}
+
 export interface DatabaseInstance {
   id: string;
   name: string;
@@ -22,6 +28,31 @@ export interface DatabaseInstance {
   env_vars?: [string, string][];
   source?: DatabaseSource;
   is_discovered?: boolean;
+  credentials?: DatabaseCredentials;
+  is_unlocked?: boolean;
+}
+
+export interface UnlockDatabaseRequest {
+  username: string;
+  password: string;
+  database: string;
+}
+
+export interface DatabaseStatusResponse {
+  id: string;
+  is_connected: boolean;
+  is_unlocked: boolean;
+  has_credentials: boolean;
+  last_error?: string;
+}
+
+export interface EnvFileSuggestion {
+  source: string;
+  username?: string;
+  password?: string;
+  database?: string;
+  host?: string;
+  port?: string;
 }
 
 export interface CreateDatabaseRequest {

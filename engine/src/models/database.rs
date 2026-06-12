@@ -23,6 +23,13 @@ impl Default for DatabaseSource {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DatabaseCredentials {
+    pub username: String,
+    pub password: String,
+    pub database: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DatabaseInstance {
     pub id: String,
     pub name: String,
@@ -42,6 +49,17 @@ pub struct DatabaseInstance {
     pub source: DatabaseSource,
     #[serde(default)]
     pub is_discovered: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub credentials: Option<DatabaseCredentials>,
+    #[serde(default)]
+    pub is_unlocked: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct UnlockDatabaseRequest {
+    pub username: String,
+    pub password: String,
+    pub database: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -56,6 +74,15 @@ pub struct CreateDatabaseRequest {
 pub struct UpdateDatabaseRequest {
     pub name: Option<String>,
     pub status: Option<DatabaseStatus>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DatabaseStatusResponse {
+    pub id: String,
+    pub is_connected: bool,
+    pub is_unlocked: bool,
+    pub has_credentials: bool,
+    pub last_error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
