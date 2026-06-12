@@ -12,8 +12,8 @@ echo ""
 
 # Kill zombie Vite/Tauri processes (engine handles its own port conflicts)
 echo "🧹 Cleaning up zombie Vite/Tauri processes..."
-lsof -ti:5173 | xargs kill -9 2>/dev/null
-lsof -ti:5174 | xargs kill -9 2>/dev/null
+fuser -k 5173/tcp 2>/dev/null
+fuser -k 5174/tcp 2>/dev/null
 pkill -f "vite.*port 517[34]" 2>/dev/null
 pkill -f "tauri.*dev" 2>/dev/null
 sleep 2
