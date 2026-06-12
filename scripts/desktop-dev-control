@@ -11,10 +11,16 @@ start_desktop() {
     fi
     echo "🖥️  Starting Desktop (Tauri dev) on http://localhost:5174..."
     cd "$DESKTOP_DIR" || exit 1
-    nohup npm run tauri dev > "$LOGFILE" 2>&1 &
-    echo $! > "$PIDFILE"
-    sleep 5
-    echo "🖥️  Desktop started (PID: $(cat $PIDFILE))"
+    
+    # If running in tmux, run in foreground so Tauri manages Vite properly
+    if [ -n "$TMUX" ]; then
+        npm run tauri dev
+    else
+        nohup npm run tauri dev > "$LOGFILE" 2>&1 &
+        echo $! > "$PIDFILE"
+        sleep 5
+        echo "🖥️  Desktop started (PID: $(cat $PIDFILE))"
+    fi
 }
 
 stop_desktop() {

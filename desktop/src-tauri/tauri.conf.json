@@ -1,7 +1,7 @@
 {
   "identifier": "com.bennettstudio.desktop",
   "build": {
-    "beforeDevCommand": "npx vite --host 0.0.0.0 --port 5174",
+    "beforeDevCommand": "npx vite --host 127.0.0.1 --port 5174",
     "beforeBuildCommand": "npm run build",
     "devUrl": "http://localhost:5174",
     "frontendDist": "../dist"
@@ -40,7 +40,8 @@
         "minHeight": 600,
         "center": true,
         "decorations": false,
-        "transparent": false
+        "transparent": false,
+        "visible": false
       }
     ]
   },

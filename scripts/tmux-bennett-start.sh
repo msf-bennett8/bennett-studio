@@ -3,33 +3,57 @@
 # Keep tmux pane alive while monitoring servers
 exec < /dev/null
 
-# Start services in order: Engine first (web/desktop proxy to it)
-~/studio.dev/bennett\ studio/scripts/engine-control start
-sleep 3
+PROJECT_DIR="/home/msf_bennett/studio.dev/bennett studio"
 
-~/studio.dev/bennett\ studio/scripts/web-dev-control start
+echo "=========================================="
+echo "  🚀 Starting Bennett Studio Dev Servers"
+echo "=========================================="
+echo ""
+
+# Kill zombie Vite/Tauri processes (engine handles its own port conflicts)
+echo "🧹 Cleaning up zombie Vite/Tauri processes..."
+lsof -ti:5173 | xargs kill -9 2>/dev/null
+lsof -ti:5174 | xargs kill -9 2>/dev/null
+pkill -f "vite.*port 517[34]" 2>/dev/null
+pkill -f "tauri.*dev" 2>/dev/null
 sleep 2
-
-~/studio.dev/bennett\ studio/scripts/desktop-dev-control start
-sleep 2
-
 echo ""
-echo "=========================================="
-echo "  ✅ All Bennett Studio servers started!"
-echo "=========================================="
-echo ""
-echo "  🔧 Engine:   http://localhost:${BENNETT_ENGINE_PORT:-3001}"
-echo "  🌐 Web:      http://localhost:5173"
-echo "  🖥️  Desktop:  http://localhost:5174 (Tauri window)"
-echo ""
-echo "  Press Ctrl+C to stop all and exit tmux"
-echo "=========================================="
 
-# Monitor loop - keep pane alive
-while true; do
-    if ! [ -f /tmp/bennett-engine.pid ] && ! [ -f /tmp/bennett-web.pid ] && ! [ -f /tmp/bennett-desktop.pid ]; then
-        echo "All servers stopped. Exiting..."
+# Step 1: Start Engine and wait for it to be ready
+echo "🔧 Starting Engine..."
+"$PROJECT_DIR/scripts/engine-control" start
+
+echo "⏳ Waiting for engine health check..."
+for i in {1..120}; do
+    if curl -s http://localhost:3001/api/health > /dev/null 2>&1; then
+        echo "✅ Engine ready on http://localhost:3001"
         break
     fi
-    sleep 5
+    sleep 1
+    if [ $i -eq 120 ]; then
+        echo "❌ Engine failed to start. Check /tmp/bennett-engine.log"
+        exit 1
+    fi
 done
+echo ""
+
+# Step 2: Start Web in background
+echo "🌐 Starting Web..."
+"$PROJECT_DIR/scripts/web-dev-control" start
+echo ""
+
+# Step 3: Start Desktop in FOREGROUND (Tauri manages Vite)
+echo "🖥️  Starting Desktop (Tauri will open window when ready)..."
+echo "    This may take 30-60 seconds for first compile..."
+echo ""
+cd "$PROJECT_DIR/desktop" || exit 1
+
+# Run Tauri in foreground so it can properly manage Vite lifecycle
+npm run tauri dev
+
+# When Tauri exits (window closed), stop everything
+echo ""
+echo "🛑 Desktop stopped. Cleaning up..."
+"$PROJECT_DIR/scripts/web-dev-control" stop 2>/dev/null || true
+"$PROJECT_DIR/scripts/engine-control" stop 2>/dev/null || true
+echo "✅ All services stopped."

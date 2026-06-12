@@ -1,8 +1,68 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use std::time::Duration;
+use tauri::Manager;
+
+mod commands;
+
+#[tauri::command]
+fn get_engine_status() -> Result<String, String> {
+    match reqwest::blocking::get("http://localhost:3001/api/health") {
+        Ok(resp) => {
+            if resp.status().is_success() {
+                Ok("running".to_string())
+            } else {
+                Ok("unhealthy".to_string())
+            }
+        }
+        Err(_) => Ok("stopped".to_string()),
+    }
+}
+
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_shell::init())
+        .invoke_handler(tauri::generate_handler![
+            get_engine_status,
+            commands::database::list_databases,
+            commands::database::create_database,
+            commands::database::delete_database,
+            commands::database::start_database,
+            commands::database::stop_database,
+            commands::query::execute_query,
+            commands::query::get_schema,
+            commands::query::get_table_data,
+            commands::sharing::create_share,
+            commands::sharing::revoke_share,
+            commands::system::get_system_info,
+        ])
+        .setup(|app| {
+            let app_handle = app.handle().clone();
+
+            // Show window immediately — don't block on engine
+            if let Some(window) = app_handle.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+
+            // Background engine health check
+            std::thread::spawn(move || {
+                let mut ready = false;
+                for _ in 0..30 {
+                    std::thread::sleep(Duration::from_secs(1));
+                    if let Ok(resp) = reqwest::blocking::get("http://localhost:3001/api/health") {
+                        if resp.status().is_success() {
+                            ready = true;
+                            break;
+                        }
+                    }
+                }
+                let _ = app_handle.emit("engine-status", if ready { "ready" } else { "timeout" });
+            });
+
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
