@@ -8,7 +8,70 @@ use tracing::info;
 use crate::AppState;
 use crate::models::database::{
     ApiResponse, CreateDatabaseRequest, DatabaseInstance, DatabaseStatus, UpdateDatabaseRequest,
+    DatabaseSource,
 };
+use crate::runtime::discovery::scanner::LocalScanner;
+
+// ============================================================================
+// Input Validation Helpers
+// ============================================================================
+
+fn validate_db_name(name: &str) -> Result<(), String> {
+    if name.is_empty() {
+        return Err("Database name cannot be empty".to_string());
+    }
+    if name.len() > 64 {
+        return Err("Database name too long (max 64 chars)".to_string());
+    }
+    if !name.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-') {
+        return Err("Database name must be alphanumeric, underscore, or hyphen only".to_string());
+    }
+    Ok(())
+}
+
+fn sanitize_sqlite_name(name: &str) -> String {
+    // Prevent path traversal in SQLite filenames
+    name.chars()
+        .filter(|c| c.is_alphanumeric() || *c == '_' || *c == '-')
+        .collect()
+}
+
+fn validate_filter(filter: &str) -> Result<(), String> {
+    let forbidden = [";", "--", "/*", "*/", "DROP", "DELETE", "UPDATE", "INSERT", "EXEC", "UNION"];
+    let upper = filter.to_uppercase();
+    for word in &forbidden {
+        if upper.contains(word) {
+            return Err(format!("Filter contains forbidden keyword: {}", word));
+        }
+    }
+    // Count quotes to prevent injection
+    let single_quotes = filter.chars().filter(|&c| c == '\'').count();
+    let double_quotes = filter.chars().filter(|&c| c == '"').count();
+    if single_quotes % 2 != 0 || double_quotes % 2 != 0 {
+        return Err("Unmatched quotes in filter".to_string());
+    }
+    Ok(())
+}
+
+fn validate_sql(sql: &str) -> Result<(), String> {
+    // Block multi-statement queries
+    if sql.contains(';') {
+        return Err("Multiple statements are not allowed".to_string());
+    }
+    // Block dangerous keywords at statement level
+    let upper = sql.to_uppercase();
+    let forbidden_starts = ["DROP", "TRUNCATE", "ALTER SYSTEM", "COPY", "\\COPY"];
+    for word in &forbidden_starts {
+        if upper.trim_start().starts_with(word) {
+            return Err(format!("Statement type not allowed: {}", word));
+        }
+    }
+    Ok(())
+}
+
+// ============================================================================
+// Health
+// ============================================================================
 
 pub async fn health_check() -> Json<ApiResponse<serde_json::Value>> {
     Json(ApiResponse::success(serde_json::json!({
@@ -18,6 +81,10 @@ pub async fn health_check() -> Json<ApiResponse<serde_json::Value>> {
         "docker": "connected"
     })))
 }
+
+// ============================================================================
+// Database CRUD
+// ============================================================================
 
 pub async fn list_databases(
     State(state): State<AppState>,
@@ -41,6 +108,11 @@ pub async fn create_database(
     State(state): State<AppState>,
     Json(req): Json<CreateDatabaseRequest>,
 ) -> Result<Json<ApiResponse<DatabaseInstance>>, StatusCode> {
+    // Validate name
+    if let Err(e) = validate_db_name(&req.name) {
+        return Ok(Json(ApiResponse::error(e)));
+    }
+
     {
         let db = state.databases.lock().unwrap();
         if db.iter().any(|d| d.name == req.name) {
@@ -51,13 +123,18 @@ pub async fn create_database(
         }
     }
 
-    let port = match state.ports.allocate(&req.db_type) {
-        Ok(p) => p,
-        Err(e) => {
-            return Ok(Json(ApiResponse::error(format!(
-                "Port allocation failed: {}",
-                e
-            ))))
+    // Skip port allocation for SQLite
+    let port = if req.db_type == "sqlite" {
+        0
+    } else {
+        match state.ports.allocate(&req.db_type) {
+            Ok(p) => p,
+            Err(e) => {
+                return Ok(Json(ApiResponse::error(format!(
+                    "Port allocation failed: {}",
+                    e
+                ))))
+            }
         }
     };
 
@@ -65,12 +142,16 @@ pub async fn create_database(
     let volume_name =
         crate::runtime::volume::manager::VolumeManager::generate_name(&req.db_type, &req.name);
 
-    if let Err(e) = state.volumes.create(&volume_name).await {
-        state.ports.release(port);
-        return Ok(Json(ApiResponse::error(format!(
-            "Volume creation failed: {}",
-            e
-        ))));
+    if req.db_type != "sqlite" {
+        if let Err(e) = state.volumes.create(&volume_name).await {
+            if port != 0 {
+                state.ports.release(port);
+            }
+            return Ok(Json(ApiResponse::error(format!(
+                "Volume creation failed: {}",
+                e
+            ))));
+        }
     }
 
     let instance = DatabaseInstance {
@@ -83,8 +164,9 @@ pub async fn create_database(
         size: "0 MB".to_string(),
         created_at: chrono::Local::now().format("%Y-%m-%d").to_string(),
         container_id: None,
-        volume_name: Some(volume_name.clone()),
+        volume_name: if req.db_type == "sqlite" { None } else { Some(volume_name.clone()) },
         env_vars: Vec::new(),
+        source: DatabaseSource::Bennett,
     };
 
     info!(
@@ -92,30 +174,40 @@ pub async fn create_database(
         req.name, req.db_type, req.version, port
     );
 
-    let container_id = match state.docker.create_container(&instance).await {
-        Ok(cid) => cid,
-        Err(e) => {
-            state.ports.release(port);
-            let _ = state.volumes.remove(&volume_name).await;
-            return Ok(Json(ApiResponse::error(format!(
-                "Container creation failed: {}",
-                e
-            ))));
+    let container_id = if req.db_type == "sqlite" {
+        None
+    } else {
+        match state.docker.create_container(&instance).await {
+            Ok(cid) => Some(cid),
+            Err(e) => {
+                if port != 0 {
+                    state.ports.release(port);
+                }
+                if req.db_type != "sqlite" {
+                    let _ = state.volumes.remove(&volume_name).await;
+                }
+                return Ok(Json(ApiResponse::error(format!(
+                    "Container creation failed: {}",
+                    e
+                ))));
+            }
         }
     };
 
     {
         let mut db = state.databases.lock().unwrap();
         let mut instance_with_container = instance.clone();
-        instance_with_container.container_id = Some(container_id.clone());
+        instance_with_container.container_id = container_id.clone();
         db.push(instance_with_container);
     }
 
-    if let Err(e) = state.docker.start_container(&container_id).await {
-        return Ok(Json(ApiResponse::error(format!(
-            "Container start failed: {}",
-            e
-        ))));
+    if let Some(ref cid) = container_id {
+        if let Err(e) = state.docker.start_container(cid).await {
+            return Ok(Json(ApiResponse::error(format!(
+                "Container start failed: {}",
+                e
+            ))));
+        }
     }
 
     let instance = {
@@ -146,6 +238,9 @@ pub async fn update_database(
 
     if let Some(instance) = db.iter_mut().find(|d| d.id == id) {
         if let Some(name) = req.name {
+            if let Err(e) = validate_db_name(&name) {
+                return Ok(Json(ApiResponse::error(e)));
+            }
             instance.name = name;
         }
         if let Some(status) = req.status {
@@ -176,12 +271,21 @@ pub async fn delete_database(
         }
     };
 
+    // Prevent deleting local-discovered databases
+    if instance.source == DatabaseSource::Local {
+        return Ok(Json(ApiResponse::error(
+            "Cannot delete a locally-discovered database. Remove it from the list instead.".to_string()
+        )));
+    }
+
     if let Some(ref container_id) = instance.container_id {
         let _ = state.docker.stop_container(container_id).await;
         let _ = state.docker.remove_container(container_id).await;
     }
 
-    state.ports.release(instance.port);
+    if instance.port != 0 {
+        state.ports.release(instance.port);
+    }
 
     if let Some(ref volume_name) = instance.volume_name {
         let _ = state.volumes.remove(volume_name).await;
@@ -213,16 +317,22 @@ pub async fn start_database(
                 let already_running = instance.status == DatabaseStatus::Running;
                 let container_id = instance.container_id.clone();
                 let name = instance.name.clone();
-                Ok((already_running, container_id, name))
+                Ok((already_running, container_id, name, instance.source.clone()))
             }
             None => Err(format!("Database {} not found", id)),
         }
     };
 
-    let (already_running, container_id, name) = match lookup {
+    let (already_running, container_id, name, source) = match lookup {
         Ok(t) => t,
         Err(msg) => return Ok(Json(ApiResponse::error(msg))),
     };
+
+    if source == DatabaseSource::Local {
+        return Ok(Json(ApiResponse::error(
+            "Cannot start/stop a locally-discovered database".to_string()
+        )));
+    }
 
     if already_running {
         return Ok(Json(ApiResponse::error(format!(
@@ -268,16 +378,23 @@ pub async fn stop_database(
                 let already_stopped = instance.status == DatabaseStatus::Stopped;
                 let container_id = instance.container_id.clone();
                 let name = instance.name.clone();
-                Ok((already_stopped, container_id, name))
+                let source = instance.source.clone();
+                Ok((already_stopped, container_id, name, source))
             }
             None => Err(format!("Database {} not found", id)),
         }
     };
 
-    let (already_stopped, container_id, name) = match lookup {
+    let (already_stopped, container_id, name, source) = match lookup {
         Ok(t) => t,
         Err(msg) => return Ok(Json(ApiResponse::error(msg))),
     };
+
+    if source == DatabaseSource::Local {
+        return Ok(Json(ApiResponse::error(
+            "Cannot start/stop a locally-discovered database".to_string()
+        )));
+    }
 
     if already_stopped {
         return Ok(Json(ApiResponse::error(format!(
@@ -312,6 +429,36 @@ pub async fn stop_database(
     }
 }
 
+// ============================================================================
+// Discovery
+// ============================================================================
+
+pub async fn discover_local_databases(
+    State(state): State<AppState>,
+) -> Json<ApiResponse<Vec<DatabaseInstance>>> {
+    let scanner = LocalScanner::new();
+    let discovered = scanner.scan().await;
+
+    let mut db = state.databases.lock().unwrap();
+    let mut added = Vec::new();
+
+    for disc in discovered {
+        let instance = scanner.to_instance(&disc);
+        // Avoid duplicates
+        if !db.iter().any(|d| d.id == instance.id) {
+            info!("Adding discovered local database: {} on port {}", instance.name, instance.port);
+            db.push(instance.clone());
+            added.push(instance);
+        }
+    }
+
+    Json(ApiResponse::success(added))
+}
+
+// ============================================================================
+// Query Execution
+// ============================================================================
+
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct ExecuteQueryRequest {
     pub sql: String,
@@ -322,6 +469,11 @@ pub async fn execute_query(
     State(state): State<AppState>,
     Json(req): Json<ExecuteQueryRequest>,
 ) -> Json<ApiResponse<crate::control_plane::connection::manager::QueryResult>> {
+    // Validate SQL
+    if let Err(e) = validate_sql(&req.sql) {
+        return Json(ApiResponse::error(e));
+    }
+
     let instance = {
         let db = state.databases.lock().unwrap();
         match db.iter().find(|d| d.id == id).cloned() {
@@ -353,6 +505,10 @@ pub async fn execute_query(
 
     result
 }
+
+// ============================================================================
+// Table Data
+// ============================================================================
 
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct TableDataRequest {
@@ -398,14 +554,25 @@ pub async fn get_table_data(
     let limit = req.limit.unwrap_or(50).max(1).min(1000);
     let offset = req.offset.unwrap_or(0).max(0);
     let order_dir = req.order_dir.as_deref().unwrap_or("ASC");
-    let filter = req.filter.as_deref().unwrap_or("");
 
-    // Build safe query
+    // Validate filter
+    let filter = req.filter.as_deref().unwrap_or("");
+    if !filter.is_empty() {
+        if let Err(e) = validate_filter(filter) {
+            return Json(ApiResponse::error(e));
+        }
+    }
+
     let where_clause = if filter.is_empty() {
         "".to_string()
     } else {
         format!("WHERE {}", filter)
     };
+
+    // Validate table name
+    if req.table.is_empty() || req.table.len() > 128 {
+        return Json(ApiResponse::error("Invalid table name".to_string()));
+    }
 
     let count_sql = if filter.is_empty() {
         format!("SELECT COUNT(*) FROM \"{}\"", req.table)
@@ -413,8 +580,7 @@ pub async fn get_table_data(
         format!("SELECT COUNT(*) FROM \"{}\" {}", req.table, where_clause)
     };
 
-    // ORDER BY only when column specified; never default to "1" (that's a column name, not position)
-    let order_clause = req.order_by.as_deref().map(|col| {
+    let order_clause = req.order_by.as_deref().filter(|c| !c.is_empty()).map(|col| {
         if instance.db_type == "mysql" || instance.db_type == "mariadb" {
             format!("ORDER BY `{}` {}", col, order_dir)
         } else {
@@ -468,6 +634,10 @@ pub async fn get_table_data(
     result
 }
 
+// ============================================================================
+// Row Operations
+// ============================================================================
+
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct UpdateRowRequest {
     pub table: String,
@@ -498,9 +668,20 @@ pub async fn update_row(
         }
     }
 
-    // Build SET clause
+    if req.data.is_empty() {
+        return Json(ApiResponse::error("No data provided for update".to_string()));
+    }
+
+    // Validate table name
+    if req.table.is_empty() || req.table.len() > 128 {
+        return Json(ApiResponse::error("Invalid table name".to_string()));
+    }
+
     let mut set_clauses = Vec::new();
     for (col, val) in &req.data {
+        if col.is_empty() || col.len() > 128 {
+            return Json(ApiResponse::error("Invalid column name".to_string()));
+        }
         let val_str = match val {
             serde_json::Value::Null => "NULL".to_string(),
             serde_json::Value::Bool(b) => b.to_string(),
@@ -508,7 +689,7 @@ pub async fn update_row(
             serde_json::Value::String(s) => format!("'{}'", s.replace("'", "''")),
             _ => format!("'{}'", val.to_string().replace("'", "''")),
         };
-        
+
         if instance.db_type == "mysql" || instance.db_type == "mariadb" {
             set_clauses.push(format!("`{}` = {}", col, val_str));
         } else {
@@ -584,6 +765,10 @@ pub async fn delete_row(
         }
     }
 
+    if req.table.is_empty() || req.table.len() > 128 {
+        return Json(ApiResponse::error("Invalid table name".to_string()));
+    }
+
     let sql = if instance.db_type == "mysql" || instance.db_type == "mariadb" {
         let pk_val = match &req.primary_key {
             serde_json::Value::String(s) => format!("'{}'", s.replace("'", "''")),
@@ -649,20 +834,24 @@ pub async fn get_table_columns(
         }
     }
 
+    if req.table.is_empty() || req.table.len() > 128 {
+        return Json(ApiResponse::error("Invalid table name".to_string()));
+    }
+
     let sql = if instance.db_type == "mysql" || instance.db_type == "mariadb" {
         format!(
-            "SELECT column_name, data_type, is_nullable, column_default, extra 
-             FROM information_schema.columns 
-             WHERE table_schema = DATABASE() AND table_name = '{}' 
+            "SELECT column_name, data_type, is_nullable, column_default, extra
+             FROM information_schema.columns
+             WHERE table_schema = DATABASE() AND table_name = '{}'
              ORDER BY ordinal_position",
             req.table
         )
     } else {
         format!(
-            "SELECT column_name, data_type, is_nullable, column_default, 
+            "SELECT column_name, data_type, is_nullable, column_default,
              CASE WHEN column_default IS NOT NULL THEN true ELSE false END as has_default
-             FROM information_schema.columns 
-             WHERE table_schema = 'public' AND table_name = '{}' 
+             FROM information_schema.columns
+             WHERE table_schema = 'public' AND table_name = '{}'
              ORDER BY ordinal_position",
             req.table
         )
@@ -678,9 +867,8 @@ pub async fn get_table_columns(
                     let nullable = row.get(2).and_then(|v| v.as_str()).map(|s| s == "YES").unwrap_or(false);
                     let has_default = row.get(3).map(|v| !v.is_null()).unwrap_or(false);
                     let column_default = row.get(3).and_then(|v| v.as_str()).map(|s| s.to_string());
-                    
-                    // Detect PK: usually first column with sequence or named 'id'
-                    let is_pk = name == "user_id" || name == "id" || 
+
+                    let is_pk = name == "user_id" || name == "id" ||
                         column_default.as_ref().map(|d| d.contains("nextval")).unwrap_or(false);
 
                     ColumnMetadata {
@@ -731,6 +919,10 @@ pub async fn insert_row(
 
     if req.data.is_empty() {
         return Json(ApiResponse::error("No data provided for insert".to_string()));
+    }
+
+    if req.table.is_empty() || req.table.len() > 128 {
+        return Json(ApiResponse::error("Invalid table name".to_string()));
     }
 
     let columns: Vec<String> = req.data.keys().cloned().collect();

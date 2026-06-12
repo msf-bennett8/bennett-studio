@@ -3,6 +3,7 @@ import { api, DatabaseInstance, CreateDatabaseRequest } from '../services/api';
 
 interface DatabaseState {
   databases: DatabaseInstance[];
+  localDatabases: DatabaseInstance[];
   loading: boolean;
   error: string | null;
   selectedDatabase: DatabaseInstance | null;
@@ -16,9 +17,10 @@ interface DatabaseState {
   tableDataLoading: boolean;
   editingRow: any | null;
   logs: string[];
-  
+
   // Actions
   fetchDatabases: () => Promise<void>;
+  discoverLocalDatabases: () => Promise<void>;
   createDatabase: (req: CreateDatabaseRequest) => Promise<void>;
   deleteDatabase: (id: string) => Promise<void>;
   startDatabase: (id: string) => Promise<void>;
@@ -42,6 +44,7 @@ interface DatabaseState {
 
 export const useDatabaseStore = create<DatabaseState>((set, get) => ({
   databases: [],
+  localDatabases: [],
   loading: false,
   error: null,
   selectedDatabase: null,
@@ -58,6 +61,19 @@ export const useDatabaseStore = create<DatabaseState>((set, get) => ({
       set({ databases, loading: false });
     } catch (err) {
       set({ error: err instanceof Error ? err.message : 'Failed to fetch databases', loading: false });
+    }
+  },
+
+  discoverLocalDatabases: async () => {
+    set({ loading: true, error: null });
+    try {
+      const localDatabases = await api.discoverLocalDatabases();
+      set({ localDatabases, loading: false });
+      const current = get().databases.filter(d => d.source !== 'local');
+      const merged = [...current, ...localDatabases];
+      set({ databases: merged });
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : 'Failed to discover local databases', loading: false });
     }
   },
 

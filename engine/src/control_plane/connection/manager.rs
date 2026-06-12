@@ -83,7 +83,15 @@ impl ConnectionManager {
                 DatabasePool::MySql(pool)
             }
             "sqlite" => {
-                let path = format!("sqlite://./bennett_{}.db", instance.name);
+                let safe_name: String = instance.name.chars()
+                    .filter(|c| c.is_alphanumeric() || *c == '_' || *c == '-')
+                    .collect();
+                if safe_name.is_empty() {
+                    return Err(sqlx::Error::Configuration(
+                        "Invalid SQLite database name".into(),
+                    ));
+                }
+                let path = format!("sqlite://./bennett_{}.db", safe_name);
                 let pool = sqlx::sqlite::SqlitePoolOptions::new()
                     .max_connections(1)
                     .connect(&path)

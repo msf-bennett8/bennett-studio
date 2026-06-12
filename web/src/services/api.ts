@@ -159,4 +159,9 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(req),
     }),
+
+  discoverLocalDatabases: () =>
+    fetchApi<DatabaseInstance[]>('/api/databases/discover', {
+      method: 'POST',
+    }),
 };

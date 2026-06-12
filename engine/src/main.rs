@@ -55,9 +55,23 @@ async fn main() {
         .merge(routes())
         .layer(
             CorsLayer::new()
-                .allow_origin(Any)
-                .allow_methods(Any)
-                .allow_headers(Any),
+                .allow_origin([
+                    "http://localhost:5173".parse().unwrap(),
+                    "http://localhost:5174".parse().unwrap(),
+                    "http://localhost:3000".parse().unwrap(),
+                    "http://localhost:3001".parse().unwrap(),
+                    "tauri://localhost".parse().unwrap(),
+                ])
+                .allow_methods([
+                    axum::http::Method::GET,
+                    axum::http::Method::POST,
+                    axum::http::Method::PUT,
+                    axum::http::Method::DELETE,
+                ])
+                .allow_headers([
+                    axum::http::header::CONTENT_TYPE,
+                    axum::http::header::AUTHORIZATION,
+                ]),
         )
         .with_state(state);
 

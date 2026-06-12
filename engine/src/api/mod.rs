@@ -14,6 +14,7 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/api/databases", get(http::list_databases))
         .route("/api/databases", post(http::create_database))
+        .route("/api/databases/discover", post(http::discover_local_databases))
         .route("/api/databases/:id", get(http::get_database))
         .route("/api/databases/:id", put(http::update_database))
         .route("/api/databases/:id", delete(http::delete_database))

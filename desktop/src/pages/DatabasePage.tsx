@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Database, Plus, Play, Square, Trash2, RefreshCw, CheckCircle, XCircle, Clock, AlertCircle, FolderOpen } from 'lucide-react';
+import { Database, Plus, Play, Square, Trash2, RefreshCw, CheckCircle, XCircle, Clock, AlertCircle, FolderOpen, ScanLine } from 'lucide-react';
 import { useDatabaseStore } from '../stores/databaseStore';
 
 const dbTypes = [
@@ -13,7 +13,7 @@ const dbTypes = [
 export function DatabasePage() {
   const {
     databases, loading, error, logs, clearError,
-    fetchDatabases, createDatabase, deleteDatabase,
+    fetchDatabases, discoverLocalDatabases, createDatabase, deleteDatabase,
     startDatabase, stopDatabase,
   } = useDatabaseStore();
 
@@ -79,6 +79,9 @@ export function DatabasePage() {
             <button onClick={fetchDatabases} className="p-2 rounded-lg" style={{ backgroundColor: 'var(--bgTertiary)' }} title="Refresh">
               <RefreshCw size={18} style={{ color: 'var(--textSecondary)' }} />
             </button>
+            <button onClick={discoverLocalDatabases} className="btn-secondary flex items-center gap-2 px-4 py-2 rounded-xl" disabled={loading}>
+              <ScanLine size={18} /> Discover Local
+            </button>
             <button onClick={() => setShowAddModal(true)} className="btn-primary flex items-center gap-2 px-4 py-2 rounded-xl">
               <Plus size={18} /> Add Database
             </button>
@@ -105,15 +108,25 @@ export function DatabasePage() {
                 <div>
                   <h3 className="font-semibold" style={{ color: 'var(--textPrimary)' }}>{db.name}</h3>
                   <div className="flex items-center gap-2 mt-1">
-                    <span className="text-xs px-2 py-1 rounded-full" style={{ backgroundColor: 'var(--bgTertiary)', color: 'var(--textSecondary)' }}>
-                      {db.type} {db.version}
+                  <span className="text-xs px-2 py-1 rounded-full" style={{ backgroundColor: 'var(--bgTertiary)', color: 'var(--textSecondary)' }}>
+                    {db.type} {db.version}
+                  </span>
+                  {db.source === 'bennett' && (
+                    <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ backgroundColor: 'var(--accentPrimary)', color: 'var(--textInverse)' }}>
+                      BnT
                     </span>
-                    <span className="text-xs" style={{ color: 'var(--textMuted)' }}>port:{db.port}</span>
-                    <span className="text-xs" style={{ color: 'var(--textMuted)' }}>{db.size}</span>
-                    {db.container_id && (
-                      <span className="text-xs font-mono" style={{ color: 'var(--textMuted)' }}>{db.container_id}</span>
-                    )}
-                  </div>
+                  )}
+                  {db.source === 'local' && (
+                    <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ backgroundColor: 'var(--accentInfo)', color: 'var(--textInverse)' }}>
+                      Local
+                    </span>
+                  )}
+                  <span className="text-xs" style={{ color: 'var(--textMuted)' }}>port:{db.port}</span>
+                  <span className="text-xs" style={{ color: 'var(--textMuted)' }}>{db.size}</span>
+                  {db.container_id && (
+                    <span className="text-xs font-mono" style={{ color: 'var(--textMuted)' }}>{db.container_id}</span>
+                  )}
+                </div>
                 </div>
               </div>
               <div className="flex items-center gap-3">
@@ -129,26 +142,28 @@ export function DatabasePage() {
                     {db.status}
                   </span>
                 </div>
-                <button 
+                <button
                   onClick={() => handleToggle(db.id, db.status)}
-                  disabled={db.status === 'starting' || loading}
+                  disabled={db.status === 'starting' || loading || db.source === 'local'}
                   className="p-2 rounded-lg transition-all disabled:opacity-50"
                   style={{ backgroundColor: 'var(--bgTertiary)' }}
                   title={db.status === 'running' ? 'Stop' : 'Start'}
                 >
                   {db.status === 'running' ? <Square size={16} /> : <Play size={16} />}
                 </button>
-                <button 
-                  onClick={() => handleOpenFolder(db.id)}
-                  className="p-2 rounded-lg transition-all"
-                  style={{ backgroundColor: 'var(--bgTertiary)' }}
-                  title="Open data folder"
-                >
-                  <FolderOpen size={16} />
-                </button>
-                <button 
+                {db.source !== 'local' && (
+                  <button
+                    onClick={() => handleOpenFolder(db.id)}
+                    className="p-2 rounded-lg transition-all"
+                    style={{ backgroundColor: 'var(--bgTertiary)' }}
+                    title="Open data folder"
+                  >
+                    <FolderOpen size={16} />
+                  </button>
+                )}
+                <button
                   onClick={() => handleDelete(db.id)}
-                  disabled={loading}
+                  disabled={loading || db.source === 'local'}
                   className="p-2 rounded-lg transition-all hover:bg-red-500/20 disabled:opacity-50"
                   style={{ backgroundColor: 'var(--bgTertiary)' }}
                   title="Delete"

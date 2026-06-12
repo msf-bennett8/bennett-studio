@@ -9,6 +9,19 @@ pub enum DatabaseStatus {
     Error,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum DatabaseSource {
+    Bennett,
+    Local,
+}
+
+impl Default for DatabaseSource {
+    fn default() -> Self {
+        DatabaseSource::Bennett
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DatabaseInstance {
     pub id: String,
@@ -25,6 +38,8 @@ pub struct DatabaseInstance {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub volume_name: Option<String>,
     pub env_vars: Vec<(String, String)>,
+    #[serde(default)]
+    pub source: DatabaseSource,
 }
 
 #[derive(Debug, Clone, Deserialize)]
