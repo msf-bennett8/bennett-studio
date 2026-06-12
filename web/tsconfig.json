@@ -17,7 +17,9 @@
     "noFallthroughCasesInSwitch": true,
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["src/*"],
+      "@bennett/shared": ["../shared/dist"],
+      "@bennett/shared/*": ["../shared/dist/*"]
     }
   },
   "include": ["src"],

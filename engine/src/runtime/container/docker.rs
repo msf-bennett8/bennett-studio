@@ -290,6 +290,7 @@ impl DockerRuntime {
                 container_id: container.id,
                 volume_name: None,
                 env_vars: Vec::new(),
+                source: crate::models::database::DatabaseSource::Bennett,
             });
         }
 

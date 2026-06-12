@@ -3,7 +3,7 @@
 
 use std::time::Duration;
 use tauri::Manager;
-
+//to start the window use use tauri::{Manager, Emitter};
 mod commands;
 
 #[tauri::command]

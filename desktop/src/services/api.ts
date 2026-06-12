@@ -1,22 +1,7 @@
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
-export interface DatabaseInstance {
-  id: string;
-  name: string;
-  type: 'postgres' | 'mysql' | 'mariadb' | 'sqlite' | 'redis';
-  version: string;
-  status: 'running' | 'stopped' | 'starting' | 'error';
-  port: number;
-  size: string;
-  created_at: string;
-  container_id?: string;
-}
-
-export interface CreateDatabaseRequest {
-  name: string;
-  type: string;
-  version: string;
-}
+import { DatabaseInstance, CreateDatabaseRequest, DatabaseSource } from '@bennett/shared';
+export type { DatabaseInstance, CreateDatabaseRequest, DatabaseSource };
 
 export interface ApiResponse<T> {
   success: boolean;

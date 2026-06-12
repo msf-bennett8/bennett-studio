@@ -29,13 +29,6 @@ fn validate_db_name(name: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn sanitize_sqlite_name(name: &str) -> String {
-    // Prevent path traversal in SQLite filenames
-    name.chars()
-        .filter(|c| c.is_alphanumeric() || *c == '_' || *c == '-')
-        .collect()
-}
-
 fn validate_filter(filter: &str) -> Result<(), String> {
     let forbidden = [";", "--", "/*", "*/", "DROP", "DELETE", "UPDATE", "INSERT", "EXEC", "UNION"];
     let upper = filter.to_uppercase();

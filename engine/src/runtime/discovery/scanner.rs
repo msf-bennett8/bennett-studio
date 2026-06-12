@@ -1,6 +1,6 @@
 use std::net::{SocketAddr, TcpStream};
 use std::time::Duration;
-use tracing::{info, debug, warn};
+use tracing::{info, debug};
 
 use crate::models::database::{DatabaseInstance, DatabaseStatus, DatabaseSource};
 

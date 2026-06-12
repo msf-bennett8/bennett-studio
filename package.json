@@ -4,6 +4,7 @@
   "private": true,
   "description": "Bennett Studio — The Database Workspace for Modern Developers",
   "workspaces": [
+    "shared",
     "web",
     "desktop",
     "e2e"
