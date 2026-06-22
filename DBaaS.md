@@ -1174,3 +1174,157 @@ Then: Query (Q), RowDescription (T), DataRow (D), CommandComplete (C)
 *Document owner: Bennett Studio Engineering*
 *Review cycle: Weekly during Phase 1–2, Bi-weekly during Phase 3–5*
 *Next review: 2026-06-29*
+
+
+
+
+## ALias
+| Question                   | Your Stance                                                | My Recommendation                                                                                                                                                                                                       | Decision                                                                                                                                                                          |
+| -------------------------- | ---------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Relay Infrastructure**   | Host everything locally, computer-to-computer via internet | **Direct P2P with STUN/TURN fallback** — no cloud relay needed initially. Use WebRTC data channels or QUIC for NAT traversal, with optional self-hosted TURN server later.                                              | **Self-hosted relay** on the sharer's machine + STUN for NAT hole punching. If both behind symmetric NAT, use a lightweight signaling server (can be self-hosted on either peer). |
+| **Authentication**         | "Like OneDesk" — simple, minimal friction                  | **Signed JWT tokens embedded in the share URL** (e.g., `https://share.bennett.studio/db/abc-123?token=eyJhbG...`). No account required for guests. Host generates token with expiry + permissions.                      | **Signed URL with JWT** — guest clicks link, token validates, session established. Host can revoke by invalidating the token signature or session ID.                             |
+| **Schema Autocomplete**    | Industry best                                              | **Host pushes schema metadata via gRPC streaming** on connection + incremental updates. Guest caches locally with TTL (e.g., 30s). This reduces latency and ensures consistency.                                        | **Push-based schema sync** with local guest cache.                                                                                                                                |
+| **Connect-RPC Transport**  | Best and scalable                                          | **Connect-RPC over HTTP/2 primary, HTTP/1.1 fallback for `curl`, gRPC-Web for browser**. This gives maximum compatibility without sacrificing performance.                                                              | **Triple transport**: HTTP/2 (gRPC-native), HTTP/1.1 (Connect + `curl`), gRPC-Web (browser).                                                                                      |
+| **Permission Granularity** | Best from day one, ready for scaling                       | **Row-Level Security (RLS) + Table-Level + Column-Level** from day one. Use a policy engine that injects `WHERE` clauses and column projections at query parse time.                                                    | **Full policy engine**: table allowlist/blocklist, column projection, RLS WHERE injection, query type restrictions (SELECT only, no DDL, no DML, etc.).                           |
+| **Session Storage**        | Industry best, future-proof                                | **SQLite for local session state** (you already have it) + **Redis protocol-compatible embedded store** (like `mini-redis` or `sled`) for distributed/session state. For now, keep it in SQLite with TTL cleanup tasks. | **SQLite with TTL + background janitor** for now. Migration path to Redis/Valkey when you go multi-node.                                                                          |
+
+
+## The Core Insight: What the "Relay Server" Actually Does
+You asked what the server was supposed to do. In your original DBaaS doc, the relay was a cloud-hosted TCP proxy that solved NAT traversal (both computers behind routers). Since you want local/P2P, we replace that with:
+
+┌─────────────────┐                      ┌─────────────────┐
+│   Host Machine  │                      │  Guest Machine  │
+│  (has database) │                      │ (has Bennett  │
+│                 │                      │    Studio app)  │
+│  ┌───────────┐  │    QUIC/WebRTC     │  ┌───────────┐  │
+│  │  Engine   │  │◄───────────────────►│  │  Engine   │  │
+│  │  (sharer) │  │   or direct TCP    │  │  (guest)  │  │
+│  └─────┬─────┘  │   with STUN        │  └─────┬─────┘  │
+│        │        │                      │        │        │
+│  ┌─────▼─────┐  │                      │  ┌─────▼─────┐  │
+│  │  MariaDB  │  │                      │  │  SQL UI   │  │
+│  │  :3306    │  │                      │  │  Console  │  │
+│  └───────────┘  │                      │  └───────────┘  │
+└─────────────────┘                      └─────────────────┘
+
+Guest Machine                    Host Machine
+┌─────────────┐                ┌─────────────┐
+│ Bennett App │ ──HTTP/2/gRPC──►│   Engine    │
+│  (React)    │   or Connect    │  (Axum +    │
+│             │   over TCP      │   tonic)    │
+└─────────────┘                └──────┬──────┘
+                                      │
+                                ┌─────▼─────┐
+                                │  MariaDB  │
+                                │  :3306    │
+                                └───────────┘
+
+                                {
+  "sub": "ACQPFDAQ7P",           // Bennett code
+  "db_id": "uuid-of-database",     // Internal database ID
+  "host_id": "fingerprint-of-host", // Host machine identity
+  "perm": "ro",                   // ro = read-only, rw = read-write, adm = admin
+  "tables": ["*"],                // ["*"] = all, or ["users", "orders"]
+  "cols": null,                   // null = all columns, or { "users": ["id", "name"] }
+  "rls": null,                    // null = no RLS, or "tenant_id = 5"
+  "iat": 1719072000,              // Issued at
+  "exp": 1719158400,              // Expires: 24h later
+  "jti": "unique-session-id"      // For revocation
+}
+
+
+
+Your e-commerce app stores:
+  BENNETT_SHARE_CODE=ACQPFDAQ7P
+  BENNETT_API_ENDPOINT=https://share.bennett.studio
+
+At runtime:
+  GET https://share.bennett.studio/v1/resolve/ACQPFDAQ7P
+  → Returns: { "host": "192.168.1.100", "port": 3001, "token": "eyJ..." }
+
+Or even better — use a **stable subdomain**:
+  https://ACQPFDAQ7P.share.bennett.studio → auto-resolves to host
+  (like how ngrok does it: abc123.ngrok.io)
+
+For e-commerce: Store only the CODE, resolve at app startup via API.
+For SDKs: Built-in resolution — `new BennettClient({ code: "ACQPFDAQ7P" })` handles lookup.
+
+┌─────────────────────────────────────────────────────────────────┐
+│                     E-COMMERCE APP (Vercel/Render)              │
+│                                                                 │
+│  Stores: BENNETT_SHARE_CODE=ACQPFDAQ7P                          │
+│          BENNETT_RESOLVER=https://resolve.bennett.studio        │
+│                                                                 │
+│  At startup:                                                    │
+│    GET /v1/resolve/ACQPFDAQ7P                                  │
+│    → Returns: {                                                 │
+│         "direct_url": "https://192.168.1.100:3001",  ← LAN    │
+│         "relay_url": "https://relay.bennett.studio/tunnel/xyz", │
+│         "status": "host_online",                               │
+│         "expires_at": "2026-06-23T16:00:00Z"                   │
+│      }                                                          │
+│                                                                 │
+│  If direct_url fails (timeout 3s):                              │
+│    Fallback to relay_url (WebSocket tunnel through any NAT)    │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  RESOLVER SERVICE (can be self-hosted on same box as e-com)   │
+│  ┌─────────────┐    ┌─────────────┐    ┌─────────────────┐    │
+│  │ Code→Host   │    │ Host Health │    │ Relay Coordination│   │
+│  │ Registry    │◄──►│ Checker     │◄──►│ (STUN/TURN lite) │    │
+│  │ (SQLite)    │    │ (ping every │    │                  │    │
+│  │             │    │  30s)       │    │                  │    │
+│  └─────────────┘    └─────────────┘    └─────────────────┘    │
+└─────────────────────────────────────────────────────────────────┘
+         ▲
+         │
+    ┌────┴────┐
+    │  Host   │ ← Bennett Studio on your laptop
+    │  pings  │   "I'm here, my IP is X, my tunnel port is Y"
+    │resolver │
+    │every 30s│
+    └─────────┘
+
+    // Bennett Studio host generates:
+let share = Share {
+    code: "ACQPFDAQ7P",           // Bennett code
+    db_id: "uuid-of-database",
+    token: jwt,                    // 24h expiry
+    host_fingerprint: "abc123...",  // Unique host ID
+};
+
+// Host registers with resolver (if configured):
+POST https://resolve.bennett.studio/v1/register
+{
+  "code": "ACQPFDAQ7P",
+  "host_ip": "192.168.1.100",
+  "host_port": 3001,
+  "fingerprint": "abc123...",
+  "tunnel_port": 3478  // For NAT traversal
+}
+
+// In your Next.js / Node.js app:
+import { BennettClient } from '@bennett-studio/sdk';
+
+const client = new BennettClient({
+  code: process.env.BENNETT_SHARE_CODE,      // "ACQPFDAQ7P"
+  resolver: process.env.BENNETT_RESOLVER,     // "https://resolve.bennett.studio"
+});
+
+// This happens automatically:
+// 1. Resolve code to host
+// 2. Try direct connection (LAN speed)
+// 3. If direct fails, use WebSocket tunnel (works through NAT)
+// 4. Cache the working URL for 5 minutes
+
+// SDK handles this:
+try {
+  const result = await client.query("SELECT * FROM products");
+} catch (err) {
+  if (err.code === "HOST_OFFLINE") {
+    // Show "Database host is offline" in your UI
+    // Or queue for retry
+  }
+}

@@ -19,17 +19,23 @@ pub enum WsRequest {
     SubscribeLogs { database_id: String },
     ExecuteQuery { database_id: String, sql: String },
     Ping,
+    // Phase 6: Reconnection support
+    Reconnect { session_id: String, last_message_id: u64 },
+    Ack { message_id: u64 },
 }
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum WsResponse {
-    LogLine { database_id: String, line: String, timestamp: String },
-    QueryResult { database_id: String, columns: Vec<String>, rows: Vec<Vec<serde_json::Value>>, row_count: usize, execution_time_ms: u64 },
-    QueryError { database_id: String, error: String },
-    HealthUpdate { database_id: String, status: String, uptime_seconds: u64 },
+    LogLine { database_id: String, line: String, timestamp: String, message_id: u64 },
+    QueryResult { database_id: String, columns: Vec<String>, rows: Vec<Vec<serde_json::Value>>, row_count: usize, execution_time_ms: u64, message_id: u64 },
+    QueryError { database_id: String, error: String, message_id: u64 },
+    HealthUpdate { database_id: String, status: String, uptime_seconds: u64, message_id: u64 },
     Pong,
     Error { message: String },
+    // Phase 6: Reconnection support
+    ReconnectAck { session_id: String, last_message_id: u64, missed_messages: Vec<WsResponse> },
+    Hello { session_id: String, server_time: String },
 }
 
 pub async fn ws_handler(
@@ -42,6 +48,18 @@ pub async fn ws_handler(
 
 async fn handle_socket(socket: WebSocket, database_id: String, state: AppState) {
     let (mut sender, mut receiver) = socket.split();
+    
+    // Generate session ID for reconnection
+    let session_id = format!("ws-{}", uuid::Uuid::new_v4());
+    let mut message_counter: u64 = 0;
+    
+    // Send hello with session ID
+    let _ = sender.send(Message::Text(
+        serde_json::to_string(&WsResponse::Hello {
+            session_id: session_id.clone(),
+            server_time: chrono::Utc::now().to_rfc3339(),
+        }).unwrap()
+    )).await;
 
     // Send initial connection confirmation
     let _ = sender.send(Message::Text(
@@ -62,6 +80,20 @@ async fn handle_socket(socket: WebSocket, database_id: String, state: AppState) 
                                 let _ = sender.send(Message::Text(
                                     serde_json::to_string(&WsResponse::Pong).unwrap()
                                 )).await;
+                            }
+                            Ok(WsRequest::Reconnect { session_id: _, last_message_id: _ }) => {
+                                // TODO: Implement message replay from buffer
+                                let _ = sender.send(Message::Text(
+                                    serde_json::to_string(&WsResponse::ReconnectAck {
+                                        session_id: session_id.clone(),
+                                        last_message_id: message_counter,
+                                        missed_messages: vec![],
+                                    }).unwrap()
+                                )).await;
+                            }
+                            Ok(WsRequest::Ack { message_id }) => {
+                                // Client acknowledged receipt, can remove from buffer
+                                debug!("Client acked message {}", message_id);
                             }
                             Ok(WsRequest::ExecuteQuery { database_id: db_id, sql }) => {
                                 let start = std::time::Instant::now();
@@ -110,6 +142,7 @@ async fn handle_socket(socket: WebSocket, database_id: String, state: AppState) 
                                 match result {
                                     Ok(query_result) => {
                                         let elapsed = start.elapsed().as_millis() as u64;
+                                        message_counter += 1;
                                         let _ = sender.send(Message::Text(
                                             serde_json::to_string(&WsResponse::QueryResult {
                                                 database_id: db_id,
@@ -117,6 +150,7 @@ async fn handle_socket(socket: WebSocket, database_id: String, state: AppState) 
                                                 rows: query_result.rows,
                                                 row_count: query_result.row_count,
                                                 execution_time_ms: elapsed,
+                                                message_id: message_counter,
                                             }).unwrap()
                                         )).await;
                                     }

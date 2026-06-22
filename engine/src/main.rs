@@ -2,6 +2,7 @@ use axum::Router;
 use std::net::SocketAddr;
 use tower_http::cors::CorsLayer;
 use tracing::info;
+use tokio::signal;
 
 use bennett_engine::{
     api::routes,
@@ -13,8 +14,11 @@ async fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env().add_directive("bennett_engine=debug".parse().unwrap()))
         .init();
+    
+    // Initialize health check start time
+    crate::api::health::init_start_time();
 
-    let state = match AppState::new() {
+    let state = match AppState::new().await {
         Ok(s) => s,
         Err(e) => {
             tracing::error!("Failed to initialize engine: {}", e);
@@ -60,6 +64,7 @@ async fn main() {
                     "http://localhost:5174".parse().unwrap(),
                     "http://localhost:3000".parse().unwrap(),
                     "http://localhost:3001".parse().unwrap(),
+                    "http://localhost:3002".parse().unwrap(),
                     "tauri://localhost".parse().unwrap(),
                 ])
                 .allow_methods([
@@ -73,7 +78,7 @@ async fn main() {
                     axum::http::header::AUTHORIZATION,
                 ]),
         )
-        .with_state(state);
+        .with_state(state.clone());
 
     let port = std::env::var("BENNETT_ENGINE_PORT")
         .ok()
@@ -91,6 +96,7 @@ async fn main() {
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     info!("Bennett Engine starting on http://{}", addr);
+    info!("gRPC server on port {}", grpc_port);
     info!("Docker runtime: connected");
     info!("API endpoints:");
     info!("  GET    /api/databases");
@@ -101,6 +107,71 @@ async fn main() {
     info!("  POST   /api/databases/:id/start");
     info!("  POST   /api/databases/:id/stop");
 
+    // Start gRPC server on port 3002 (or BENNETT_GRPC_PORT)
+    let grpc_port = std::env::var("BENNETT_GRPC_PORT")
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(3002);
+    
+    let grpc_state = state.clone();
+    tokio::spawn(async move {
+        if let Err(e) = crate::grpc::start_grpc_server(grpc_state, grpc_port).await {
+            tracing::error!("gRPC server error: {}", e);
+        }
+    });
+    
+    info!("gRPC server starting on port {}", grpc_port);
+    
+    // Start wire protocol proxy (Phase 5)
+    let proxy_port = std::env::var("BENNETT_WIRE_PORT")
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(3307);
+    
+    let proxy_state = state.clone();
+    tokio::spawn(async move {
+        let proxy = crate::sharing::proxy::WireProxyServer::new(proxy_state, proxy_port);
+        if let Err(e) = proxy.start().await {
+            tracing::error!("Wire protocol proxy error: {}", e);
+        }
+    });
+    
+    info!("Wire protocol proxy starting on port {}", proxy_port);
+    info!("MySQL: mysql -h host -P {} -u bennett_SHARECODE -p", proxy_port);
+    info!("PostgreSQL: psql -h host -p {} -U bennett_SHARECODE", proxy_port);
+    info!("API endpoints:");
+    info!("gRPC-Web enabled for browser clients");
+
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-    axum::serve(listener, app).await.unwrap();
+    
+    // Graceful shutdown with SIGTERM/SIGINT
+    let shutdown = tokio::spawn(async move {
+        let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("Failed to create SIGTERM handler");
+        let mut sigint = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())
+            .expect("Failed to create SIGINT handler");
+        
+        tokio::select! {
+            _ = sigterm.recv() => {
+                info!("Received SIGTERM, starting graceful shutdown...");
+            }
+            _ = sigint.recv() => {
+                info!("Received SIGINT, starting graceful shutdown...");
+            }
+        }
+        
+        // Drain connections
+        info!("Draining connections...");
+        tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+        info!("Shutdown complete");
+    });
+    
+    let server = axum::serve(listener, app)
+        .with_graceful_shutdown(async {
+            shutdown.await.ok();
+        });
+    
+    if let Err(e) = server.await {
+        tracing::error!("Server error: {}", e);
+    }
 }

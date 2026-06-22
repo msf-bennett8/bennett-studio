@@ -1,0 +1,42 @@
+syntax = "proto3";
+
+package bennett.v1;
+
+option go_package = "github.com/msf-bennett8/bennett-studio/gen/go/bennett/v1;bennettv1";
+
+// Export service for data export
+service ExportService {
+  // Export query results to CSV
+  rpc ExportCsv(ExportRequest) returns (stream ExportChunk);
+  
+  // Export query results to JSON
+  rpc ExportJson(ExportRequest) returns (stream ExportChunk);
+  
+  // Export query results to Parquet (future)
+  rpc ExportParquet(ExportRequest) returns (stream ExportChunk);
+  
+  // Export full table dump
+  rpc ExportTableDump(ExportTableRequest) returns (stream ExportChunk);
+}
+
+message ExportRequest {
+  string share_code = 1;
+  string token = 2;
+  string sql = 3;
+  string format = 4;  // "csv", "json", "parquet"
+  bool include_headers = 5;
+}
+
+message ExportTableRequest {
+  string share_code = 1;
+  string token = 2;
+  string table_name = 3;
+  string format = 4;
+}
+
+message ExportChunk {
+  bytes data = 1;
+  bool is_last = 2;
+  int64 total_rows = 3;
+  int64 chunk_index = 4;
+}

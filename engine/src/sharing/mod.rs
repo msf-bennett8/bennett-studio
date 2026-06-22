@@ -1,5 +1,10 @@
 pub mod lan;
 pub mod multiplex;
 pub mod policy;
+pub mod proxy;
 pub mod relay;
 pub mod session;
+pub mod share_store;
+pub mod manager;
+pub mod state;
+pub mod uuid;

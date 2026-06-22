@@ -8,6 +8,8 @@ import { QueryPage } from './pages/QueryPage';
 import { SchemaPage } from './pages/SchemaPage';
 import { DataPage } from './pages/DataPage';
 import { SharePage } from './pages/SharePage';
+import { JoinSharePage } from './pages/JoinSharePage';
+import { RemoteQueryPage } from './pages/RemoteQueryPage';
 import { SettingsPage } from './pages/SettingsPage';
 import './index.css';
 
@@ -32,6 +34,8 @@ function App() {
           <Route path="/schema" element={<SchemaPage />} />
           <Route path="/data" element={<DataPage />} />
           <Route path="/share" element={<SharePage />} />
+          <Route path="/join-share" element={<JoinSharePage />} />
+          <Route path="/remote-query" element={<RemoteQueryPage />} />
           <Route path="/settings" element={<SettingsPage />} />
         </Routes>
       </Layout>

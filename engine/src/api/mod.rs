@@ -1,5 +1,8 @@
+pub mod health;
 pub mod http;
 pub mod websocket;
+pub mod sharing;
+pub mod connect_rpc;
 
 use axum::{
     routing::{get, post, put, delete},
@@ -9,6 +12,23 @@ use crate::AppState;
 
 pub use http::*;
 pub use websocket::*;
+pub use sharing::*;
+
+use axum::response::Response;
+use axum::body::Body;
+use axum::http::{StatusCode, header};
+
+/// Prometheus metrics endpoint
+pub async fn metrics_endpoint() -> Response {
+    let registry = crate::telemetry::metrics::init_metrics();
+    let body = registry.export_prometheus().await;
+    
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "text/plain; charset=utf-8")
+        .body(Body::from(body))
+        .unwrap()
+}
 
 pub fn routes() -> Router<AppState> {
     Router::new()
@@ -31,5 +51,15 @@ pub fn routes() -> Router<AppState> {
         .route("/api/databases/:id/columns", post(http::get_table_columns))
         .route("/api/databases/:id/rows/insert", post(http::insert_row))
         .route("/api/databases/:id/ws", get(websocket::ws_handler))
-        .route("/api/health", get(http::health_check))
+        // Phase 1: Share endpoints
+        .route("/api/shares", post(sharing::create_share))
+        .route("/api/shares", get(sharing::list_shares))
+        .route("/api/shares/:code", get(sharing::get_share_info))
+        .route("/api/shares/:code", delete(sharing::revoke_share))
+        .route("/api/shares/:code/validate", post(sharing::validate_share))
+        .route("/api/health", get(crate::api::health::comprehensive_health_check))
+        .route("/metrics", get(metrics_endpoint))
+        // Phase 2: Connect-RPC full service endpoints
+        .route("/bennett.v1.HealthService/Check", post(crate::connect_rpc::connect_health))
+        .merge(crate::connect_rpc::connect_routes())
 }

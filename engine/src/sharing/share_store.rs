@@ -1,0 +1,396 @@
+//! SQLite-backed share session storage
+//! Stores active shares, guest sessions, and revoked tokens
+//! Uses TTL cleanup with background janitor
+
+use chrono::{DateTime, Duration, Utc};
+use serde::{Deserialize, Serialize};
+use sqlx::{sqlite::SqlitePoolOptions, Pool, Sqlite, Row};
+use std::sync::Arc;
+use tokio::sync::RwLock;
+use tracing::{info, warn, error};
+
+/// Share record in database
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ShareRecord {
+    pub code: String,
+    pub db_id: String,
+    pub host_id: String,
+    pub token_jti: String,
+    pub permission: String,
+    pub tables: String, // JSON array
+    pub cols: Option<String>, // JSON object
+    pub rls: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub expires_at: DateTime<Utc>,
+    pub revoked: bool,
+    pub guest_count: i32,
+}
+
+/// Guest session record
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GuestSession {
+    pub id: String,
+    pub share_code: String,
+    pub ip_address: Option<String>,
+    pub user_agent: Option<String>,
+    pub connected_at: DateTime<Utc>,
+    pub last_active: DateTime<Utc>,
+    pub query_count: i32,
+}
+
+/// Revoked token record (for immediate revocation)
+#[derive(Debug, Clone)]
+pub struct RevokedToken {
+    pub jti: String,
+    pub revoked_at: DateTime<Utc>,
+    pub reason: String,
+}
+
+/// Share store with SQLite backend
+pub struct ShareStore {
+    pool: Pool<Sqlite>,
+    // In-memory cache for fast revocation checks
+    revoked_cache: Arc<RwLock<dashmap::DashMap<String, DateTime<Utc>>>>,
+}
+
+impl ShareStore {
+    /// Initialize share store with SQLite connection
+    pub async fn new(db_path: &str) -> anyhow::Result<Arc<Self>> {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(5)
+            .connect(db_path)
+            .await?;
+        
+        // Create tables
+        Self::init_schema(&pool).await?;
+        
+        let store = Arc::new(Self {
+            pool,
+            revoked_cache: Arc::new(RwLock::new(dashmap::DashMap::new())),
+        });
+        
+        // Start background janitor
+        let store_clone = store.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(300)); // 5 min
+            loop {
+                interval.tick().await;
+                if let Err(e) = store_clone.cleanup_expired().await {
+                    error!("Share store cleanup error: {}", e);
+                }
+            }
+        });
+        
+        info!("Share store initialized");
+        Ok(store)
+    }
+    
+    async fn init_schema(pool: &Pool<Sqlite>) -> anyhow::Result<()> {
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS shares (
+                code TEXT PRIMARY KEY,
+                db_id TEXT NOT NULL,
+                host_id TEXT NOT NULL,
+                token_jti TEXT NOT NULL UNIQUE,
+                permission TEXT NOT NULL DEFAULT 'ro',
+                tables TEXT NOT NULL DEFAULT '["*"]',
+                cols TEXT,
+                rls TEXT,
+                created_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                revoked INTEGER NOT NULL DEFAULT 0,
+                guest_count INTEGER NOT NULL DEFAULT 0
+            );
+            
+            CREATE INDEX IF NOT EXISTS idx_shares_db_id ON shares(db_id);
+            CREATE INDEX IF NOT EXISTS idx_shares_expires ON shares(expires_at);
+            CREATE INDEX IF NOT EXISTS idx_shares_revoked ON shares(revoked);
+            
+            CREATE TABLE IF NOT EXISTS guest_sessions (
+                id TEXT PRIMARY KEY,
+                share_code TEXT NOT NULL,
+                ip_address TEXT,
+                user_agent TEXT,
+                connected_at TEXT NOT NULL,
+                last_active TEXT NOT NULL,
+                query_count INTEGER NOT NULL DEFAULT 0,
+                FOREIGN KEY (share_code) REFERENCES shares(code) ON DELETE CASCADE
+            );
+            
+            CREATE INDEX IF NOT EXISTS idx_guests_share ON guest_sessions(share_code);
+            CREATE INDEX IF NOT EXISTS idx_guests_last_active ON guest_sessions(last_active);
+            
+            CREATE TABLE IF NOT EXISTS revoked_tokens (
+                jti TEXT PRIMARY KEY,
+                revoked_at TEXT NOT NULL,
+                reason TEXT NOT NULL DEFAULT 'host_revoked'
+            );
+            
+            CREATE INDEX IF NOT EXISTS idx_revoked_jti ON revoked_tokens(jti);
+            "#
+        )
+        .execute(pool)
+        .await?;
+        
+        Ok(())
+    }
+    
+    /// Create a new share record
+    pub async fn create_share(&self, record: &ShareRecord) -> anyhow::Result<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO shares (code, db_id, host_id, token_jti, permission, tables, cols, rls, created_at, expires_at, revoked, guest_count)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            "#
+        )
+        .bind(&record.code)
+        .bind(&record.db_id)
+        .bind(&record.host_id)
+        .bind(&record.token_jti)
+        .bind(&record.permission)
+        .bind(&record.tables)
+        .bind(record.cols.as_ref())
+        .bind(record.rls.as_ref())
+        .bind(record.created_at.to_rfc3339())
+        .bind(record.expires_at.to_rfc3339())
+        .bind(record.revoked as i32)
+        .bind(record.guest_count)
+        .execute(&self.pool)
+        .await?;
+        
+        info!("Created share {} for db {}", record.code, record.db_id);
+        Ok(())
+    }
+    
+    /// Get share by code
+    pub async fn get_share(&self, code: &str) -> anyhow::Result<Option<ShareRecord>> {
+        let row = sqlx::query("SELECT * FROM shares WHERE code = ?")
+            .bind(code)
+            .fetch_optional(&self.pool)
+            .await?;
+        
+        Ok(row.map(|r| Self::row_to_share(r)))
+    }
+    
+    /// Get share by JTI (token ID)
+    pub async fn get_share_by_jti(&self, jti: &str) -> anyhow::Result<Option<ShareRecord>> {
+        let row = sqlx::query("SELECT * FROM shares WHERE token_jti = ?")
+            .bind(jti)
+            .fetch_optional(&self.pool)
+            .await?;
+        
+        Ok(row.map(|r| Self::row_to_share(r)))
+    }
+    
+    /// List all active shares for a database
+    pub async fn list_shares_by_db(&self, db_id: &str) -> anyhow::Result<Vec<ShareRecord>> {
+        let rows = sqlx::query(
+            "SELECT * FROM shares WHERE db_id = ? AND revoked = 0 AND expires_at > ? ORDER BY created_at DESC"
+        )
+        .bind(db_id)
+        .bind(Utc::now().to_rfc3339())
+        .fetch_all(&self.pool)
+        .await?;
+        
+        Ok(rows.into_iter().map(Self::row_to_share).collect())
+    }
+    
+    /// Revoke a share by code (host action)
+    pub async fn revoke_share(&self, code: &str, reason: &str) -> anyhow::Result<bool> {
+        let result = sqlx::query(
+            "UPDATE shares SET revoked = 1 WHERE code = ?"
+        )
+        .bind(code)
+        .execute(&self.pool)
+        .await?;
+        
+        if result.rows_affected() > 0 {
+            // Also add to revoked_tokens for immediate invalidation
+            if let Ok(Some(share)) = self.get_share(code).await {
+                let jti = share.token_jti;
+                sqlx::query("INSERT OR REPLACE INTO revoked_tokens (jti, revoked_at, reason) VALUES (?, ?, ?)")
+                    .bind(&jti)
+                    .bind(Utc::now().to_rfc3339())
+                    .bind(reason)
+                    .execute(&self.pool)
+                    .await?;
+                
+                // Add to in-memory cache
+                self.revoked_cache.write().await.insert(jti, Utc::now());
+            }
+            
+            info!("Revoked share {}", code);
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+    
+    /// Check if a token JTI is revoked
+    pub async fn is_revoked(&self, jti: &str) -> bool {
+        // Check in-memory cache first
+        if self.revoked_cache.read().await.contains_key(jti) {
+            return true;
+        }
+        
+        // Check database
+        match sqlx::query("SELECT 1 FROM revoked_tokens WHERE jti = ?")
+            .bind(jti)
+            .fetch_optional(&self.pool)
+            .await
+        {
+            Ok(Some(_)) => {
+                // Add to cache for next time
+                self.revoked_cache.write().await.insert(jti.to_string(), Utc::now());
+                true
+            }
+            _ => false,
+        }
+    }
+    
+    /// Record guest connection
+    pub async fn record_guest_connect(&self, share_code: &str, ip: Option<String>, ua: Option<String>) -> anyhow::Result<String> {
+        let id = uuid::Uuid::new_v4().to_string();
+        let now = Utc::now();
+        
+        sqlx::query(
+            "INSERT INTO guest_sessions (id, share_code, ip_address, user_agent, connected_at, last_active, query_count) VALUES (?, ?, ?, ?, ?, ?, 0)"
+        )
+        .bind(&id)
+        .bind(share_code)
+        .bind(ip)
+        .bind(ua)
+        .bind(now.to_rfc3339())
+        .bind(now.to_rfc3339())
+        .execute(&self.pool)
+        .await?;
+        
+        // Increment guest count
+        sqlx::query("UPDATE shares SET guest_count = guest_count + 1 WHERE code = ?")
+            .bind(share_code)
+            .execute(&self.pool)
+            .await?;
+        
+        Ok(id)
+    }
+    
+    /// Record guest activity
+    pub async fn record_guest_activity(&self, session_id: &str) -> anyhow::Result<()> {
+        sqlx::query("UPDATE guest_sessions SET last_active = ?, query_count = query_count + 1 WHERE id = ?")
+            .bind(Utc::now().to_rfc3339())
+            .bind(session_id)
+            .execute(&self.pool)
+            .await?;
+        
+        Ok(())
+    }
+    
+    /// Disconnect guest
+    pub async fn record_guest_disconnect(&self, session_id: &str) -> anyhow::Result<()> {
+        // Delete guest session and decrement count
+        let share_code: Option<String> = sqlx::query("SELECT share_code FROM guest_sessions WHERE id = ?")
+            .bind(session_id)
+            .fetch_optional(&self.pool)
+            .await?
+            .map(|r| r.get("share_code"));
+        
+        if let Some(code) = share_code {
+            sqlx::query("DELETE FROM guest_sessions WHERE id = ?")
+                .bind(session_id)
+                .execute(&self.pool)
+                .await?;
+            
+            sqlx::query("UPDATE shares SET guest_count = MAX(0, guest_count - 1) WHERE code = ?")
+                .bind(&code)
+                .execute(&self.pool)
+                .await?;
+        }
+        
+        Ok(())
+    }
+    
+    /// Cleanup expired shares and stale sessions
+    pub async fn cleanup_expired(&self) -> anyhow::Result<()> {
+        let now = Utc::now().to_rfc3339();
+        
+        // Mark expired shares as revoked
+        let expired = sqlx::query("UPDATE shares SET revoked = 1 WHERE expires_at < ? AND revoked = 0")
+            .bind(&now)
+            .execute(&self.pool)
+            .await?;
+        
+        // Delete old guest sessions (inactive for > 24h)
+        let cutoff = (Utc::now() - Duration::hours(24)).to_rfc3339();
+        let stale = sqlx::query("DELETE FROM guest_sessions WHERE last_active < ?")
+            .bind(&cutoff)
+            .execute(&self.pool)
+            .await?;
+        
+        // Clean old revoked tokens (> 30 days)
+        let old_cutoff = (Utc::now() - Duration::days(30)).to_rfc3339();
+        let old = sqlx::query("DELETE FROM revoked_tokens WHERE revoked_at < ?")
+            .bind(&old_cutoff)
+            .execute(&self.pool)
+            .await?;
+        
+        if expired.rows_affected() > 0 || stale.rows_affected() > 0 || old.rows_affected() > 0 {
+            info!("Cleaned up {} expired shares, {} stale sessions, {} old tokens", 
+                expired.rows_affected(), stale.rows_affected(), old.rows_affected());
+        }
+        
+        Ok(())
+    }
+    
+    fn row_to_share(row: sqlx::sqlite::SqliteRow) -> ShareRecord {
+        ShareRecord {
+            code: row.get("code"),
+            db_id: row.get("db_id"),
+            host_id: row.get("host_id"),
+            token_jti: row.get("token_jti"),
+            permission: row.get("permission"),
+            tables: row.get("tables"),
+            cols: row.get("cols"),
+            rls: row.get("rls"),
+            created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
+                .map(|d| d.with_timezone(&Utc))
+                .unwrap_or_else(|_| Utc::now()),
+            expires_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("expires_at"))
+                .map(|d| d.with_timezone(&Utc))
+                .unwrap_or_else(|_| Utc::now()),
+            revoked: row.get::<i32, _>("revoked") != 0,
+            guest_count: row.get("guest_count"),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    
+    #[tokio::test]
+    async fn test_share_store() {
+        let store = ShareStore::new("sqlite::memory:").await.unwrap();
+        
+        let record = ShareRecord {
+            code: "ACQPFDAQ7P".to_string(),
+            db_id: "db-123".to_string(),
+            host_id: "host-abc".to_string(),
+            token_jti: "jti-123".to_string(),
+            permission: "ro".to_string(),
+            tables: r#"["*"]"#.to_string(),
+            cols: None,
+            rls: None,
+            created_at: Utc::now(),
+            expires_at: Utc::now() + Duration::hours(24),
+            revoked: false,
+            guest_count: 0,
+        };
+        
+        store.create_share(&record).await.unwrap();
+        
+        let fetched = store.get_share("ACQPFDAQ7P").await.unwrap();
+        assert!(fetched.is_some());
+        assert_eq!(fetched.unwrap().code, "ACQPFDAQ7P");
+    }
+}

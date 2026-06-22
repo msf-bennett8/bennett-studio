@@ -1,5 +1,5 @@
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Database, Search, Table2, Share2, Settings, Home, Terminal, Cpu, Rows3 } from 'lucide-react';
+import { Database, Search, Table2, Share2, Settings, Home, Terminal, Cpu, Rows3, Globe } from 'lucide-react';
 
 const navItems = [
   { icon: Home, label: 'Home', path: '/' },
@@ -8,6 +8,7 @@ const navItems = [
   { icon: Table2, label: 'Schema', path: '/schema' },
   { icon: Rows3, label: 'Data', path: '/data' },
   { icon: Share2, label: 'Share', path: '/share' },
+  { icon: Globe, label: 'Remote', path: '/remote-query' },
   { icon: Settings, label: 'Settings', path: '/settings' },
 ];
 

@@ -1,0 +1,120 @@
+syntax = "proto3";
+
+package bennett.v1;
+
+option go_package = "github.com/msf-bennett8/bennett-studio/gen/go/bennett/v1;bennettv1";
+
+// Schema service for database introspection
+service SchemaService {
+  // Get full database schema
+  rpc GetSchema(GetSchemaRequest) returns (GetSchemaResponse);
+  
+  // Stream schema updates (for autocomplete)
+  rpc StreamSchemaUpdates(GetSchemaRequest) returns (stream SchemaUpdate);
+  
+  // Get table columns
+  rpc GetTableColumns(GetTableColumnsRequest) returns (GetTableColumnsResponse);
+  
+  // Get table indexes
+  rpc GetTableIndexes(GetTableIndexesRequest) returns (GetTableIndexesResponse);
+  
+  // Get table constraints
+  rpc GetTableConstraints(GetTableConstraintsRequest) returns (GetTableConstraintsResponse);
+}
+
+message GetSchemaRequest {
+  string share_code = 1;
+  string token = 2;
+}
+
+message GetSchemaResponse {
+  bool success = 1;
+  repeated TableSchema tables = 2;
+  string database_name = 3;
+  string database_type = 4;  // "postgres", "mysql", "mariadb", "sqlite"
+  string database_version = 5;
+}
+
+message TableSchema {
+  string name = 1;
+  repeated ColumnSchema columns = 2;
+  repeated IndexSchema indexes = 3;
+  repeated ConstraintSchema constraints = 4;
+  int64 estimated_row_count = 5;
+  string table_size = 6;
+}
+
+message ColumnSchema {
+  string name = 1;
+  string data_type = 2;
+  bool nullable = 3;
+  string default_value = 4;
+  bool is_primary_key = 5;
+  bool is_foreign_key = 6;
+  string foreign_key_reference = 7;  // "table.column"
+  string comment = 8;
+}
+
+message IndexSchema {
+  string name = 1;
+  repeated string columns = 2;
+  string index_type = 3;  // "btree", "hash", "gin", etc.
+  bool is_unique = 4;
+  bool is_primary = 5;
+}
+
+message ConstraintSchema {
+  string name = 1;
+  string constraint_type = 2;  // "PRIMARY KEY", "FOREIGN KEY", "UNIQUE", "CHECK"
+  repeated string columns = 3;
+  string definition = 4;  // Full SQL definition
+}
+
+message GetTableColumnsRequest {
+  string share_code = 1;
+  string token = 2;
+  string table_name = 3;
+}
+
+message GetTableColumnsResponse {
+  bool success = 1;
+  repeated ColumnSchema columns = 2;
+}
+
+message GetTableIndexesRequest {
+  string share_code = 1;
+  string token = 2;
+  string table_name = 3;
+}
+
+message GetTableIndexesResponse {
+  bool success = 1;
+  repeated IndexSchema indexes = 2;
+}
+
+message GetTableConstraintsRequest {
+  string share_code = 1;
+  string token = 2;
+  string table_name = 3;
+}
+
+message GetTableConstraintsResponse {
+  bool success = 1;
+  repeated ConstraintSchema constraints = 2;
+}
+
+message SchemaUpdate {
+  enum UpdateType {
+    FULL_REFRESH = 0;
+    TABLE_ADDED = 1;
+    TABLE_REMOVED = 2;
+    COLUMN_ADDED = 3;
+    COLUMN_REMOVED = 4;
+    COLUMN_CHANGED = 5;
+  }
+  
+  UpdateType type = 1;
+  TableSchema table = 2;
+  string removed_table_name = 3;
+  string timestamp = 4;  // RFC3339
+}

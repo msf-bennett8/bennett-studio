@@ -1,10 +1,14 @@
 pub mod api;
+pub mod audit;
 pub mod auth;
 pub mod config;
+pub mod connect_rpc;
 pub mod control_plane;
 pub mod errors;
+pub mod grpc;
 pub mod models;
 pub mod plugins;
+pub mod rate_limit;
 pub mod runtime;
 pub mod sharing;
 pub mod telemetry;
@@ -17,6 +21,11 @@ use runtime::container::docker::DockerRuntime;
 use runtime::port::allocator::PortAllocator;
 use runtime::volume::manager::VolumeManager;
 use control_plane::connection::manager::ConnectionManager;
+use sharing::share_store::ShareStore;
+use auth::share_token::ShareTokenManager;
+use audit::AuditService;
+use rate_limit::RateLimitService;
+use control_plane::query::cache::QueryCache;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -25,16 +34,48 @@ pub struct AppState {
     pub ports: Arc<PortAllocator>,
     pub volumes: Arc<VolumeManager>,
     pub connections: Arc<tokio::sync::Mutex<ConnectionManager>>,
+    pub share_store: Arc<ShareStore>,
+    pub token_manager: Arc<tokio::sync::RwLock<ShareTokenManager>>,
+    pub audit_service: Option<Arc<AuditService>>,
+    pub rate_limiter: Arc<RateLimitService>,
+    pub query_cache: Arc<QueryCache>,
 }
 
 impl AppState {
-    pub fn new() -> Result<Self, crate::runtime::container::docker::DockerError> {
+    pub async fn new() -> Result<Self, crate::runtime::container::docker::DockerError> {
+        let home = dirs::home_dir()
+            .ok_or_else(|| crate::runtime::container::docker::DockerError::Other("No home dir".to_string()))?;
+        let data_dir = home.join(".bennett").join("data");
+        std::fs::create_dir_all(&data_dir).ok();
+        
+        let db_path = format!("sqlite://{}", data_dir.join("shares.db").to_string_lossy());
+        let audit_path = format!("sqlite://{}", data_dir.join("audit.db").to_string_lossy());
+        
+        let share_store = ShareStore::new(&db_path).await
+            .map_err(|e| crate::runtime::container::docker::DockerError::Other(e.to_string()))?;
+        
+        let token_manager = ShareTokenManager::new().await
+            .map_err(|e| crate::runtime::container::docker::DockerError::Other(e.to_string()))?;
+        
+        // Initialize audit service (optional - don't fail if it doesn't work)
+        let audit_service = AuditService::new(&audit_path).await.ok();
+        if audit_service.is_none() {
+            tracing::warn!("Audit service failed to initialize - continuing without audit logging");
+        }
+        
+        let rate_limiter = Arc::new(RateLimitService::new());
+        
         Ok(Self {
             databases: Arc::new(Mutex::new(Vec::new())),
             docker: Arc::new(DockerRuntime::new()?),
             ports: Arc::new(PortAllocator::new()),
             volumes: Arc::new(VolumeManager::new()?),
             connections: Arc::new(tokio::sync::Mutex::new(ConnectionManager::new())),
+            share_store,
+            token_manager,
+            audit_service,
+            rate_limiter,
+            query_cache: Arc::new(QueryCache::new()),
         })
     }
 }

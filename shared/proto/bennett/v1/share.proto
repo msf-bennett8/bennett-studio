@@ -1,0 +1,100 @@
+syntax = "proto3";
+
+package bennett.v1;
+
+option go_package = "github.com/msf-bennett8/bennett-studio/gen/go/bennett/v1;bennettv1";
+
+// Share service for managing database shares
+service ShareService {
+  // Create a new share link
+  rpc CreateShare(CreateShareRequest) returns (CreateShareResponse);
+  
+  // List active shares
+  rpc ListShares(ListSharesRequest) returns (ListSharesResponse);
+  
+  // Revoke a share
+  rpc RevokeShare(RevokeShareRequest) returns (RevokeShareResponse);
+  
+  // Validate a share (guest)
+  rpc ValidateShare(ValidateShareRequest) returns (ValidateShareResponse);
+  
+  // Get share info (public)
+  rpc GetShareInfo(GetShareInfoRequest) returns (ShareInfo);
+}
+
+message CreateShareRequest {
+  string database_id = 1;
+  string permission = 2;  // "ro", "rw", "adm"
+  repeated string tables = 3;
+  string rls = 4;       // Row-level security filter
+  int64 duration_hours = 5;  // Default 24, max 168
+}
+
+message CreateShareResponse {
+  string code = 1;
+  string url = 2;
+  string token = 3;
+  string expires_at = 4;  // RFC3339
+}
+
+message ListSharesRequest {
+  string database_id = 1;  // Optional filter
+}
+
+message ListSharesResponse {
+  repeated ShareLink shares = 1;
+  int32 total = 2;
+}
+
+message ShareLink {
+  string code = 1;
+  string url = 2;
+  string db_id = 3;
+  string db_name = 4;
+  string db_type = 5;
+  string permission = 6;
+  repeated string tables = 7;
+  string expires_at = 8;
+  string created_at = 9;
+  int32 guest_count = 10;
+  string status = 11;  // "active", "expired", "revoked"
+}
+
+message RevokeShareRequest {
+  string code = 1;
+  string reason = 2;
+}
+
+message RevokeShareResponse {
+  bool revoked = 1;
+  string code = 2;
+}
+
+message ValidateShareRequest {
+  string code = 1;
+  string token = 2;
+}
+
+message ValidateShareResponse {
+  bool valid = 1;
+  string code = 2;
+  string db_id = 3;
+  string permission = 4;
+  repeated string tables = 5;
+  string expires_at = 6;
+  bool host_online = 7;
+}
+
+message GetShareInfoRequest {
+  string code = 1;
+}
+
+message ShareInfo {
+  string code = 1;
+  string db_id = 2;
+  string permission = 3;
+  repeated string tables = 4;
+  string expires_at = 5;
+  string status = 6;
+  int32 guest_count = 7;
+}

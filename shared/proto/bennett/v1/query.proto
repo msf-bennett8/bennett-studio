@@ -1,0 +1,75 @@
+syntax = "proto3";
+
+package bennett.v1;
+
+option go_package = "github.com/msf-bennett8/bennett-studio/gen/go/bennett/v1;bennettv1";
+
+// Query service for executing SQL via Connect-RPC
+service QueryService {
+  // Execute a single query
+  rpc ExecuteQuery(ExecuteQueryRequest) returns (ExecuteQueryResponse);
+  
+  // Stream results for large queries
+  rpc StreamQuery(ExecuteQueryRequest) returns (stream QueryResultRow);
+  
+  // Execute a write query (INSERT/UPDATE/DELETE) - requires rw permission
+  rpc ExecuteWrite(ExecuteWriteRequest) returns (ExecuteWriteResponse);
+}
+
+message ExecuteQueryRequest {
+  string share_code = 1;
+  string token = 2;
+  string sql = 3;
+  int32 limit = 4;      // Max rows to return (default 1000)
+  int32 offset = 5;     // Pagination offset
+}
+
+message ExecuteQueryResponse {
+  bool success = 1;
+  repeated string columns = 2;
+  repeated QueryResultRow rows = 3;
+  int32 row_count = 4;
+  int64 execution_time_ms = 5;
+  string error = 6;
+}
+
+message QueryResultRow {
+  repeated Value values = 1;
+}
+
+message Value {
+  oneof kind {
+    string null_value = 1;      // "NULL"
+    string string_value = 2;
+    int64 int_value = 3;
+    double float_value = 4;
+    bool bool_value = 5;
+    bytes bytes_value = 6;
+    string timestamp_value = 7;   // RFC3339
+  }
+}
+
+message ExecuteWriteRequest {
+  string share_code = 1;
+  string token = 2;
+  string sql = 3;
+  repeated WriteParameter parameters = 4;
+}
+
+message WriteParameter {
+  oneof kind {
+    string string_value = 1;
+    int64 int_value = 2;
+    double float_value = 3;
+    bool bool_value = 4;
+    bytes bytes_value = 5;
+  }
+}
+
+message ExecuteWriteResponse {
+  bool success = 1;
+  int64 rows_affected = 2;
+  string last_insert_id = 3;
+  int64 execution_time_ms = 4;
+  string error = 5;
+}

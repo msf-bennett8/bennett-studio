@@ -6,6 +6,7 @@ use axum::{
 use tracing::info;
 
 use crate::AppState;
+use crate::api::health::init_start_time;
 use crate::models::database::{
     ApiResponse, CreateDatabaseRequest, DatabaseInstance, DatabaseStatus, UpdateDatabaseRequest,
     DatabaseSource, UnlockDatabaseRequest, DatabaseStatusResponse, DatabaseCredentials,
@@ -67,12 +68,7 @@ fn validate_sql(sql: &str) -> Result<(), String> {
 // ============================================================================
 
 pub async fn health_check() -> Json<ApiResponse<serde_json::Value>> {
-    Json(ApiResponse::success(serde_json::json!({
-        "status": "ok",
-        "version": "0.1.0",
-        "engine": "bennett-engine",
-        "docker": "connected"
-    })))
+    crate::api::health::simple_health_check().await
 }
 
 // ============================================================================
