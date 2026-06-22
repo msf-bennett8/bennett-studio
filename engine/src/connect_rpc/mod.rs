@@ -152,6 +152,7 @@ pub fn validate_shared_sql(sql: &str, permission: &crate::auth::share_token::Sha
 }
 
 /// Apply table/column filtering to SQL
+/// Uses sqlparser for accurate table extraction from complex queries
 pub fn apply_table_filter(
     sql: &str,
     allowed_tables: &[String],
@@ -159,19 +160,159 @@ pub fn apply_table_filter(
     if allowed_tables.len() == 1 && allowed_tables[0] == "*" {
         return Ok(sql.to_string());
     }
-    
-    // TODO: Phase 2 - Implement proper SQL parsing for table extraction
-    // NOTE: sqlparser-rs would improve accuracy for complex subqueries, CTEs
-    // For now, naive parsing is sufficient for common query patterns
-    let upper = sql.to_uppercase();
-    for table in allowed_tables {
-        // Simple check - production would use sqlparser
-        if !upper.contains(&table.to_uppercase()) && !upper.starts_with("SELECT") {
-            // Allow if it's a SELECT that might join - we'll check at execution
+
+    // Parse SQL to extract referenced tables
+    let dialect = sqlparser::dialect::GenericDialect {};
+    let statements = match sqlparser::parser::Parser::parse_sql(&dialect, sql) {
+        Ok(stmts) => stmts,
+        Err(_) => {
+            // If parsing fails, fall back to allowing (execution-time check will catch issues)
+            tracing::warn!("SQL parse failed for table filter, falling back to execution-time check");
+            return Ok(sql.to_string());
+        }
+    };
+
+    // Extract table names from AST
+    let mut referenced_tables = std::collections::HashSet::new();
+    for stmt in &statements {
+        extract_tables_from_statement(stmt, &mut referenced_tables);
+    }
+
+    // Check each referenced table
+    for table in referenced_tables {
+        if !allowed_tables.contains(&table) {
+            return Err(connect_error(
+                "permission_denied",
+                &format!("Access to table '{}' not allowed by this share", table)
+            ));
         }
     }
-    
+
     Ok(sql.to_string())
+}
+
+/// Extract table names from a SQL statement AST
+fn extract_tables_from_statement(
+    stmt: &sqlparser::ast::Statement,
+    tables: &mut std::collections::HashSet<String>,
+) {
+    use sqlparser::ast::Statement;
+    use sqlparser::ast::TableFactor;
+
+    match stmt {
+        Statement::Query(query) => {
+            if let Some(ref with) = query.with {
+                for cte in &with.cte_tables {
+                    // CTE names are not real tables, but their queries may reference tables
+                    extract_tables_from_query(&cte.query, tables);
+                }
+            }
+            extract_tables_from_query(query, tables);
+        }
+        Statement::Insert { table_name, .. } => {
+            tables.insert(table_name.to_string());
+        }
+        Statement::Update { table, .. } => {
+            tables.insert(table.to_string());
+        }
+        Statement::Delete { table_name, .. } => {
+            if let Some(name) = table_name {
+                tables.insert(name.to_string());
+            }
+        }
+        Statement::CreateTable { name, .. } => {
+            tables.insert(name.to_string());
+        }
+        Statement::AlterTable { name, .. } => {
+            tables.insert(name.to_string());
+        }
+        Statement::Drop { object_type: sqlparser::ast::ObjectType::Table, names, .. } => {
+            for name in names {
+                tables.insert(name.to_string());
+            }
+        }
+        _ => {}
+    }
+}
+
+fn extract_tables_from_query(
+    query: &sqlparser::ast::Query,
+    tables: &mut std::collections::HashSet<String>,
+) {
+    use sqlparser::ast::{SetExpr, TableFactor};
+
+    match &*query.body {
+        SetExpr::Select(select) => {
+            for table_with_joins in &select.from {
+                extract_table_factor(&table_with_joins.relation, tables);
+                for join in &table_with_joins.joins {
+                    extract_table_factor(&join.relation, tables);
+                }
+            }
+        }
+        SetExpr::Query(q) => extract_tables_from_query(q, tables),
+        SetExpr::SetOperation { left, right, .. } => {
+            extract_set_expr(left, tables);
+            extract_set_expr(right, tables);
+        }
+        _ => {}
+    }
+
+    // Handle ORDER BY, LIMIT - no tables there
+}
+
+fn extract_set_expr(
+    expr: &sqlparser::ast::SetExpr,
+    tables: &mut std::collections::HashSet<String>,
+) {
+    use sqlparser::ast::SetExpr;
+    match expr {
+        SetExpr::Select(select) => {
+            for table_with_joins in &select.from {
+                extract_table_factor(&table_with_joins.relation, tables);
+                for join in &table_with_joins.joins {
+                    extract_table_factor(&join.relation, tables);
+                }
+            }
+        }
+        SetExpr::Query(q) => extract_tables_from_query(q, tables),
+        SetExpr::SetOperation { left, right, .. } => {
+            extract_set_expr(left, tables);
+            extract_set_expr(right, tables);
+        }
+        _ => {}
+    }
+}
+
+fn extract_table_factor(
+    factor: &sqlparser::ast::TableFactor,
+    tables: &mut std::collections::HashSet<String>,
+) {
+    use sqlparser::ast::TableFactor;
+    match factor {
+        TableFactor::Table { name, .. } => {
+            tables.insert(name.to_string());
+        }
+        TableFactor::Derived { subquery, .. } => {
+            extract_tables_from_query(subquery, tables);
+        }
+        TableFactor::UNNEST { .. } => {}
+        TableFactor::TableFunction { .. } => {}
+        TableFactor::Pivot { .. } => {}
+        TableFactor::Unpivot { .. } => {}
+        TableFactor::NestedJoin { table_with_joins, .. } => {
+            extract_table_factor(&table_with_joins.relation, tables);
+            for join in &table_with_joins.joins {
+                extract_table_factor(&join.relation, tables);
+            }
+        }
+        TableFactor::OuterJoin { table_with_joins, .. } => {
+            extract_table_factor(&table_with_joins.relation, tables);
+            for join in &table_with_joins.joins {
+                extract_table_factor(&join.relation, tables);
+            }
+        }
+    }
 }
 
 /// Apply RLS (Row-Level Security) filter

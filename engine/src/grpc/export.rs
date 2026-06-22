@@ -47,15 +47,9 @@ impl ExportService for ExportGrpcService {
 
     async fn export_parquet(
         &self,
-        _request: Request<ExportRequest>,
+        request: Request<ExportRequest>,
     ) -> Result<Response<Self::ExportParquetStream>, Status> {
-        // TODO: Implement Parquet export — requires parquet crate + Arrow conversion
-                // Parquet export requires parquet crate + Arrow conversion
-        let (tx, rx) = tokio::sync::mpsc::channel(4);
-        tokio::spawn(async move {
-            let _ = tx.send(Err(Status::unimplemented("Parquet export not yet implemented"))).await;
-        });
-        Ok(Response::new(ReceiverStream::new(rx)))
+        self.stream_export(request.into_inner(), "parquet").await
     }
 
     async fn export_table_dump(
@@ -120,6 +114,8 @@ impl ExportGrpcService {
         let data = match format {
             "csv" => self.format_csv(&result.columns, &result.rows, req.include_headers),
             "json" => self.format_json(&result.columns, &result.rows),
+            "parquet" => self.format_parquet(&result.columns, &result.rows)
+                .map_err(|e| Status::internal(format!("Parquet encoding failed: {}", e)))?,
             _ => return Err(Status::invalid_argument(format!("Unsupported format: {}", format))),
         };
         
@@ -204,7 +200,7 @@ impl ExportGrpcService {
         rows: &[Vec<serde_json::Value>],
     ) -> String {
         let mut objects = Vec::new();
-        
+
         for row in rows {
             let mut obj = serde_json::Map::new();
             for (i, col) in columns.iter().enumerate() {
@@ -213,7 +209,117 @@ impl ExportGrpcService {
             }
             objects.push(serde_json::Value::Object(obj));
         }
-        
+
         serde_json::to_string_pretty(&objects).unwrap_or_default()
+    }
+
+    fn format_parquet(
+        &self,
+        columns: &[String],
+        rows: &[Vec<serde_json::Value>],
+    ) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
+        use arrow::array::*;
+        use arrow::datatypes::*;
+        use arrow::record_batch::RecordBatch;
+        use parquet::arrow::arrow_writer::ArrowWriter;
+        use parquet::file::properties::WriterProperties;
+        use std::sync::Arc;
+
+        if columns.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Infer Arrow schema from first row
+        let arrow_fields: Vec<Field> = columns.iter().enumerate().map(|(i, name)| {
+            let data_type = if let Some(first_row) = rows.first() {
+                if let Some(val) = first_row.get(i) {
+                    match val {
+                        serde_json::Value::Null => DataType::Utf8,
+                        serde_json::Value::Bool(_) => DataType::Boolean,
+                        serde_json::Value::Number(n) => {
+                            if n.is_i64() { DataType::Int64 }
+                            else if n.is_f64() { DataType::Float64 }
+                            else { DataType::Utf8 }
+                        }
+                        serde_json::Value::String(_) => DataType::Utf8,
+                        serde_json::Value::Array(_) => DataType::Utf8,
+                        serde_json::Value::Object(_) => DataType::Utf8,
+                    }
+                } else {
+                    DataType::Utf8
+                }
+            } else {
+                DataType::Utf8
+            };
+            Field::new(name, data_type, true)
+        }).collect();
+
+        let schema = Arc::new(Schema::new(arrow_fields.clone()));
+
+        // Build Arrow arrays
+        let mut arrays: Vec<Arc<dyn Array>> = Vec::with_capacity(columns.len());
+
+        for (col_idx, field) in arrow_fields.iter().enumerate() {
+            match field.data_type() {
+                DataType::Boolean => {
+                    let values: Vec<Option<bool>> = rows.iter().map(|row| {
+                        row.get(col_idx).and_then(|v| match v {
+                            serde_json::Value::Bool(b) => Some(*b),
+                            _ => None,
+                        })
+                    }).collect();
+                    arrays.push(Arc::new(BooleanArray::from(values)));
+                }
+                DataType::Int64 => {
+                    let values: Vec<Option<i64>> = rows.iter().map(|row| {
+                        row.get(col_idx).and_then(|v| match v {
+                            serde_json::Value::Number(n) => n.as_i64(),
+                            _ => None,
+                        })
+                    }).collect();
+                    arrays.push(Arc::new(Int64Array::from(values)));
+                }
+                DataType::Float64 => {
+                    let values: Vec<Option<f64>> = rows.iter().map(|row| {
+                        row.get(col_idx).and_then(|v| match v {
+                            serde_json::Value::Number(n) => n.as_f64(),
+                            _ => None,
+                        })
+                    }).collect();
+                    arrays.push(Arc::new(Float64Array::from(values)));
+                }
+                DataType::Utf8 => {
+                    let values: Vec<Option<String>> = rows.iter().map(|row| {
+                        row.get(col_idx).map(|v| match v {
+                            serde_json::Value::Null => String::new(),
+                            serde_json::Value::String(s) => s.clone(),
+                            other => other.to_string(),
+                        })
+                    }).collect();
+                    arrays.push(Arc::new(StringArray::from_iter(values)));
+                }
+                _ => {
+                    let values: Vec<Option<String>> = rows.iter().map(|row| {
+                        row.get(col_idx).map(|v| v.to_string())
+                    }).collect();
+                    arrays.push(Arc::new(StringArray::from_iter(values)));
+                }
+            }
+        }
+
+        let batch = RecordBatch::try_new(schema.clone(), arrays)
+            .map_err(|e| format!("Failed to build RecordBatch: {}", e))?;
+
+        let mut buf = Vec::new();
+        let props = WriterProperties::builder().build();
+        let mut writer = ArrowWriter::try_new(&mut buf, schema, Some(props))
+            .map_err(|e| format!("Failed to create Parquet writer: {}", e))?;
+
+        writer.write(&batch)
+            .map_err(|e| format!("Failed to write Parquet batch: {}", e))?;
+        writer.close()
+            .map_err(|e| format!("Failed to close Parquet writer: {}", e))?;
+
+        Ok(buf)
     }
 }

@@ -18,11 +18,11 @@ const RESOLVER_TIMEOUT = 5000; // 5 seconds
  * Strategy:
  * 1. Check memory cache
  * 2. Check localStorage (browser) / env (node)
- * 3. DNS TXT record lookup (browser: DoH, node: dns module)
- * 4. Well-known endpoint: https://resolver.bennett.studio/resolve/{code}
- * 5. Fallback to default pattern: https://{code}.share.bennett.studio
+ * 3. Extract from JWT token (self-describing token)
+ * 4. Well-known endpoint (cloud resolver, for future)
+ * 5. Fallback to default pattern
  */
-export async function resolveHost(code: string): Promise<string> {
+export async function resolveHost(code: string, token?: string): Promise<string> {
   // 1. Check memory cache
   const cached = DNS_CACHE.get(code);
   if (cached) {
@@ -39,7 +39,33 @@ export async function resolveHost(code: string): Promise<string> {
     return persistent.baseUrl;
   }
   
-  // 3. Try resolver endpoint
+  // 3. Extract host from JWT token (self-describing token)
+  if (token) {
+    try {
+      const parts = token.split('.');
+      if (parts.length === 3) {
+        const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+        const padLen = (4 - (base64.length % 4)) % 4;
+        const padded = base64 + '='.repeat(padLen);
+        const payload = JSON.parse(atob(padded));
+        
+        if (payload.host && payload.port) {
+          const resolved: ResolvedHost = {
+            baseUrl: `http://${payload.host}:${payload.port}`,
+            resolvedAt: new Date().toISOString(),
+            ttlSeconds: DEFAULT_TTL,
+          };
+          setPersistentCache(code, resolved);
+          DNS_CACHE.set(code, resolved);
+          return resolved.baseUrl;
+        }
+      }
+    } catch {
+      // Token doesn't contain host info
+    }
+  }
+
+  // 4. Try resolver endpoint (cloud, for future)
   try {
     const resolved = await fetchResolver(code);
     if (resolved) {
@@ -50,8 +76,8 @@ export async function resolveHost(code: string): Promise<string> {
   } catch {
     // Resolver unavailable, continue to fallback
   }
-  
-  // 4. Fallback to pattern-based URL
+
+  // 5. Fallback to pattern-based URL
   const fallback: ResolvedHost = {
     baseUrl: `https://${code.toLowerCase()}.share.bennett.studio`,
     resolvedAt: new Date().toISOString(),

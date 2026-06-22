@@ -26,11 +26,14 @@ pub fn connect_routes() -> Router<AppState> {
         .route("/bennett.v1.QueryService/ExecuteWrite", post(query_service::execute_write))
         // SchemaService
         .route("/bennett.v1.SchemaService/GetSchema", post(schema_service::get_schema))
+        .route("/bennett.v1.SchemaService/StreamSchemaUpdates", post(schema_service::stream_schema_updates))
         .route("/bennett.v1.SchemaService/GetTableColumns", post(schema_service::get_table_columns))
         .route("/bennett.v1.SchemaService/GetTableIndexes", post(schema_service::get_table_indexes))
         .route("/bennett.v1.SchemaService/GetTableConstraints", post(schema_service::get_table_constraints))
         // ExportService
         .route("/bennett.v1.ExportService/ExportCsv", post(export_service::export_csv))
         .route("/bennett.v1.ExportService/ExportJson", post(export_service::export_json))
+        .route("/bennett.v1.ExportService/ExportParquet", post(export_service::export_parquet))
         .route("/bennett.v1.ExportService/ExportTableDump", post(export_service::export_table_dump))
 }
+

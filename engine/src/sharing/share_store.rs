@@ -15,6 +15,10 @@ pub struct ShareRecord {
     pub code: String,
     pub db_id: String,
     pub host_id: String,
+    /// Host IP address for guest direct connection
+    pub host: Option<String>,
+    /// Host port for guest direct connection
+    pub port: Option<u16>,
     pub token_jti: String,
     pub permission: String,
     pub tables: String, // JSON array
@@ -92,6 +96,8 @@ impl ShareStore {
                 code TEXT PRIMARY KEY,
                 db_id TEXT NOT NULL,
                 host_id TEXT NOT NULL,
+                host TEXT,
+                port INTEGER,
                 token_jti TEXT NOT NULL UNIQUE,
                 permission TEXT NOT NULL DEFAULT 'ro',
                 tables TEXT NOT NULL DEFAULT '["*"]',
@@ -140,13 +146,15 @@ impl ShareStore {
     pub async fn create_share(&self, record: &ShareRecord) -> anyhow::Result<()> {
         sqlx::query(
             r#"
-            INSERT INTO shares (code, db_id, host_id, token_jti, permission, tables, cols, rls, created_at, expires_at, revoked, guest_count)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO shares (code, db_id, host_id, host, port, token_jti, permission, tables, cols, rls, created_at, expires_at, revoked, guest_count)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#
         )
         .bind(&record.code)
         .bind(&record.db_id)
         .bind(&record.host_id)
+        .bind(record.host.as_ref())
+        .bind(record.port.map(|p| p as i32))
         .bind(&record.token_jti)
         .bind(&record.permission)
         .bind(&record.tables)
@@ -347,6 +355,8 @@ impl ShareStore {
             code: row.get("code"),
             db_id: row.get("db_id"),
             host_id: row.get("host_id"),
+            host: row.get("host"),
+            port: row.get::<Option<i32>, _>("port").map(|p| p as u16),
             token_jti: row.get("token_jti"),
             permission: row.get("permission"),
             tables: row.get("tables"),
@@ -376,6 +386,8 @@ mod tests {
             code: "ACQPFDAQ7P".to_string(),
             db_id: "db-123".to_string(),
             host_id: "host-abc".to_string(),
+            host: Some("192.168.1.100".to_string()),
+            port: Some(3001),
             token_jti: "jti-123".to_string(),
             permission: "ro".to_string(),
             tables: r#"["*"]"#.to_string(),

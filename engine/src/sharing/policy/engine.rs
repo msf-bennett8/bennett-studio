@@ -95,14 +95,32 @@ impl PolicyEngine {
         }
     }
     
-    /// Extract table names from SQL (naive implementation)
-    /// NOTE: sqlparser-rs would improve accuracy for complex subqueries, CTEs, derived tables
+    /// Extract table names from SQL using sqlparser for accuracy
+    /// Handles: subqueries, CTEs, derived tables, schema-qualified names, quoted identifiers
     fn extract_table_names(sql: &str) -> Vec<String> {
+        let dialect = sqlparser::dialect::GenericDialect {};
+        let statements = match sqlparser::parser::Parser::parse_sql(&dialect, sql) {
+            Ok(stmts) => stmts,
+            Err(e) => {
+                tracing::warn!("SQL parse failed in policy engine: {}", e);
+                // Fallback to naive extraction
+                return Self::naive_extract_table_names(sql);
+            }
+        };
+
+        let mut tables = std::collections::HashSet::new();
+        for stmt in &statements {
+            Self::extract_tables_from_ast(stmt, &mut tables);
+        }
+
+        tables.into_iter().collect()
+    }
+
+    /// Fallback naive extraction when sqlparser fails
+    fn naive_extract_table_names(sql: &str) -> Vec<String> {
         let upper = sql.to_uppercase();
         let mut tables = Vec::new();
-        
-        // Simple regex-like extraction
-        // FROM table_name
+
         if let Some(from_pos) = upper.find(" FROM ") {
             let after_from = &sql[from_pos + 6..];
             let table_name = after_from.split_whitespace().next().unwrap_or("");
@@ -111,8 +129,7 @@ impl PolicyEngine {
                 tables.push(clean);
             }
         }
-        
-        // JOIN table_name
+
         let mut search_start = 0;
         while let Some(join_pos) = upper[search_start..].find(" JOIN ") {
             let abs_pos = search_start + join_pos;
@@ -124,28 +141,110 @@ impl PolicyEngine {
             }
             search_start = abs_pos + 6;
         }
-        
-        // INTO table_name
-        if let Some(into_pos) = upper.find(" INTO ") {
-            let after_into = &sql[into_pos + 6..];
-            let table_name = after_into.split_whitespace().next().unwrap_or("");
-            let clean = table_name.trim_matches('"').trim_matches('`').trim_matches('\'').to_string();
-            if !clean.is_empty() {
-                tables.push(clean);
-            }
-        }
-        
-        // UPDATE table_name
-        if upper.starts_with("UPDATE ") {
-            let after_update = &sql[7..];
-            let table_name = after_update.split_whitespace().next().unwrap_or("");
-            let clean = table_name.trim_matches('"').trim_matches('`').trim_matches('\'').to_string();
-            if !clean.is_empty() {
-                tables.push(clean);
-            }
-        }
-        
+
         tables
+    }
+
+    /// Extract tables from AST recursively
+    fn extract_tables_from_ast(
+        stmt: &sqlparser::ast::Statement,
+        tables: &mut std::collections::HashSet<String>,
+    ) {
+        use sqlparser::ast::Statement;
+        use sqlparser::ast::TableFactor;
+
+        match stmt {
+            Statement::Query(query) => {
+                if let Some(ref with) = query.with {
+                    for cte in &with.cte_tables {
+                        Self::extract_tables_from_query(&cte.query, tables);
+                    }
+                }
+                Self::extract_tables_from_query(query, tables);
+            }
+            Statement::Insert { table_name, .. } => {
+                tables.insert(table_name.to_string());
+            }
+            Statement::Update { table, .. } => {
+                tables.insert(table.to_string());
+            }
+            Statement::Delete { table_name, .. } => {
+                if let Some(name) = table_name {
+                    tables.insert(name.to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn extract_tables_from_query(
+        query: &sqlparser::ast::Query,
+        tables: &mut std::collections::HashSet<String>,
+    ) {
+        use sqlparser::ast::SetExpr;
+        use sqlparser::ast::TableFactor;
+
+        match &*query.body {
+            SetExpr::Select(select) => {
+                for table_with_joins in &select.from {
+                    Self::extract_table_factor(&table_with_joins.relation, tables);
+                    for join in &table_with_joins.joins {
+                        Self::extract_table_factor(&join.relation, tables);
+                    }
+                }
+            }
+            SetExpr::Query(q) => Self::extract_tables_from_query(q, tables),
+            SetExpr::SetOperation { left, right, .. } => {
+                Self::extract_set_expr(left, tables);
+                Self::extract_set_expr(right, tables);
+            }
+            _ => {}
+        }
+    }
+
+    fn extract_set_expr(
+        expr: &sqlparser::ast::SetExpr,
+        tables: &mut std::collections::HashSet<String>,
+    ) {
+        use sqlparser::ast::SetExpr;
+        match expr {
+            SetExpr::Select(select) => {
+                for table_with_joins in &select.from {
+                    Self::extract_table_factor(&table_with_joins.relation, tables);
+                    for join in &table_with_joins.joins {
+                        Self::extract_table_factor(&join.relation, tables);
+                    }
+                }
+            }
+            SetExpr::Query(q) => Self::extract_tables_from_query(q, tables),
+            SetExpr::SetOperation { left, right, .. } => {
+                Self::extract_set_expr(left, tables);
+                Self::extract_set_expr(right, tables);
+            }
+            _ => {}
+        }
+    }
+
+    fn extract_table_factor(
+        factor: &sqlparser::ast::TableFactor,
+        tables: &mut std::collections::HashSet<String>,
+    ) {
+        use sqlparser::ast::TableFactor;
+        match factor {
+            TableFactor::Table { name, .. } => {
+                tables.insert(name.to_string());
+            }
+            TableFactor::Derived { subquery, .. } => {
+                Self::extract_tables_from_query(subquery, tables);
+            }
+            TableFactor::NestedJoin { table_with_joins, .. } => {
+                Self::extract_table_factor(&table_with_joins.relation, tables);
+                for join in &table_with_joins.joins {
+                    Self::extract_table_factor(&join.relation, tables);
+                }
+            }
+            _ => {}
+        }
     }
     
     /// Apply column-level filtering to result

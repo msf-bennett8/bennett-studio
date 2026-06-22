@@ -37,13 +37,31 @@ export class BennettShareClient {
      * In local dev: assume localhost:3001
      */
     resolveBaseUrl(_code) {
-        // TODO: Phase 1B - Implement resolver lookup
-        // For now, assume local development
+        // Phase 1B: Host endpoint is embedded in the JWT token
+        // The token payload contains { host: "192.168.1.100", port: 3001 }
+        try {
+            const parts = this.token.split('.');
+            if (parts.length === 3) {
+                // Base64 decode the payload (JWT middle segment)
+                // Handle URL-safe base64
+                const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+                const padLen = (4 - (base64.length % 4)) % 4;
+                const padded = base64 + '='.repeat(padLen);
+                const payload = JSON.parse(atob(padded));
+                
+                if (payload.host && payload.port) {
+                    return `http://${payload.host}:${payload.port}`;
+                }
+            }
+        } catch (e) {
+            // Token doesn't contain host info or is malformed — fallback
+            console.debug('JWT host extraction failed, using fallback:', e);
+        }
+
+        // Fallback: Environment or default localhost
         if (typeof window !== 'undefined') {
-            // Browser: use current host or env
             return import.meta.env?.VITE_BENNETT_HOST || 'http://localhost:3001';
         }
-        // Node.js/CLI: use env or default
         return process?.env?.BENNETT_HOST || 'http://localhost:3001';
     }
     /**

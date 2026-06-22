@@ -29,21 +29,37 @@ pub async fn auth_interceptor(
 
 /// Rate limiting interceptor
 /// Applies token bucket rate limiting per share_code + IP
+/// For Connect-RPC, extracts share_code from JSON body when possible
 pub async fn rate_limit_interceptor(
     State(state): State<AppState>,
-    req: Request,
+    mut req: Request,
     next: Next,
 ) -> Response {
     // Extract client IP
     let client_ip = req.extensions().get::<crate::api::middleware::ClientIp>().map(|c| c.0);
-    let ip_str = client_ip.map(|ip| ip.to_string()).unwrap_or_else(|| "unknown".to_string());
+    let ip = client_ip.unwrap_or(std::net::IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1));
 
     // Try to extract share_code from request body (best effort for Connect-RPC)
-    // For full implementation, parse JSON body
-    let share_code = "unknown".to_string();
+    let share_code = if let Ok(body) = axum::body::to_bytes(req.body_mut(), 4096).await {
+        // Parse JSON body to extract share_code
+        let code = if let Ok(json) = serde_json::from_slice::<serde_json::Value>(&body) {
+            json.get("shareCode")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown")
+                .to_string()
+        } else {
+            "unknown".to_string()
+        };
+
+        // Reconstruct body for downstream handlers
+        *req.body_mut() = axum::body::Body::from(body);
+        code
+    } else {
+        "unknown".to_string()
+    };
 
     // Check rate limit
-    if let Err(msg) = state.rate_limiter.check(&share_code, &client_ip.unwrap_or(std::net::IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1)))).await {
+    if let Err(msg) = state.rate_limiter.check(&share_code, &ip).await {
         return crate::connect_rpc::connect_error("resource_exhausted", &msg);
     }
 

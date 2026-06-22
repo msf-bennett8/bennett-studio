@@ -60,6 +60,7 @@ pub fn routes() -> Router<AppState> {
         .route("/api/shares/:code", get(sharing::get_share_info))
         .route("/api/shares/:code", delete(sharing::revoke_share))
         .route("/api/shares/:code/validate", post(sharing::validate_share))
+        .route("/api/shares/:code/resolve", get(sharing::resolve_share))
         .route("/api/health", get(crate::api::health::comprehensive_health_check))
         .route("/metrics", get(metrics_endpoint))
         // Phase 2: Connect-RPC full service endpoints

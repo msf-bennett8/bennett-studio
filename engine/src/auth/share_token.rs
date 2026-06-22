@@ -19,6 +19,12 @@ pub struct ShareClaims {
     pub db_id: String,
     /// Host machine fingerprint
     pub host_id: String,
+    /// Host IP address for direct guest connection
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host: Option<String>,
+    /// Host port for direct guest connection
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub port: Option<u16>,
     /// Permission level: "ro" | "rw" | "adm"
     pub perm: String,
     /// Allowed tables: ["*"] = all, or ["users", "orders"]
@@ -91,6 +97,8 @@ pub struct ValidatedShare {
     pub code: String,
     pub db_id: String,
     pub host_id: String,
+    pub host: Option<String>,
+    pub port: Option<u16>,
     pub permission: SharePermission,
     pub tables: Vec<String>,
     pub cols: Option<serde_json::Value>,
@@ -127,8 +135,8 @@ impl ShareTokenManager {
             // Generate Ed25519 key pair using ring or ed25519-dalek
             // For now, use a generated secret - in production use proper keygen
             let secret = Self::generate_secret();
-            let pem = format!("-----BEGIN PRIVATE KEY-----\n{}\n-----END PRIVATE KEY-----", 
-                base64::encode(&secret));
+            let pem = format!("-----BEGIN PRIVATE KEY-----\n{}\n-----END PRIVATE KEY-----",
+                base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &secret));
             tokio::fs::write(&key_path, &pem).await?;
             let encoding = EncodingKey::from_secret(&secret);
             let decoding = DecodingKey::from_secret(&secret);
@@ -156,6 +164,8 @@ impl ShareTokenManager {
         code: String,
         db_id: String,
         host_id: String,
+        host: Option<String>,
+        port: Option<u16>,
         permission: SharePermission,
         tables: Vec<String>,
         cols: Option<serde_json::Value>,
@@ -170,6 +180,8 @@ impl ShareTokenManager {
             sub: code.clone(),
             db_id,
             host_id,
+            host,
+            port,
             perm: permission.as_str().to_string(),
             tables,
             cols,
@@ -208,6 +220,8 @@ impl ShareTokenManager {
             code: claims.sub,
             db_id: claims.db_id,
             host_id: claims.host_id,
+            host: claims.host,
+            port: claims.port,
             permission: SharePermission::from_str(&claims.perm),
             tables: claims.tables,
             cols: claims.cols,
@@ -226,7 +240,7 @@ impl ShareTokenManager {
             return None;
         }
         
-        let payload = base64::decode_config(parts[1], base64::URL_SAFE_NO_PAD).ok()?;
+        let payload = base64::Engine::decode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, parts[1]).ok()?;
         let claims: ShareClaims = serde_json::from_slice(&payload).ok()?;
         Some(claims.sub)
     }

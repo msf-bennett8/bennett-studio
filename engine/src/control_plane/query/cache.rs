@@ -35,8 +35,9 @@ pub struct QueryCache {
 impl QueryCache {
     pub fn new() -> Self {
         // 5 minute TTL, max 1000 entries
-        let cache = TtlCache::new(Duration::from_secs(300), 1000);
-        
+        let cache = Arc::new(TtlCache::new(Duration::from_secs(300), 1000));
+        TtlCache::start_janitor(&cache);
+
         Self {
             cache,
             hit_count: std::sync::atomic::AtomicU64::new(0),

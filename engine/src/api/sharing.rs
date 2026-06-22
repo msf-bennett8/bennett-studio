@@ -18,6 +18,7 @@ use crate::models::share::{
 };
 use crate::auth::share_token::{SharePermission, build_share_url};
 use crate::utils::bennett_code::generate_share_code;
+use crate::utils::net::{detect_lan_ip, detect_engine_port};
 use crate::sharing::share_store::ShareRecord;
 
 /// Base URL for share links (configurable via env)
@@ -60,13 +61,19 @@ pub async fn create_share(
     
     // Generate host ID (fingerprint)
     let host_id = format!("host-{}", uuid::Uuid::new_v4().to_string().split('-').next().unwrap_or("unknown"));
-    
-    // Create JWT token
+
+    // Detect host network endpoint for guest resolution
+    let host_ip = detect_lan_ip().unwrap_or_else(|| "127.0.0.1".to_string());
+    let host_port = detect_engine_port();
+
+    // Create JWT token with embedded host endpoint
     let token_manager = state.token_manager.read().await;
     let token_result = token_manager.create_token(
         code.clone(),
         db.id.clone(),
         host_id.clone(),
+        Some(host_ip.clone()),
+        Some(host_port),
         perm.clone(),
         tables.clone(),
         req.cols.clone(),
@@ -93,6 +100,8 @@ pub async fn create_share(
         code: code.clone(),
         db_id: db.id.clone(),
         host_id,
+        host: Some(host_ip.clone()),
+        port: Some(host_port),
         token_jti: token.jti.clone(),
         permission: perm.as_str().to_string(),
         tables: serde_json::to_string(&tables).unwrap_or_else(|_| r#"["*"]"#.to_string()),
@@ -321,5 +330,54 @@ pub async fn get_share_info(
         "expires_at": record.expires_at,
         "status": if record.revoked { "revoked" } else if record.expires_at < Utc::now() { "expired" } else { "active" },
         "guest_count": record.guest_count,
-    }))))
+    })) ))
+}
+
+/// GET /api/shares/:code/resolve — Resolve share code to host endpoint (guest)
+/// Returns the host IP and port so the guest can connect directly
+pub async fn resolve_share(
+    Path(code): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<crate::models::database::ApiResponse<serde_json::Value>>, StatusCode> {
+    // Get share record
+    let record = match state.share_store.get_share(&code).await {
+        Ok(Some(r)) => r,
+        Ok(None) => {
+            return Ok(Json(crate::models::database::ApiResponse::error(
+                "Share not found".to_string()
+            )));
+        }
+        Err(e) => {
+            warn!("Failed to get share {} for resolve: {}", code, e);
+            return Ok(Json(crate::models::database::ApiResponse::error(
+                "Internal error".to_string()
+            )));
+        }
+    };
+
+    // Check if revoked or expired
+    if record.revoked {
+        return Ok(Json(crate::models::database::ApiResponse::error(
+            "Share has been revoked".to_string()
+        )));
+    }
+    if record.expires_at < Utc::now() {
+        return Ok(Json(crate::models::database::ApiResponse::error(
+            "Share has expired".to_string()
+        )));
+    }
+
+    // Read host/port from stored record
+    let host_ip = record.host.unwrap_or_else(|| "127.0.0.1".to_string());
+    let host_port = record.port.unwrap_or(3001);
+
+    info!("Resolved share {} to {}:{}", code, host_ip, host_port);
+
+    Ok(Json(crate::models::database::ApiResponse::success(serde_json::json!({
+        "code": record.code,
+        "host": host_ip,
+        "port": host_port,
+        "base_url": format!("http://{}:{}", host_ip, host_port),
+        "ttl_seconds": 300,
+    })) ))
 }

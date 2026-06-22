@@ -94,6 +94,12 @@ async fn main() {
             panic!("No available port found in range 3001-3010");
         });
 
+    // Start gRPC server on port 3002 (or BENNETT_GRPC_PORT)
+    let grpc_port = std::env::var("BENNETT_GRPC_PORT")
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(3002);
+
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     info!("Bennett Engine starting on http://{}", addr);
     info!("gRPC server on port {}", grpc_port);
@@ -106,12 +112,6 @@ async fn main() {
     info!("  DELETE /api/databases/:id");
     info!("  POST   /api/databases/:id/start");
     info!("  POST   /api/databases/:id/stop");
-
-    // Start gRPC server on port 3002 (or BENNETT_GRPC_PORT)
-    let grpc_port = std::env::var("BENNETT_GRPC_PORT")
-        .ok()
-        .and_then(|p| p.parse().ok())
-        .unwrap_or(3002);
     
     let grpc_state = state.clone();
     tokio::spawn(async move {

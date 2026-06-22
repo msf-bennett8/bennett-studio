@@ -42,8 +42,15 @@ futures = "0.3"
 # Phase 4: gRPC HTTP/2 + gRPC-Web
 tokio-stream = "0.1"
 
+# Phase 6: Parquet export support
+arrow = "53"
+parquet = "53"
+
 [build-dependencies]
 tonic-build = "0.12"
+
+# Phase 2: SQL parsing for table extraction and validation
+sqlparser = "0.52"
 
 # Phase 5: Wire Protocol Proxy + Security
 tokio-rustls = "0.26"

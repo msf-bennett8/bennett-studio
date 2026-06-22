@@ -103,6 +103,25 @@ pub async fn export_json(
     execute_export(None, state, req, "json").await
 }
 
+/// POST /bennett.v1.ExportService/ExportParquet
+pub async fn export_parquet(
+    State(state): State<AppState>,
+    Json(body): Json<serde_json::Value>,
+    request: axum::extract::Request,
+) -> Response {
+    let client_ip = request.extensions().get::<crate::api::middleware::ClientIp>().map(|c| c.0);
+    let req: ExportRequest = match parse_connect_request(&body.to_string()) {
+        Ok(r) => r,
+        Err(resp) => return resp,
+    };
+
+    if req.format != "parquet" {
+        return connect_error("invalid_argument", "Format must be 'parquet' for this endpoint");
+    }
+
+    execute_export(client_ip, state, req, "parquet").await
+}
+
 /// POST /bennett.v1.ExportService/ExportTableDump
 pub async fn export_table_dump(
     State(state): State<AppState>,
@@ -193,6 +212,24 @@ async fn execute_export(
     let data = match format {
         "csv" => format_csv(&result.columns, &result.rows, req.include_headers),
         "json" => format_json(&result.columns, &result.rows),
+        "parquet" => match format_parquet(&result.columns, &result.rows) {
+            Ok(bytes) => {
+                // Parquet is binary — encode as base64 for JSON transport
+                // Client decodes: atob(data) in browser, Buffer.from(data, 'base64') in Node
+                use base64::Engine;
+                base64::engine::general_purpose::STANDARD.encode(&bytes)
+            }
+            Err(e) => {
+                return connect_response(ExportResponse {
+                    success: false,
+                    data: String::new(),
+                    is_last: true,
+                    total_rows: 0,
+                    chunk_index: 0,
+                    error: Some(format!("Parquet encoding failed: {}", e)),
+                });
+            }
+        },
         _ => {
             return connect_error("invalid_argument", &format!("Unsupported format: {}", format));
         }
@@ -291,7 +328,7 @@ fn format_json(
     rows: &[Vec<serde_json::Value>],
 ) -> String {
     let mut objects = Vec::new();
-    
+
     for row in rows {
         let mut obj = serde_json::Map::new();
         for (i, col) in columns.iter().enumerate() {
@@ -300,9 +337,111 @@ fn format_json(
         }
         objects.push(serde_json::Value::Object(obj));
     }
-    
+
     serde_json::to_string_pretty(&objects).unwrap_or_default()
 }
 
+/// Format query result as Apache Parquet binary
+/// Returns base64-encoded string for JSON transport
+fn format_parquet(
+    columns: &[String],
+    rows: &[Vec<serde_json::Value>],
+) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
+    use arrow::array::*;
+    use arrow::datatypes::*;
+    use arrow::record_batch::RecordBatch;
+    use parquet::arrow::arrow_writer::ArrowWriter;
+    use parquet::file::properties::WriterProperties;
+    use std::sync::Arc;
+
+    if columns.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let arrow_fields: Vec<Field> = columns.iter().enumerate().map(|(i, name)| {
+        let data_type = if let Some(first_row) = rows.first() {
+            if let Some(val) = first_row.get(i) {
+                match val {
+                    serde_json::Value::Null => DataType::Utf8,
+                    serde_json::Value::Bool(_) => DataType::Boolean,
+                    serde_json::Value::Number(n) => {
+                        if n.is_i64() { DataType::Int64 }
+                        else if n.is_f64() { DataType::Float64 }
+                        else { DataType::Utf8 }
+                    }
+                    serde_json::Value::String(_) => DataType::Utf8,
+                    _ => DataType::Utf8,
+                }
+            } else {
+                DataType::Utf8
+            }
+        } else {
+            DataType::Utf8
+        };
+        Field::new(name, data_type, true)
+    }).collect();
+
+    let schema = Arc::new(Schema::new(arrow_fields.clone()));
+
+    let mut arrays: Vec<Arc<dyn Array>> = Vec::with_capacity(columns.len());
+
+    for (col_idx, field) in arrow_fields.iter().enumerate() {
+        match field.data_type() {
+            DataType::Boolean => {
+                let values: Vec<Option<bool>> = rows.iter().map(|row| {
+                    row.get(col_idx).and_then(|v| match v {
+                        serde_json::Value::Bool(b) => Some(*b),
+                        _ => None,
+                    })
+                }).collect();
+                arrays.push(Arc::new(BooleanArray::from(values)));
+            }
+            DataType::Int64 => {
+                let values: Vec<Option<i64>> = rows.iter().map(|row| {
+                    row.get(col_idx).and_then(|v| match v {
+                        serde_json::Value::Number(n) => n.as_i64(),
+                        _ => None,
+                    })
+                }).collect();
+                arrays.push(Arc::new(Int64Array::from(values)));
+            }
+            DataType::Float64 => {
+                let values: Vec<Option<f64>> = rows.iter().map(|row| {
+                    row.get(col_idx).and_then(|v| match v {
+                        serde_json::Value::Number(n) => n.as_f64(),
+                        _ => None,
+                    })
+                }).collect();
+                arrays.push(Arc::new(Float64Array::from(values)));
+            }
+            _ => {
+                let values: Vec<Option<String>> = rows.iter().map(|row| {
+                    row.get(col_idx).map(|v| match v {
+                        serde_json::Value::Null => String::new(),
+                        serde_json::Value::String(s) => s.clone(),
+                        other => other.to_string(),
+                    })
+                }).collect();
+                arrays.push(Arc::new(StringArray::from_iter(values)));
+            }
+        }
+    }
+
+    let batch = RecordBatch::try_new(schema.clone(), arrays)
+        .map_err(|e| format!("Failed to build RecordBatch: {}", e))?;
+
+    let mut buf = Vec::new();
+    let props = WriterProperties::builder().build();
+    let mut writer = ArrowWriter::try_new(&mut buf, schema, Some(props))
+        .map_err(|e| format!("Failed to create Parquet writer: {}", e))?;
+
+    writer.write(&batch)
+        .map_err(|e| format!("Failed to write Parquet batch: {}", e))?;
+    writer.close()
+        .map_err(|e| format!("Failed to close Parquet writer: {}", e))?;
+
+    Ok(buf)
+}
+
 // ExportService implementation complete
-// Features: CSV/JSON export, chunked streaming, progress tracking
+// Features: CSV/JSON/Parquet export, chunked streaming, progress tracking

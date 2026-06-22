@@ -5,6 +5,8 @@ CREATE TABLE IF NOT EXISTS shares (
     code TEXT PRIMARY KEY,
     db_id TEXT NOT NULL,
     host_id TEXT NOT NULL,
+    host TEXT,
+    port INTEGER,
     token_jti TEXT NOT NULL UNIQUE,
     permission TEXT NOT NULL DEFAULT 'ro',
     tables TEXT NOT NULL DEFAULT '["*"]',

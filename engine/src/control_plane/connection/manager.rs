@@ -185,11 +185,32 @@ impl ConnectionManager {
                             .collect()
                     })
                     .collect();
+                // Extract last_insert_id from RETURNING clause or pg_last_oid
+                let last_insert_id = if sql.trim().to_uppercase().starts_with("INSERT") {
+                    // Check if RETURNING clause exists
+                    if sql.to_uppercase().contains("RETURNING") {
+                        rows.first().and_then(|row| {
+                            row.try_get::<String, _>(0).ok()
+                                .or_else(|| row.try_get::<i64, _>(0).ok().map(|v| v.to_string()))
+                        })
+                    } else {
+                        // Use pg_last_oid for tables with OID
+                        sqlx::query("SELECT pg_last_oid()::text")
+                            .fetch_optional(pool)
+                            .await
+                            .ok()
+                            .flatten()
+                            .and_then(|r| r.try_get::<String, _>(0).ok())
+                    }
+                } else {
+                    None
+                };
+
                 Ok(QueryResult {
                     columns,
                     rows: data,
                     row_count: rows.len(),
-                    last_insert_id: None, // TODO: Extract from RETURNING clause or pg_last_oid
+                    last_insert_id,
                 })
             }
             DatabasePool::MySql(pool) => {
@@ -209,11 +230,23 @@ impl ConnectionManager {
                             .collect()
                     })
                     .collect();
+                // Extract last_insert_id for INSERT operations
+                let last_insert_id = if sql.trim().to_uppercase().starts_with("INSERT") {
+                    sqlx::query("SELECT LAST_INSERT_ID() as id")
+                        .fetch_optional(pool)
+                        .await
+                        .ok()
+                        .flatten()
+                        .and_then(|r| r.try_get::<i64, _>("id").ok().map(|v| v.to_string()))
+                } else {
+                    None
+                };
+
                 Ok(QueryResult {
                     columns,
                     rows: data,
                     row_count: rows.len(),
-                    last_insert_id: None, // TODO: Extract from LAST_INSERT_ID()
+                    last_insert_id,
                 })
             }
             DatabasePool::Sqlite(pool) => {
@@ -233,11 +266,23 @@ impl ConnectionManager {
                             .collect()
                     })
                     .collect();
+                // Extract last_insert_id for INSERT operations
+                let last_insert_id = if sql.trim().to_uppercase().starts_with("INSERT") {
+                    sqlx::query("SELECT last_insert_rowid() as id")
+                        .fetch_optional(pool)
+                        .await
+                        .ok()
+                        .flatten()
+                        .and_then(|r| r.try_get::<i64, _>("id").ok().map(|v| v.to_string()))
+                } else {
+                    None
+                };
+
                 Ok(QueryResult {
                     columns,
                     rows: data,
                     row_count: rows.len(),
-                    last_insert_id: None, // TODO: Extract from last_insert_rowid()
+                    last_insert_id,
                 })
             }
         }

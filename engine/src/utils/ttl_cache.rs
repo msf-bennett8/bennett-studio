@@ -27,16 +27,18 @@ where
     K: Eq + Hash + Clone + Send + Sync + 'static,
     V: Send + Sync + 'static,
 {
-    pub fn new(default_ttl: Duration, max_size: usize) -> Arc<Self> {
-        let cache = Arc::new(Self {
+    pub fn new(default_ttl: Duration, max_size: usize) -> Self {
+        Self {
             store: RwLock::new(HashMap::with_capacity(max_size.min(1024))),
             default_ttl,
             max_size,
             cleanup_interval: Duration::from_secs(300), // 5 min
-        });
-        
-        // Start background janitor
-        let cache_clone = cache.clone();
+        }
+    }
+
+    /// Start background janitor. Call after wrapping in Arc.
+    pub fn start_janitor(self_arc: &Arc<Self>) {
+        let cache_clone = self_arc.clone();
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(300));
             loop {
@@ -44,8 +46,6 @@ where
                 cache_clone.cleanup().await;
             }
         });
-        
-        cache
     }
     
     /// Get value if not expired
