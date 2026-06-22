@@ -63,8 +63,10 @@ impl QueryCache {
         None
     }
     
-    /// Store result in cache
-    pub async fn put(&self, db_id: &str, sql: &str, share_code: Option<&str>, result: QueryResult, tables: Vec<String>) {
+    /// Store result in cache (tables auto-extracted from SQL)
+    pub async fn put(&self, db_id: &str, sql: &str, share_code: Option<&str>, result: QueryResult, _tables: Vec<String>) {
+        // Auto-extract tables from SQL for precise invalidation
+        let tables = Self::extract_tables(sql);
         // Only cache SELECT queries
         let upper = sql.trim().to_uppercase();
         if !upper.starts_with("SELECT") && !upper.starts_with("WITH") {
@@ -108,23 +110,70 @@ impl QueryCache {
         }
     }
     
+    /// Extract table names from SQL (naive but functional)
+    pub fn extract_tables(sql: &str) -> Vec<String> {
+        let upper = sql.to_uppercase();
+        let mut tables = Vec::new();
+        
+        // FROM table
+        if let Some(pos) = upper.find(" FROM ") {
+            let after = &sql[pos + 6..];
+            let name = after.split_whitespace().next().unwrap_or("")
+                .trim_matches('"').trim_matches('`').trim_matches('[').trim_matches(']');
+            if !name.is_empty() && !name.starts_with('(') {
+                tables.push(name.to_lowercase());
+            }
+        }
+        
+        // JOIN table
+        let mut search = 0;
+        while let Some(pos) = upper[search..].find(" JOIN ") {
+            let abs = search + pos;
+            let after = &sql[abs + 6..];
+            let name = after.split_whitespace().next().unwrap_or("")
+                .trim_matches('"').trim_matches('`').trim_matches('[').trim_matches(']');
+            if !name.is_empty() {
+                tables.push(name.to_lowercase());
+            }
+            search = abs + 6;
+        }
+        
+        // INTO table
+        if let Some(pos) = upper.find(" INTO ") {
+            let after = &sql[pos + 6..];
+            let name = after.split_whitespace().next().unwrap_or("")
+                .trim_matches('"').trim_matches('`').trim_matches('[').trim_matches(']');
+            if !name.is_empty() {
+                tables.push(name.to_lowercase());
+            }
+        }
+        
+        tables
+    }
+    
     /// Invalidate cache entries for specific tables
     pub async fn invalidate_tables(&self, db_id: &str, tables: &[String]) {
         let keys = self.cache.keys().await;
+        let tables_lower: Vec<String> = tables.iter().map(|t| t.to_lowercase()).collect();
+        
         let to_remove: Vec<_> = keys
             .into_iter()
             .filter(|k| {
-                k.db_id == db_id && {
-                    // Check if entry references any of the invalidated tables
-                    // This requires storing table references in the key
-                    // Simplified: invalidate all for this db
-                    true
+                if k.db_id != db_id {
+                    return false;
                 }
+                // Check if query references any invalidated table
+                let query_tables = Self::extract_tables(&k.sql);
+                query_tables.iter().any(|qt| tables_lower.contains(qt))
             })
             .collect();
         
         for key in to_remove {
             self.cache.remove(&key).await;
+        }
+        
+        if !to_remove.is_empty() {
+            tracing::info!("Invalidated {} cache entries for tables {:?}", to_remove.len(), tables);
         }
     }
     

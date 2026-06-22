@@ -25,10 +25,18 @@ pub async fn start_grpc_server(
     
     info!("Starting gRPC server on {}", addr);
     
-    // Build reflection service for grpcurl/discovery
-    let reflection_service = tonic_reflection::server::Builder::configure()
-        .register_encoded_file_descriptor_set(generated::FILE_DESCRIPTOR_SET)
-        .build()?;
+        // Build reflection service for grpcurl/discovery
+        let reflection_service = if generated::FILE_DESCRIPTOR_SET.is_empty() {
+            // Stub mode — no reflection available
+            tracing::warn!("gRPC reflection unavailable — proto files not generated yet");
+            None
+        } else {
+            Some(
+                tonic_reflection::server::Builder::configure()
+                    .register_encoded_file_descriptor_set(generated::FILE_DESCRIPTOR_SET)
+                    .build()?
+            )
+        };
     
     let share_service = share::ShareGrpcService::new(state.clone());
     let query_service = query::QueryGrpcService::new(state.clone());
@@ -38,10 +46,16 @@ pub async fn start_grpc_server(
     // gRPC-Web proxy layer
     let web_proxy = web_proxy::grpc_web_proxy();
     
-    Server::builder()
+    let mut server = Server::builder()
         .accept_http1(true) // Required for gRPC-Web
-        .layer(web_proxy)
-        .add_service(reflection_service)
+        .layer(web_proxy);
+    
+    // Add reflection if available
+    if let Some(reflection) = reflection_service {
+        server = server.add_service(reflection);
+    }
+    
+    server
         .add_service(generated::share_service_server::ShareServiceServer::new(share_service))
         .add_service(generated::query_service_server::QueryServiceServer::new(query_service))
         .add_service(generated::schema_service_server::SchemaServiceServer::new(schema_service))

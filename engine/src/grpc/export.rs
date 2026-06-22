@@ -49,7 +49,8 @@ impl ExportService for ExportGrpcService {
         &self,
         _request: Request<ExportRequest>,
     ) -> Result<Response<Self::ExportParquetStream>, Status> {
-        // TODO: Implement Parquet export
+        // TODO: Implement Parquet export — requires parquet crate + Arrow conversion
+                // Parquet export requires parquet crate + Arrow conversion
         let (tx, rx) = tokio::sync::mpsc::channel(4);
         tokio::spawn(async move {
             let _ = tx.send(Err(Status::unimplemented("Parquet export not yet implemented"))).await;
@@ -124,20 +125,43 @@ impl ExportGrpcService {
         
         info!("gRPC export on {}: {} rows as {} in {}ms", req.share_code, result.row_count, format, elapsed);
         
-        // Single chunk for now - TODO: stream large results
-        let (tx, rx) = tokio::sync::mpsc::channel(4);
-        let chunk = ExportChunk {
-            data: data.into_bytes(),
-            is_last: true,
-            total_rows: result.row_count as i64,
-            chunk_index: 0,
-        };
+    // Stream in chunks to avoid memory issues
+    let (tx, rx) = tokio::sync::mpsc::channel(4);
+    let data_bytes = data.into_bytes();
+    let chunk_size = 64 * 1024; // 64KB chunks
+    let total_rows = result.row_count as i64;
+    
+    tokio::spawn(async move {
+        let mut offset = 0;
+        let mut chunk_index = 0;
+        let total_len = data_bytes.len();
         
-        tokio::spawn(async move {
-            let _ = tx.send(Ok(chunk)).await;
-        });
-        
-        Ok(ReceiverStream::new(rx))
+        loop {
+            let end = (offset + chunk_size).min(total_len);
+            let is_last = end == total_len;
+            let chunk_data = data_bytes[offset..end].to_vec();
+            
+            let chunk = ExportChunk {
+                data: chunk_data,
+                is_last,
+                total_rows,
+                chunk_index,
+            };
+            
+            if tx.send(Ok(chunk)).await.is_err() {
+                break; // Receiver dropped
+            }
+            
+            if is_last {
+                break;
+            }
+            
+            offset = end;
+            chunk_index += 1;
+        }
+    });
+    
+    Ok(ReceiverStream::new(rx))
     }
     
     fn format_csv(

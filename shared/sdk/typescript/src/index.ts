@@ -14,6 +14,12 @@ export {
   createGrpcWebClient,
 } from './grpcClient';
 
+export {
+  resolveHost,
+  preloadHosts,
+  clearResolverCache,
+} from './resolver';
+
 export type {
   BennettClientConfig,
   QueryResult,

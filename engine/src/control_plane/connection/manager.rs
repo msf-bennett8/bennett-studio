@@ -189,6 +189,7 @@ impl ConnectionManager {
                     columns,
                     rows: data,
                     row_count: rows.len(),
+                    last_insert_id: None, // TODO: Extract from RETURNING clause or pg_last_oid
                 })
             }
             DatabasePool::MySql(pool) => {
@@ -212,6 +213,7 @@ impl ConnectionManager {
                     columns,
                     rows: data,
                     row_count: rows.len(),
+                    last_insert_id: None, // TODO: Extract from LAST_INSERT_ID()
                 })
             }
             DatabasePool::Sqlite(pool) => {
@@ -235,6 +237,7 @@ impl ConnectionManager {
                     columns,
                     rows: data,
                     row_count: rows.len(),
+                    last_insert_id: None, // TODO: Extract from last_insert_rowid()
                 })
             }
         }
@@ -331,6 +334,239 @@ impl ConnectionManager {
             }
         }
     }
+
+        pub async fn get_table_columns(
+        &self,
+        id: &str,
+        table_name: &str,
+    ) -> Result<Vec<ColumnInfo>, sqlx::Error> {
+        let pool = self.pools.get(id).ok_or_else(|| {
+            sqlx::Error::Configuration("Database not connected".into())
+        })?;
+
+        match pool {
+            DatabasePool::Postgres(pool) => {
+                let rows = sqlx::query(
+                    "SELECT column_name, data_type, is_nullable, column_default
+                     FROM information_schema.columns
+                     WHERE table_schema = 'public' AND table_name = $1
+                     ORDER BY ordinal_position"
+                )
+                .bind(table_name)
+                .fetch_all(pool)
+                .await?;
+
+                Ok(rows.iter().map(|row| ColumnInfo {
+                    name: row.get("column_name"),
+                    data_type: row.get("data_type"),
+                    nullable: row.get::<String, _>("is_nullable") == "YES",
+                }).collect())
+            }
+            DatabasePool::MySql(pool) => {
+                let rows = sqlx::query(
+                    "SELECT column_name, data_type, is_nullable, column_default
+                     FROM information_schema.columns
+                     WHERE table_schema = DATABASE() AND table_name = ?
+                     ORDER BY ordinal_position"
+                )
+                .bind(table_name)
+                .fetch_all(pool)
+                .await?;
+
+                Ok(rows.iter().map(|row| ColumnInfo {
+                    name: row.get("column_name"),
+                    data_type: row.get("data_type"),
+                    nullable: row.get::<String, _>("is_nullable") == "YES",
+                }).collect())
+            }
+            DatabasePool::Sqlite(pool) => {
+                let rows = sqlx::query(&format!("PRAGMA table_info({})", table_name))
+                    .fetch_all(pool)
+                    .await?;
+
+                Ok(rows.iter().map(|row| ColumnInfo {
+                    name: row.get("name"),
+                    data_type: row.get("type"),
+                    nullable: row.get::<i32, _>("notnull") == 0,
+                }).collect())
+            }
+        }
+    }
+
+    pub async fn get_table_indexes(
+        &self,
+        id: &str,
+        table_name: &str,
+    ) -> Result<Vec<IndexInfo>, sqlx::Error> {
+        let pool = self.pools.get(id).ok_or_else(|| {
+            sqlx::Error::Configuration("Database not connected".into())
+        })?;
+
+        match pool {
+            DatabasePool::Postgres(pool) => {
+                let rows = sqlx::query(
+                    "SELECT indexname, indexdef 
+                     FROM pg_indexes 
+                     WHERE tablename = $1 AND schemaname = 'public'"
+                )
+                .bind(table_name)
+                .fetch_all(pool)
+                .await?;
+
+                Ok(rows.iter().map(|row| {
+                    let def: String = row.get("indexdef");
+                    let is_unique = def.contains(" UNIQUE ");
+                    let is_primary = def.contains(" PRIMARY KEY ");
+                    let name: String = row.get("indexname");
+                    IndexInfo {
+                        name: name.clone(),
+                        columns: Self::extract_columns_from_index_def(&def),
+                        index_type: if def.contains("btree") { "btree".to_string() } else { "unknown".to_string() },
+                        is_unique,
+                        is_primary,
+                    }
+                }).collect())
+            }
+            DatabasePool::MySql(pool) => {
+                let rows = sqlx::query(
+                    "SELECT index_name, column_name, non_unique 
+                     FROM information_schema.statistics 
+                     WHERE table_schema = DATABASE() AND table_name = ?"
+                )
+                .bind(table_name)
+                .fetch_all(pool)
+                .await?;
+
+                // Group by index_name
+                let mut indexes: HashMap<String, (bool, Vec<String>)> = HashMap::new();
+                for row in rows {
+                    let name: String = row.get("index_name");
+                    let col: String = row.get("column_name");
+                    let non_unique: i64 = row.get("non_unique");
+                    let entry = indexes.entry(name).or_insert((non_unique == 0, Vec::new()));
+                    entry.1.push(col);
+                }
+
+                Ok(indexes.into_iter().map(|(name, (unique, cols))| IndexInfo {
+                    name: name.clone(),
+                    columns: cols,
+                    index_type: "btree".to_string(),
+                    is_unique: unique,
+                    is_primary: name == "PRIMARY",
+                }).collect())
+            }
+            DatabasePool::Sqlite(pool) => {
+                let rows = sqlx::query(&format!("PRAGMA index_list({})", table_name))
+                    .fetch_all(pool)
+                    .await?;
+
+                let mut indexes = Vec::new();
+                for row in rows {
+                    let name: String = row.get("name");
+                    let unique: i32 = row.get("unique");
+                    
+                    let cols = sqlx::query(&format!("PRAGMA index_info({})", name))
+                        .fetch_all(pool)
+                        .await?;
+                    
+                    let columns: Vec<String> = cols.iter().map(|c| c.get::<String, _>("name")).collect();
+                    
+                    indexes.push(IndexInfo {
+                        name: name.clone(),
+                        columns,
+                        index_type: "btree".to_string(),
+                        is_unique: unique == 1,
+                        is_primary: name.starts_with("sqlite_autoindex") && unique == 1,
+                    });
+                }
+                Ok(indexes)
+            }
+        }
+    }
+
+    pub async fn get_table_constraints(
+        &self,
+        id: &str,
+        table_name: &str,
+    ) -> Result<Vec<ConstraintInfo>, sqlx::Error> {
+        let pool = self.pools.get(id).ok_or_else(|| {
+            sqlx::Error::Configuration("Database not connected".into())
+        })?;
+
+        match pool {
+            DatabasePool::Postgres(pool) => {
+                let rows = sqlx::query(
+                    "SELECT conname, contype, pg_get_constraintdef(oid) as def
+                     FROM pg_constraint
+                     WHERE conrelid = $1::regclass"
+                )
+                .bind(table_name)
+                .fetch_all(pool)
+                .await?;
+
+                Ok(rows.iter().map(|row| {
+                    let con_type: String = row.get("contype");
+                    ConstraintInfo {
+                        name: row.get("conname"),
+                        constraint_type: match con_type.as_str() {
+                            "p" => "PRIMARY KEY".to_string(),
+                            "f" => "FOREIGN KEY".to_string(),
+                            "u" => "UNIQUE".to_string(),
+                            "c" => "CHECK".to_string(),
+                            _ => "UNKNOWN".to_string(),
+                        },
+                        columns: vec![], // Would need to parse def
+                        definition: Some(row.get("def")),
+                    }
+                }).collect())
+            }
+            DatabasePool::MySql(pool) => {
+                let rows = sqlx::query(
+                    "SELECT constraint_name, constraint_type
+                     FROM information_schema.table_constraints
+                     WHERE table_schema = DATABASE() AND table_name = ?"
+                )
+                .bind(table_name)
+                .fetch_all(pool)
+                .await?;
+
+                Ok(rows.iter().map(|row| ConstraintInfo {
+                    name: row.get("constraint_name"),
+                    constraint_type: row.get("constraint_type"),
+                    columns: vec![], // Would need column mapping
+                    definition: None,
+                }).collect())
+            }
+            DatabasePool::Sqlite(pool) => {
+                // SQLite constraints are in CREATE TABLE statement
+                // Parse from table_info or use PRAGMA
+                let rows = sqlx::query(
+                    "SELECT sql FROM sqlite_master WHERE type='table' AND name = ?"
+                )
+                .bind(table_name)
+                .fetch_all(pool)
+                .await?;
+
+                Ok(rows.iter().map(|row| ConstraintInfo {
+                    name: format!("{}_table", table_name),
+                    constraint_type: "TABLE".to_string(),
+                    columns: vec![],
+                    definition: row.try_get("sql").ok(),
+                }).collect())
+            }
+        }
+    }
+
+    fn extract_columns_from_index_def(def: &str) -> Vec<String> {
+        // Extract column names from "CREATE INDEX ... ON table (col1, col2)"
+        if let Some(start) = def.find('(') {
+            if let Some(end) = def.find(')') {
+                let cols = &def[start+1..end];
+                return cols.split(',').map(|s| s.trim().trim_matches('"').to_string()).collect();
+            }
+        }
+        vec![]
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -338,6 +574,7 @@ pub struct QueryResult {
     pub columns: Vec<String>,
     pub rows: Vec<Vec<serde_json::Value>>,
     pub row_count: usize,
+    pub last_insert_id: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -351,6 +588,23 @@ pub struct ColumnInfo {
     pub name: String,
     pub data_type: String,
     pub nullable: bool,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct IndexInfo {
+    pub name: String,
+    pub columns: Vec<String>,
+    pub index_type: String,
+    pub is_unique: bool,
+    pub is_primary: bool,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ConstraintInfo {
+    pub name: String,
+    pub constraint_type: String,
+    pub columns: Vec<String>,
+    pub definition: Option<String>,
 }
 
 fn pg_value_to_json(row: &sqlx::postgres::PgRow, i: usize) -> serde_json::Value {

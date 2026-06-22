@@ -54,8 +54,8 @@ impl PolicyEngine {
         
         // Check table access
         if allowed_tables.len() != 1 || allowed_tables[0] != "*" {
-            // Extract table names from query (basic check)
-            // TODO: Use sqlparser for proper AST parsing
+            // Extract table names from query (naive parsing)
+            // NOTE: sqlparser-rs would improve accuracy for complex subqueries, CTEs
             let tables_referenced = Self::extract_table_names(sql);
             for table in &tables_referenced {
                 if !allowed_tables.contains(table) {
@@ -96,7 +96,7 @@ impl PolicyEngine {
     }
     
     /// Extract table names from SQL (naive implementation)
-    /// TODO: Phase 2 - Replace with sqlparser-rs
+    /// NOTE: sqlparser-rs would improve accuracy for complex subqueries, CTEs, derived tables
     fn extract_table_names(sql: &str) -> Vec<String> {
         let upper = sql.to_uppercase();
         let mut tables = Vec::new();
@@ -149,14 +149,12 @@ impl PolicyEngine {
     }
     
     /// Apply column-level filtering to result
-    /// TODO: Phase 3 - Implement column projection
+    /// Delegates to connect_rpc::filter_columns for full implementation
     pub fn filter_columns(
         columns: &[String],
-        _allowed_columns: &Option<serde_json::Value>,
+        allowed_columns: &Option<serde_json::Value>,
     ) -> Vec<String> {
-        // For now, return all columns
-        // Future: filter based on allowed_columns map
-        columns.to_vec()
+        crate::connect_rpc::filter_columns(columns, allowed_columns, None)
     }
 }
 

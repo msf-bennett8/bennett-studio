@@ -171,7 +171,7 @@ impl QueryService for QueryGrpcService {
         Ok(Response::new(ExecuteWriteResponse {
             success: true,
             rows_affected: result.row_count as i64,
-            last_insert_id: String::new(),
+            last_insert_id: result.last_insert_id.clone().unwrap_or_default(),
             execution_time_ms: elapsed,
             error: String::new(),
         }))
@@ -184,29 +184,107 @@ impl QueryService for QueryGrpcService {
         request: Request<StreamQueryRequest>,
     ) -> Result<Response<Self::StreamQueryStream>, Status> {
         let req = request.into_inner();
-        
-        // Validate
+
         let validated = validate_share_request(&self.state, &req.share_code, &req.token)
             .await
             .map_err(|e| map_error_to_status(&e))?;
-        
+
         validate_shared_sql(&req.sql, &validated.permission)
             .map_err(|e| map_error_to_status(&e))?;
-        
-        // TODO: Implement streaming with chunked results
-        // For now, return single chunk
+
+        let sql = apply_rls(&req.sql, validated.rls.as_deref());
+        let chunk_size = 1000; // Default chunk size
+        let max_chunks = 100;  // Max 100 chunks = 100k rows
+
+        let db_instance = {
+            let dbs = self.state.databases.lock().unwrap();
+            dbs.iter().find(|d| d.id == validated.db_id).cloned()
+        };
+
+        let db_instance = db_instance.ok_or_else(|| Status::not_found("Database not available"))?;
+
+        {
+            let mut conn = self.state.connections.lock().await;
+            if !conn.is_connected(&db_instance.id) {
+                conn.connect(&db_instance).await
+                    .map_err(|e| Status::unavailable(format!("Connection failed: {}", e)))?;
+            }
+        }
+
         let (tx, rx) = tokio::sync::mpsc::channel(4);
-        
+        let state = self.state.clone();
+        let db_id = db_instance.id.clone();
+
         tokio::spawn(async move {
-            // Placeholder - full implementation would stream rows in chunks
-            let _ = tx.send(Ok(QueryChunk {
-                rows: vec![],
-                is_last: true,
-                total_rows: 0,
-                chunk_index: 0,
-            })).await;
+            let mut offset = 0;
+            let mut chunk_index = 0;
+            let mut total_rows = 0;
+
+            loop {
+                if chunk_index >= max_chunks {
+                    break;
+                }
+
+                let chunk_sql = format!("{} LIMIT {} OFFSET {}", sql, chunk_size, offset);
+
+                let result = {
+                    let conn = state.connections.lock().await;
+                    match conn.execute(&db_id, &chunk_sql).await {
+                        Ok(r) => r,
+                        Err(e) => {
+                            let _ = tx.send(Err(Status::internal(format!("Query failed: {}", e)))).await;
+                            break;
+                        }
+                    }
+                };
+
+                if result.rows.is_empty() {
+                    break;
+                }
+
+                let rows: Vec<QueryResultRow> = result.rows.iter().map(|row| {
+                    let values: Vec<Value> = row.iter().map(|cell| {
+                        match cell {
+                            serde_json::Value::Null => Value { kind: Some(crate::grpc::generated::value::Kind::NullValue(0)) },
+                            serde_json::Value::Bool(b) => Value { kind: Some(crate::grpc::generated::value::Kind::BoolValue(*b)) },
+                            serde_json::Value::Number(n) => {
+                                if let Some(i) = n.as_i64() {
+                                    Value { kind: Some(crate::grpc::generated::value::Kind::Int64Value(i)) }
+                                } else if let Some(f) = n.as_f64() {
+                                    Value { kind: Some(crate::grpc::generated::value::Kind::DoubleValue(f)) }
+                                } else {
+                                    Value { kind: Some(crate::grpc::generated::value::Kind::StringValue(n.to_string())) }
+                                }
+                            }
+                            serde_json::Value::String(s) => Value { kind: Some(crate::grpc::generated::value::Kind::StringValue(s.clone())) },
+                            _ => Value { kind: Some(crate::grpc::generated::value::Kind::StringValue(cell.to_string())) },
+                        }
+                    }).collect();
+                    QueryResultRow { values }
+                }).collect();
+
+                total_rows += rows.len();
+                let is_last = rows.len() < chunk_size;
+
+                if tx.send(Ok(QueryChunk {
+                    columns: result.columns.clone(),
+                    rows,
+                    is_last,
+                    total_rows: total_rows as i64,
+                    chunk_index,
+                })).await.is_err() {
+                    break;
+                }
+
+                if is_last {
+                    break;
+                }
+
+                offset += chunk_size;
+                chunk_index += 1;
+            }
         });
-        
+
         Ok(Response::new(ReceiverStream::new(rx)))
     }
 }

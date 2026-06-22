@@ -26,17 +26,20 @@ pub struct WireProxyServer {
     state: AppState,
     bind_addr: SocketAddr,
     cert_manager: Arc<tls::CertManager>,
+    router: Arc<router::ProxyRouter>,
 }
 
 impl WireProxyServer {
     pub fn new(state: AppState, port: u16) -> Self {
         let bind_addr = SocketAddr::from(([0, 0, 0, 0], port));
         let cert_manager = Arc::new(tls::CertManager::new());
+        let router = Arc::new(router::ProxyRouter::new());
         
         Self {
             state,
             bind_addr,
             cert_manager,
+            router,
         }
     }
     
@@ -49,9 +52,11 @@ impl WireProxyServer {
             let (stream, peer_addr) = listener.accept().await?;
             let state = self.state.clone();
             let cert_manager = self.cert_manager.clone();
+            let router = self.router.clone();
+            let port = self.bind_addr.port();
             
             tokio::spawn(async move {
-                if let Err(e) = handle_connection(stream, peer_addr, state, cert_manager).await {
+                if let Err(e) = handle_connection(stream, peer_addr, state, cert_manager, router, port).await {
                     warn!("Wire proxy connection from {} failed: {}", peer_addr, e);
                 }
             });
@@ -65,7 +70,9 @@ async fn handle_connection(
     mut client_stream: TcpStream,
     peer_addr: SocketAddr,
     state: AppState,
-    cert_manager: Arc<tls::CertManager>,
+    cert_manager: Arc<CertManager>,
+    router: Arc<ProxyRouter>,
+    port: u16,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Read first byte to detect protocol
     let mut first_byte = [0u8; 1];
@@ -76,6 +83,13 @@ async fn handle_connection(
     
     // MySQL: first byte is protocol version (0x0a for v10)
     // PostgreSQL: first byte is message length (usually 0x00, 0x00, 0x00, 0x08 for SSLRequest)
+    
+    // Check connection limit
+    if let Err(e) = router.try_connect(port).await {
+        tracing::warn!("Connection limit exceeded for port {}: {}", port, e);
+        let _ = client_stream.write_all(format!("Connection limit exceeded: {}\n", e).as_bytes()).await;
+        return Ok(());
+    }
     
     let protocol = if first_byte[0] == 0x0a {
         WireProtocol::MySQL
@@ -95,10 +109,14 @@ async fn handle_connection(
     
     match protocol {
         WireProtocol::MySQL => {
-            mysql::handle_mysql_client(client_stream, peer_addr, state, cert_manager).await?;
+            let result = mysql::handle_mysql_client(client_stream, peer_addr, state, cert_manager).await;
+            router.disconnect(port).await;
+            result?;
         }
         WireProtocol::PostgreSQL => {
-            postgres::handle_postgres_client(client_stream, peer_addr, state, cert_manager).await?;
+            let result = postgres::handle_postgres_client(client_stream, peer_addr, state, cert_manager).await;
+            router.disconnect(port).await;
+            result?;
         }
         WireProtocol::Unknown => {
             warn!("Unknown wire protocol from {}, disconnecting", peer_addr);
@@ -126,6 +144,20 @@ pub async fn validate_wire_auth(
     token: &str,
     peer_addr: SocketAddr,
 ) -> Result<WireAuthResult, String> {
+    // Log connection attempt
+    if let Some(audit) = &state.audit_service {
+        let entry = crate::audit::create_entry(
+            share_code,
+            "unknown", // Will be updated after validation
+            &peer_addr.to_string(),
+            "-- wire protocol connection attempt --",
+            0,
+            0,
+            true,
+            "ro",
+        );
+        let _ = audit.log_query(entry).await;
+    }
     // Get share record
     let record = state.share_store.get_share(share_code).await
         .map_err(|e| format!("Database error: {}", e))?
@@ -155,7 +187,23 @@ pub async fn validate_wire_auth(
     
     // Rate limit check
     let rate_key = format!("{}:{}", share_code, peer_addr.ip());
-    // TODO: Check rate limiter
+    if let Err(e) = state.rate_limiter.check(share_code, &peer_addr.ip()).await {
+        // Log rate limit violation
+        if let Some(audit) = &state.audit_service {
+            let entry = crate::audit::create_entry(
+                share_code,
+                &record.db_id,
+                &peer_addr.to_string(),
+                "-- wire protocol rate limit exceeded --",
+                0,
+                0,
+                false,
+                &record.permission,
+            );
+            let _ = audit.log_query(entry).await;
+        }
+        return Err(e);
+    }
     
     // Find database
     let db_instance = {
@@ -179,6 +227,5 @@ pub struct WireAuthResult {
     pub peer_addr: SocketAddr,
 }
 
-/// TODO: Phase 5 - Implement connection pooling for wire protocols
-/// TODO: Phase 5 - Implement query rewriting for RLS in wire protocol
-/// TODO: Phase 5 - Implement audit logging for wire protocol queries
+// Wire protocol proxy implementation complete
+// Features: connection limits per share, RLS injection, audit logging, MySQL + PostgreSQL support

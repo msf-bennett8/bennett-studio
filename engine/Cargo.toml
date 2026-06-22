@@ -42,6 +42,9 @@ futures = "0.3"
 # Phase 4: gRPC HTTP/2 + gRPC-Web
 tokio-stream = "0.1"
 
+[build-dependencies]
+tonic-build = "0.12"
+
 # Phase 5: Wire Protocol Proxy + Security
 tokio-rustls = "0.26"
 rustls-pemfile = "2.0"

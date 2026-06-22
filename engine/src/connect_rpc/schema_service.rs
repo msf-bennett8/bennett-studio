@@ -134,7 +134,9 @@ pub struct GetTableConstraintsResponse {
 pub async fn get_schema(
     State(state): State<AppState>,
     Json(body): Json<serde_json::Value>,
+    request: axum::extract::Request,
 ) -> Response {
+    let client_ip = request.extensions().get::<crate::api::middleware::ClientIp>().map(|c| c.0);
     let req: GetSchemaRequest = match parse_connect_request(&body.to_string()) {
         Ok(r) => r,
         Err(resp) => return resp,
@@ -142,8 +144,8 @@ pub async fn get_schema(
     
     let start = std::time::Instant::now();
     
-    // Validate share
-    let validated = match validate_share_request(&state, &req.share_code, &req.token).await {
+    // Validate
+    let validated = match validate_share_request(&state, &req.share_code, &req.token, client_ip).await {
         Ok(v) => v,
         Err(resp) => return resp,
     };
@@ -170,6 +172,7 @@ pub async fn get_schema(
     }
     
     // Get schema from connection manager
+    // Get schema from connection manager
     let schema_result = {
         let conn = state.connections.lock().await;
         match conn.get_schema(&db_instance.id).await {
@@ -187,6 +190,55 @@ pub async fn get_schema(
             }
         }
     };
+
+    // Convert to our schema format with real metadata
+    let mut tables = Vec::new();
+    for table_info in schema_result {
+        let table_name = table_info.name.clone();
+        
+        // Fetch indexes and constraints for each table
+        let (indexes, constraints) = {
+            let conn = state.connections.lock().await;
+            let idx = conn.get_table_indexes(&db_instance.id, &table_name).await.unwrap_or_default();
+            let cst = conn.get_table_constraints(&db_instance.id, &table_name).await.unwrap_or_default();
+            (idx, cst)
+        };
+        
+        // Detect primary key from constraints
+        let pk_columns: Vec<String> = constraints.iter()
+            .filter(|c| c.constraint_type == "PRIMARY KEY")
+            .flat_map(|c| c.columns.clone())
+            .collect();
+
+        tables.push(TableSchema {
+            name: table_info.name,
+            columns: table_info.columns.into_iter().map(|col| ColumnSchema {
+                name: col.name.clone(),
+                data_type: col.data_type,
+                nullable: col.nullable,
+                default_value: None,
+                is_primary_key: pk_columns.contains(&col.name),
+                is_foreign_key: false,
+                foreign_key_reference: None,
+                comment: None,
+            }).collect(),
+            indexes: indexes.into_iter().map(|i| IndexSchema {
+                name: i.name,
+                columns: i.columns,
+                index_type: i.index_type,
+                is_unique: i.is_unique,
+                is_primary: i.is_primary,
+            }).collect(),
+            constraints: constraints.into_iter().map(|c| ConstraintSchema {
+                name: c.name,
+                constraint_type: c.constraint_type,
+                columns: c.columns,
+                definition: c.definition,
+            }).collect(),
+            estimated_row_count: 0,
+            table_size: None,
+        });
+    }
     
     // Convert to our schema format
     let tables: Vec<TableSchema> = schema_result.into_iter().map(|table_info| {
@@ -231,55 +283,186 @@ pub async fn get_table_columns(
         Ok(r) => r,
         Err(resp) => return resp,
     };
-    
+
     // Validate share
     let validated = match validate_share_request(&state, &req.share_code, &req.token).await {
         Ok(v) => v,
         Err(resp) => return resp,
     };
-    
-    // Get full schema then filter
-    // TODO: Optimize with direct column query
-    let schema_resp = get_schema(State(state), Json(json!({
-        "shareCode": req.share_code,
-        "token": req.token
-    }))).await;
-    
-    // Extract columns from response
-    // For now, return error - full implementation requires parsing the response
+
+    // Find database
+    let db_instance = {
+        let dbs = state.databases.lock().unwrap();
+        dbs.iter().find(|d| d.id == validated.db_id).cloned()
+    };
+
+    let db_instance = match db_instance {
+        Some(d) => d,
+        None => return connect_error("not_found", "Database not available"),
+    };
+
+    // Auto-connect
+    {
+        let mut conn = state.connections.lock().await;
+        if !conn.is_connected(&db_instance.id) {
+            if let Err(e) = conn.connect(&db_instance).await {
+                return connect_error("unavailable", &format!("Connection failed: {}", e));
+            }
+        }
+    }
+
+    // Get columns directly
+    let columns = {
+        let conn = state.connections.lock().await;
+        match conn.get_table_columns(&db_instance.id, &req.table_name).await {
+            Ok(cols) => cols.into_iter().map(|col| ColumnSchema {
+                name: col.name,
+                data_type: col.data_type,
+                nullable: col.nullable,
+                default_value: None,
+                is_primary_key: false, // Will be detected separately
+                is_foreign_key: false,
+                foreign_key_reference: None,
+                comment: None,
+            }).collect(),
+            Err(e) => {
+                return connect_response(GetTableColumnsResponse {
+                    success: false,
+                    columns: vec![],
+                    error: Some(format!("Failed to fetch columns: {}", e)),
+                });
+            }
+        }
+    };
+
     connect_response(GetTableColumnsResponse {
-        success: false,
-        columns: vec![],
-        error: Some("Direct column fetch not yet implemented. Use GetSchema.".to_string()),
+        success: true,
+        columns,
+        error: None,
     })
 }
 
 /// POST /bennett.v1.SchemaService/GetTableIndexes
 pub async fn get_table_indexes(
-    State(_state): State<AppState>,
-    Json(_body): Json<serde_json::Value>,
+    State(state): State<AppState>,
+    Json(body): Json<serde_json::Value>,
 ) -> Response {
-    // TODO: Implement index fetching
+    let req: GetTableIndexesRequest = match parse_connect_request(&body.to_string()) {
+        Ok(r) => r,
+        Err(resp) => return resp,
+    };
+
+    let validated = match validate_share_request(&state, &req.share_code, &req.token).await {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+
+    let db_instance = {
+        let dbs = state.databases.lock().unwrap();
+        dbs.iter().find(|d| d.id == validated.db_id).cloned()
+    };
+
+    let db_instance = match db_instance {
+        Some(d) => d,
+        None => return connect_error("not_found", "Database not available"),
+    };
+
+    {
+        let mut conn = state.connections.lock().await;
+        if !conn.is_connected(&db_instance.id) {
+            if let Err(e) = conn.connect(&db_instance).await {
+                return connect_error("unavailable", &format!("Connection failed: {}", e));
+            }
+        }
+    }
+
+    let indexes = {
+        let conn = state.connections.lock().await;
+        match conn.get_table_indexes(&db_instance.id, &req.table_name).await {
+            Ok(idx) => idx.into_iter().map(|i| IndexSchema {
+                name: i.name,
+                columns: i.columns,
+                index_type: i.index_type,
+                is_unique: i.is_unique,
+                is_primary: i.is_primary,
+            }).collect(),
+            Err(e) => {
+                return connect_response(GetTableIndexesResponse {
+                    success: false,
+                    indexes: vec![],
+                    error: Some(format!("Failed to fetch indexes: {}", e)),
+                });
+            }
+        }
+    };
+
     connect_response(GetTableIndexesResponse {
-        success: false,
-        indexes: vec![],
-        error: Some("Index fetching not yet implemented".to_string()),
+        success: true,
+        indexes,
+        error: None,
     })
 }
 
 /// POST /bennett.v1.SchemaService/GetTableConstraints
 pub async fn get_table_constraints(
-    State(_state): State<AppState>,
-    Json(_body): Json<serde_json::Value>,
+    State(state): State<AppState>,
+    Json(body): Json<serde_json::Value>,
 ) -> Response {
-    // TODO: Implement constraint fetching
+    let req: GetTableConstraintsRequest = match parse_connect_request(&body.to_string()) {
+        Ok(r) => r,
+        Err(resp) => return resp,
+    };
+
+    let validated = match validate_share_request(&state, &req.share_code, &req.token).await {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+
+    let db_instance = {
+        let dbs = state.databases.lock().unwrap();
+        dbs.iter().find(|d| d.id == validated.db_id).cloned()
+    };
+
+    let db_instance = match db_instance {
+        Some(d) => d,
+        None => return connect_error("not_found", "Database not available"),
+    };
+
+    {
+        let mut conn = state.connections.lock().await;
+        if !conn.is_connected(&db_instance.id) {
+            if let Err(e) = conn.connect(&db_instance).await {
+                return connect_error("unavailable", &format!("Connection failed: {}", e));
+            }
+        }
+    }
+
+    let constraints = {
+        let conn = state.connections.lock().await;
+        match conn.get_table_constraints(&db_instance.id, &req.table_name).await {
+            Ok(c) => c.into_iter().map(|c| ConstraintSchema {
+                name: c.name,
+                constraint_type: c.constraint_type,
+                columns: c.columns,
+                definition: c.definition,
+            }).collect(),
+            Err(e) => {
+                return connect_response(GetTableConstraintsResponse {
+                    success: false,
+                    constraints: vec![],
+                    error: Some(format!("Failed to fetch constraints: {}", e)),
+                });
+            }
+        }
+    };
+
     connect_response(GetTableConstraintsResponse {
-        success: false,
-        constraints: vec![],
-        error: Some("Constraint fetching not yet implemented".to_string()),
+        success: true,
+        constraints,
+        error: None,
     })
 }
 
-/// TODO: Phase 2 - Implement StreamSchemaUpdates for real-time autocomplete
-/// TODO: Phase 3 - Implement column-level permission filtering
-/// TODO: Phase 3 - Implement schema caching with TTL
+/// TODO: Phase 2 - Implement StreamSchemaUpdates for real-time autocomplete (WebSocket/polling infrastructure)
+/// TODO: Phase 3 - Implement column-level permission filtering (filter schema columns based on share config)
+/// TODO: Phase 3 - Implement schema caching with TTL (add SchemaCache to AppState, invalidate on DDL)

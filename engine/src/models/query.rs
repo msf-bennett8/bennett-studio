@@ -12,4 +12,5 @@ pub struct QueryResult {
     pub rows: Vec<Vec<serde_json::Value>>,
     pub row_count: usize,
     pub execution_time_ms: u64,
+    pub last_insert_id: Option<String>,
 }

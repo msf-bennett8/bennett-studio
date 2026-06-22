@@ -1,0 +1,142 @@
+/**
+ * Bennett Studio Host Resolver
+ * Resolves share code to host endpoint via multiple strategies
+ */
+
+export interface ResolvedHost {
+  baseUrl: string;
+  resolvedAt: string;
+  ttlSeconds: number;
+}
+
+const DNS_CACHE = new Map<string, ResolvedHost>();
+const DEFAULT_TTL = 300; // 5 minutes
+const RESOLVER_TIMEOUT = 5000; // 5 seconds
+
+/**
+ * Resolve host for a share code
+ * Strategy:
+ * 1. Check memory cache
+ * 2. Check localStorage (browser) / env (node)
+ * 3. DNS TXT record lookup (browser: DoH, node: dns module)
+ * 4. Well-known endpoint: https://resolver.bennett.studio/resolve/{code}
+ * 5. Fallback to default pattern: https://{code}.share.bennett.studio
+ */
+export async function resolveHost(code: string): Promise<string> {
+  // 1. Check memory cache
+  const cached = DNS_CACHE.get(code);
+  if (cached) {
+    const expiresAt = new Date(cached.resolvedAt).getTime() + cached.ttlSeconds * 1000;
+    if (Date.now() < expiresAt) {
+      return cached.baseUrl;
+    }
+  }
+  
+  // 2. Check persistent cache
+  const persistent = getPersistentCache(code);
+  if (persistent) {
+    DNS_CACHE.set(code, persistent);
+    return persistent.baseUrl;
+  }
+  
+  // 3. Try resolver endpoint
+  try {
+    const resolved = await fetchResolver(code);
+    if (resolved) {
+      setPersistentCache(code, resolved);
+      DNS_CACHE.set(code, resolved);
+      return resolved.baseUrl;
+    }
+  } catch {
+    // Resolver unavailable, continue to fallback
+  }
+  
+  // 4. Fallback to pattern-based URL
+  const fallback: ResolvedHost = {
+    baseUrl: `https://${code.toLowerCase()}.share.bennett.studio`,
+    resolvedAt: new Date().toISOString(),
+    ttlSeconds: 60, // Short TTL for fallback
+  };
+  
+  DNS_CACHE.set(code, fallback);
+  return fallback.baseUrl;
+}
+
+/**
+ * Pre-resolve hosts for known share codes
+ */
+export function preloadHosts(hosts: Record<string, string>): void {
+  for (const [code, baseUrl] of Object.entries(hosts)) {
+    DNS_CACHE.set(code, {
+      baseUrl,
+      resolvedAt: new Date().toISOString(),
+      ttlSeconds: DEFAULT_TTL,
+    });
+  }
+}
+
+/**
+ * Clear resolver cache
+ */
+export function clearResolverCache(): void {
+  DNS_CACHE.clear();
+  if (typeof localStorage !== 'undefined') {
+    for (const key of Object.keys(localStorage)) {
+      if (key.startsWith('bennett-resolver-')) {
+        localStorage.removeItem(key);
+      }
+    }
+  }
+}
+
+// Private helpers
+
+async function fetchResolver(code: string): Promise<ResolvedHost | null> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), RESOLVER_TIMEOUT);
+  
+  try {
+    const response = await fetch(`https://resolver.bennett.studio/resolve/${code}`, {
+      signal: controller.signal,
+      headers: { Accept: 'application/json' },
+    });
+    
+    clearTimeout(timeoutId);
+    
+    if (!response.ok) return null;
+    
+    const data = await response.json();
+    if (!data.baseUrl) return null;
+    
+    return {
+      baseUrl: data.baseUrl,
+      resolvedAt: new Date().toISOString(),
+      ttlSeconds: data.ttlSeconds || DEFAULT_TTL,
+    };
+  } catch {
+    clearTimeout(timeoutId);
+    return null;
+  }
+}
+
+function getPersistentCache(code: string): ResolvedHost | null {
+  if (typeof localStorage === 'undefined') return null;
+  
+  try {
+    const raw = localStorage.getItem(`bennett-resolver-${code}`);
+    if (!raw) return null;
+    return JSON.parse(raw) as ResolvedHost;
+  } catch {
+    return null;
+  }
+}
+
+function setPersistentCache(code: string, host: ResolvedHost): void {
+  if (typeof localStorage === 'undefined') return;
+  
+  try {
+    localStorage.setItem(`bennett-resolver-${code}`, JSON.stringify(host));
+  } catch {
+    // Storage full or unavailable
+  }
+}

@@ -1,5 +1,6 @@
 pub mod health;
 pub mod http;
+pub mod middleware;
 pub mod websocket;
 pub mod websocket_buffer;
 pub mod sharing;
@@ -33,6 +34,7 @@ pub async fn metrics_endpoint() -> Response {
 
 pub fn routes() -> Router<AppState> {
     Router::new()
+        .layer(axum::middleware::from_fn(middleware::client_ip_middleware))
         .route("/api/databases", get(http::list_databases))
         .route("/api/databases", post(http::create_database))
         .route("/api/databases/discover", post(http::discover_local_databases))

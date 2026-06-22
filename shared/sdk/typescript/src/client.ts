@@ -7,6 +7,8 @@
  *   const result = await client.query('SELECT * FROM users LIMIT 10');
  */
 
+import { resolveHost, preloadHosts } from './resolver';
+
 export interface BennettClientConfig {
   /** Share code (e.g., 'ACQPFDAQ7P') */
   code: string;
@@ -93,6 +95,7 @@ export class BennettShareClient {
   private token: string;
   private baseUrl: string;
   private timeout: number;
+  private resolved: boolean;
 
   /** gRPC-Web client for HTTP/2 streaming */
   private grpcClient?: any;
@@ -100,42 +103,49 @@ export class BennettShareClient {
   constructor(config: BennettClientConfig) {
     this.code = config.code;
     this.token = config.token;
-    this.baseUrl = config.baseUrl || this.resolveBaseUrl(config.code);
+    this.baseUrl = config.baseUrl || 'https://placeholder';
     this.timeout = config.timeout || 30000;
+    this.resolved = !!config.baseUrl;
     
     // Initialize gRPC-Web client if host supports it
+    if (config.baseUrl) {
+      try {
+        const { BennettGrpcWebClient } = require('./grpcClient');
+        this.grpcClient = new BennettGrpcWebClient({
+          host: this.baseUrl.replace(/^https?:\/\//, ''),
+          tls: this.baseUrl.startsWith('https'),
+        });
+      } catch {
+        this.grpcClient = null;
+      }
+    }
+  }
+  
+  /** Ensure base URL is resolved before making requests */
+  private async ensureResolved(): Promise<void> {
+    if (this.resolved) return;
+    
+    this.baseUrl = await resolveHost(this.code);
+    this.resolved = true;
+    
+    // Initialize gRPC-Web client after resolution
     try {
-      const { BennettGrpcWebClient } = require('./grpcClient');
+      const { BennettGrpcWebClient } = await import('./grpcClient');
       this.grpcClient = new BennettGrpcWebClient({
         host: this.baseUrl.replace(/^https?:\/\//, ''),
         tls: this.baseUrl.startsWith('https'),
       });
     } catch {
-      // gRPC-Web not available, use REST fallback
       this.grpcClient = null;
     }
-  }
-
-  /**
-   * Resolve base URL from share code
-   * In production: lookup via resolver service
-   * In local dev: assume localhost:3001
-   */
-  private resolveBaseUrl(_code: string): string {
-    // TODO: Phase 1B - Implement resolver lookup
-    // For now, assume local development
-    if (typeof window !== 'undefined') {
-      // Browser: use current host or env
-      return import.meta.env?.VITE_BENNETT_HOST || 'http://localhost:3001';
-    }
-    // Node.js/CLI: use env or default
-    return process?.env?.BENNETT_HOST || 'http://localhost:3001';
   }
 
   /**
    * Execute a SELECT query
    */
   async query(sql: string, limit?: number, offset?: number): Promise<QueryResult> {
+    await this.ensureResolved();
+    
     const response = await this.call<QueryResult>(
       'bennett.v1.QueryService/ExecuteQuery',
       {
@@ -162,6 +172,8 @@ export class BennettShareClient {
    * Requires read-write permission
    */
   async write(sql: string, parameters?: any[]): Promise<WriteResult> {
+    await this.ensureResolved();
+    
     const response = await this.call<WriteResult>(
       'bennett.v1.QueryService/ExecuteWrite',
       {
@@ -216,6 +228,8 @@ export class BennettShareClient {
    * Get database schema
    */
   async getSchema(): Promise<SchemaResult> {
+    await this.ensureResolved();
+    
     const response = await this.call<SchemaResult>(
       'bennett.v1.SchemaService/GetSchema',
       {
@@ -238,6 +252,8 @@ export class BennettShareClient {
    * Export query results as CSV
    */
   async exportCsv(sql: string, includeHeaders = true): Promise<ExportResult> {
+    await this.ensureResolved();
+    
     return this.call<ExportResult>(
       'bennett.v1.ExportService/ExportCsv',
       {
@@ -254,6 +270,8 @@ export class BennettShareClient {
    * Export query results as JSON
    */
   async exportJson(sql: string, includeHeaders = true): Promise<ExportResult> {
+    await this.ensureResolved();
+    
     return this.call<ExportResult>(
       'bennett.v1.ExportService/ExportJson',
       {
@@ -270,6 +288,8 @@ export class BennettShareClient {
    * Export full table dump
    */
   async exportTable(tableName: string, format: 'csv' | 'json' = 'csv'): Promise<ExportResult> {
+    await this.ensureResolved();
+    
     return this.call<ExportResult>(
       'bennett.v1.ExportService/ExportTableDump',
       {

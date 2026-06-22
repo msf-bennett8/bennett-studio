@@ -46,12 +46,26 @@ pub async fn ws_handler(
     ws.on_upgrade(move |socket| handle_socket(socket, database_id, state))
 }
 
+/// Global message buffer for WebSocket reconnection
+use std::sync::OnceLock;
+use tokio::sync::RwLock;
+use std::collections::VecDeque;
+
+static MESSAGE_BUFFER: OnceLock<RwLock<std::collections::HashMap<String, VecDeque<(u64, String)>>>> = OnceLock::new();
+
+fn get_message_buffer() -> &'static RwLock<std::collections::HashMap<String, VecDeque<(u64, String)>>> {
+    MESSAGE_BUFFER.get_or_init(|| RwLock::new(std::collections::HashMap::new()))
+}
+
+const MAX_BUFFERED_MESSAGES: usize = 100;
+
 async fn handle_socket(socket: WebSocket, database_id: String, state: AppState) {
     let (mut sender, mut receiver) = socket.split();
     
     // Generate session ID for reconnection
-    let session_id = format!("ws-{}", uuid::Uuid::new_v4());
+    let mut session_id = format!("ws-{}", uuid::Uuid::new_v4());
     let mut message_counter: u64 = 0;
+    let mut is_reconnect = false;
     
     // Create or get message buffer for this session
     let session_buffer = state.ws_buffer.get_or_create(&session_id).await;

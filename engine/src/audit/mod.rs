@@ -149,7 +149,16 @@ impl AuditService {
         .bind(&entry.db_id)
         .bind(&entry.peer_ip)
         .bind(entry.user_agent.as_ref())
-        .bind(format!("{:?}", entry.query_type))
+        .bind(match entry.query_type {
+            QueryType::Select => "Select",
+            QueryType::Insert => "Insert",
+            QueryType::Update => "Update",
+            QueryType::Delete => "Delete",
+            QueryType::Create => "Create",
+            QueryType::Alter => "Alter",
+            QueryType::Drop => "Drop",
+            QueryType::Other => "Other",
+        })
         .bind(&entry.sql)
         .bind(entry.rows_affected)
         .bind(entry.execution_time_ms)
@@ -203,6 +212,18 @@ impl AuditService {
             .await?;
         
         let entries = rows.into_iter().map(|row| {
+            let query_type_str: String = row.get("query_type");
+            let query_type = match query_type_str.as_str() {
+                "Select" => QueryType::Select,
+                "Insert" => QueryType::Insert,
+                "Update" => QueryType::Update,
+                "Delete" => QueryType::Delete,
+                "Create" => QueryType::Create,
+                "Alter" => QueryType::Alter,
+                "Drop" => QueryType::Drop,
+                _ => QueryType::Other,
+            };
+            
             AuditEntry {
                 id: row.get("id"),
                 timestamp: DateTime::parse_from_rfc3339(&row.get::<String, _>("timestamp"))
@@ -212,7 +233,7 @@ impl AuditService {
                 db_id: row.get("db_id"),
                 peer_ip: row.get("peer_ip"),
                 user_agent: row.get("user_agent"),
-                query_type: QueryType::from_sql("SELECT"), // TODO: Parse from string
+                query_type,
                 sql: row.get("sql"),
                 rows_affected: row.get("rows_affected"),
                 execution_time_ms: row.get("execution_time_ms"),

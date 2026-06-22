@@ -107,6 +107,8 @@ impl SchemaService for SchemaGrpcService {
         _request: Request<GetSchemaRequest>,
     ) -> Result<Response<Self::StreamSchemaUpdatesStream>, Status> {
         // TODO: Implement streaming schema updates for real-time autocomplete
+        // Schema change streaming requires database trigger/monitoring infrastructure
+        // Placeholder: sends single full-refresh event
         let (tx, rx) = tokio::sync::mpsc::channel(4);
         
         tokio::spawn(async move {
@@ -124,35 +126,141 @@ impl SchemaService for SchemaGrpcService {
 
     async fn get_table_columns(
         &self,
-        _request: Request<GetTableColumnsRequest>,
+        request: Request<GetTableColumnsRequest>,
     ) -> Result<Response<GetTableColumnsResponse>, Status> {
-        // TODO: Implement direct column fetch
+        let req = request.into_inner();
+
+        let validated = validate_share_request(&self.state, &req.share_code, &req.token)
+            .await
+            .map_err(|e| map_error_to_status(&e))?;
+
+        let db_instance = {
+            let dbs = self.state.databases.lock().unwrap();
+            dbs.iter().find(|d| d.id == validated.db_id).cloned()
+        };
+
+        let db_instance = db_instance.ok_or_else(|| Status::not_found("Database not available"))?;
+
+        {
+            let mut conn = self.state.connections.lock().await;
+            if !conn.is_connected(&db_instance.id) {
+                conn.connect(&db_instance).await
+                    .map_err(|e| Status::unavailable(format!("Connection failed: {}", e)))?;
+            }
+        }
+
+        let columns = {
+            let conn = self.state.connections.lock().await;
+            conn.get_table_columns(&db_instance.id, &req.table_name).await
+                .map_err(|e| Status::internal(format!("Failed to fetch columns: {}", e)))?
+        };
+
+        let columns: Vec<ColumnSchema> = columns.into_iter().map(|col| ColumnSchema {
+            name: col.name,
+            data_type: col.data_type,
+            nullable: col.nullable,
+            default_value: String::new(),
+            is_primary_key: false,
+            is_foreign_key: false,
+            foreign_key_reference: String::new(),
+            comment: String::new(),
+        }).collect();
+
         Ok(Response::new(GetTableColumnsResponse {
-            success: false,
-            columns: vec![],
-            error: "Direct column fetch not yet implemented. Use GetSchema.".to_string(),
+            success: true,
+            columns,
+            error: String::new(),
         }))
     }
 
     async fn get_table_indexes(
         &self,
-        _request: Request<GetTableIndexesRequest>,
+        request: Request<GetTableIndexesRequest>,
     ) -> Result<Response<GetTableIndexesResponse>, Status> {
+        let req = request.into_inner();
+
+        let validated = validate_share_request(&self.state, &req.share_code, &req.token)
+            .await
+            .map_err(|e| map_error_to_status(&e))?;
+
+        let db_instance = {
+            let dbs = self.state.databases.lock().unwrap();
+            dbs.iter().find(|d| d.id == validated.db_id).cloned()
+        };
+
+        let db_instance = db_instance.ok_or_else(|| Status::not_found("Database not available"))?;
+
+        {
+            let mut conn = self.state.connections.lock().await;
+            if !conn.is_connected(&db_instance.id) {
+                conn.connect(&db_instance).await
+                    .map_err(|e| Status::unavailable(format!("Connection failed: {}", e)))?;
+            }
+        }
+
+        let indexes = {
+            let conn = self.state.connections.lock().await;
+            conn.get_table_indexes(&db_instance.id, &req.table_name).await
+                .map_err(|e| Status::internal(format!("Failed to fetch indexes: {}", e)))?
+        };
+
+        let indexes: Vec<IndexSchema> = indexes.into_iter().map(|i| IndexSchema {
+            name: i.name,
+            columns: i.columns,
+            index_type: i.index_type,
+            is_unique: i.is_unique,
+            is_primary: i.is_primary,
+        }).collect();
+
         Ok(Response::new(GetTableIndexesResponse {
-            success: false,
-            indexes: vec![],
-            error: "Not yet implemented".to_string(),
+            success: true,
+            indexes,
+            error: String::new(),
         }))
     }
 
     async fn get_table_constraints(
         &self,
-        _request: Request<GetTableConstraintsRequest>,
+        request: Request<GetTableConstraintsRequest>,
     ) -> Result<Response<GetTableConstraintsResponse>, Status> {
+        let req = request.into_inner();
+
+        let validated = validate_share_request(&self.state, &req.share_code, &req.token)
+            .await
+            .map_err(|e| map_error_to_status(&e))?;
+
+        let db_instance = {
+            let dbs = self.state.databases.lock().unwrap();
+            dbs.iter().find(|d| d.id == validated.db_id).cloned()
+        };
+
+        let db_instance = db_instance.ok_or_else(|| Status::not_found("Database not available"))?;
+
+        {
+            let mut conn = self.state.connections.lock().await;
+            if !conn.is_connected(&db_instance.id) {
+                conn.connect(&db_instance).await
+                    .map_err(|e| Status::unavailable(format!("Connection failed: {}", e)))?;
+            }
+        }
+
+        let constraints = {
+            let conn = self.state.connections.lock().await;
+            conn.get_table_constraints(&db_instance.id, &req.table_name).await
+                .map_err(|e| Status::internal(format!("Failed to fetch constraints: {}", e)))?
+        };
+
+        let constraints: Vec<ConstraintSchema> = constraints.into_iter().map(|c| ConstraintSchema {
+            name: c.name,
+            constraint_type: c.constraint_type,
+            columns: c.columns,
+            definition: c.definition.unwrap_or_default(),
+        }).collect();
+
         Ok(Response::new(GetTableConstraintsResponse {
-            success: false,
-            constraints: vec![],
-            error: "Not yet implemented".to_string(),
+            success: true,
+            constraints,
+            error: String::new(),
         }))
     }
 }
