@@ -1,6 +1,7 @@
 pub mod health;
 pub mod http;
 pub mod websocket;
+pub mod websocket_buffer;
 pub mod sharing;
 pub mod connect_rpc;
 

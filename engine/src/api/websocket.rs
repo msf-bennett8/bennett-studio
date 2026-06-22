@@ -9,7 +9,7 @@ use futures_util::{sink::SinkExt, stream::StreamExt};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tokio::time::interval;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use crate::AppState;
 
@@ -53,12 +53,16 @@ async fn handle_socket(socket: WebSocket, database_id: String, state: AppState) 
     let session_id = format!("ws-{}", uuid::Uuid::new_v4());
     let mut message_counter: u64 = 0;
     
+    // Create or get message buffer for this session
+    let session_buffer = state.ws_buffer.get_or_create(&session_id).await;
+
     // Send hello with session ID
+    let hello_msg = WsResponse::Hello {
+        session_id: session_id.clone(),
+        server_time: chrono::Utc::now().to_rfc3339(),
+    };
     let _ = sender.send(Message::Text(
-        serde_json::to_string(&WsResponse::Hello {
-            session_id: session_id.clone(),
-            server_time: chrono::Utc::now().to_rfc3339(),
-        }).unwrap()
+        serde_json::to_string(&hello_msg).unwrap()
     )).await;
 
     // Send initial connection confirmation
@@ -81,13 +85,26 @@ async fn handle_socket(socket: WebSocket, database_id: String, state: AppState) 
                                     serde_json::to_string(&WsResponse::Pong).unwrap()
                                 )).await;
                             }
-                            Ok(WsRequest::Reconnect { session_id: _, last_message_id: _ }) => {
-                                // TODO: Implement message replay from buffer
+                            Ok(WsRequest::Reconnect { session_id: req_session_id, last_message_id }) => {
+                                // Look up the old session buffer
+                                let missed_messages = if let Some(buffer) = state.ws_buffer.get(&req_session_id).await {
+                                    let missed = buffer.get_missed(last_message_id).await;
+                                    let last_id = buffer.last_message_id().await;
+                                    info!(
+                                        "Reconnection for session {}: client at {}, server at {}, replaying {} messages",
+                                        req_session_id, last_message_id, last_id, missed.len()
+                                    );
+                                    missed
+                                } else {
+                                    warn!("Reconnection for unknown session {}: no buffer found", req_session_id);
+                                    vec![]
+                                };
+
                                 let _ = sender.send(Message::Text(
                                     serde_json::to_string(&WsResponse::ReconnectAck {
                                         session_id: session_id.clone(),
                                         last_message_id: message_counter,
-                                        missed_messages: vec![],
+                                        missed_messages,
                                     }).unwrap()
                                 )).await;
                             }
@@ -105,11 +122,15 @@ async fn handle_socket(socket: WebSocket, database_id: String, state: AppState) 
                                 let instance = match instance {
                                     Some(i) => i,
                                     None => {
+                                        message_counter += 1;
+                                        let response = WsResponse::QueryError {
+                                            database_id: db_id.clone(),
+                                            error: "Database not found".to_string(),
+                                            message_id: message_counter,
+                                        };
+                                        session_buffer.push(message_counter, response.clone()).await;
                                         let _ = sender.send(Message::Text(
-                                            serde_json::to_string(&WsResponse::QueryError {
-                                                database_id: db_id,
-                                                error: "Database not found".to_string(),
-                                            }).unwrap()
+                                            serde_json::to_string(&response).unwrap()
                                         )).await;
                                         continue;
                                     }
@@ -124,11 +145,15 @@ async fn handle_socket(socket: WebSocket, database_id: String, state: AppState) 
                                 if needs_connect {
                                     let mut conn = state.connections.lock().await;
                                     if let Err(e) = conn.connect(&instance).await {
+                                        message_counter += 1;
+                                        let response = WsResponse::QueryError {
+                                            database_id: db_id.clone(),
+                                            error: format!("Connection failed: {}", e),
+                                            message_id: message_counter,
+                                        };
+                                        session_buffer.push(message_counter, response.clone()).await;
                                         let _ = sender.send(Message::Text(
-                                            serde_json::to_string(&WsResponse::QueryError {
-                                                database_id: db_id,
-                                                error: format!("Connection failed: {}", e),
-                                            }).unwrap()
+                                            serde_json::to_string(&response).unwrap()
                                         )).await;
                                         continue;
                                     }
@@ -143,23 +168,30 @@ async fn handle_socket(socket: WebSocket, database_id: String, state: AppState) 
                                     Ok(query_result) => {
                                         let elapsed = start.elapsed().as_millis() as u64;
                                         message_counter += 1;
+                                        let response = WsResponse::QueryResult {
+                                            database_id: db_id.clone(),
+                                            columns: query_result.columns,
+                                            rows: query_result.rows,
+                                            row_count: query_result.row_count,
+                                            execution_time_ms: elapsed,
+                                            message_id: message_counter,
+                                        };
+                                        // Buffer for replay
+                                        session_buffer.push(message_counter, response.clone()).await;
                                         let _ = sender.send(Message::Text(
-                                            serde_json::to_string(&WsResponse::QueryResult {
-                                                database_id: db_id,
-                                                columns: query_result.columns,
-                                                rows: query_result.rows,
-                                                row_count: query_result.row_count,
-                                                execution_time_ms: elapsed,
-                                                message_id: message_counter,
-                                            }).unwrap()
+                                            serde_json::to_string(&response).unwrap()
                                         )).await;
                                     }
                                     Err(e) => {
+                                        message_counter += 1;
+                                        let response = WsResponse::QueryError {
+                                            database_id: db_id.clone(),
+                                            error: format!("Query failed: {}", e),
+                                            message_id: message_counter,
+                                        };
+                                        session_buffer.push(message_counter, response.clone()).await;
                                         let _ = sender.send(Message::Text(
-                                            serde_json::to_string(&WsResponse::QueryError {
-                                                database_id: db_id,
-                                                error: format!("Query failed: {}", e),
-                                            }).unwrap()
+                                            serde_json::to_string(&response).unwrap()
                                         )).await;
                                     }
                                 }
@@ -200,12 +232,16 @@ async fn handle_socket(socket: WebSocket, database_id: String, state: AppState) 
                         match state.docker.get_logs(container_id).await {
                             Ok(logs) if !logs.is_empty() => {
                                 for line in logs.lines().rev().take(5) {
+                                    message_counter += 1;
+                                    let response = WsResponse::LogLine {
+                                        database_id: database_id.clone(),
+                                        line: line.to_string(),
+                                        timestamp: chrono::Local::now().to_rfc3339(),
+                                        message_id: message_counter,
+                                    };
+                                    session_buffer.push(message_counter, response.clone()).await;
                                     let _ = sender.send(Message::Text(
-                                        serde_json::to_string(&WsResponse::LogLine {
-                                            database_id: database_id.clone(),
-                                            line: line.to_string(),
-                                            timestamp: chrono::Local::now().to_rfc3339(),
-                                        }).unwrap()
+                                        serde_json::to_string(&response).unwrap()
                                     )).await;
                                 }
                             }
@@ -224,15 +260,23 @@ async fn handle_socket(socket: WebSocket, database_id: String, state: AppState) 
 
                 if let Some(instance) = instance {
                     let status = format!("{:?}", instance.status);
+                    message_counter += 1;
+                    let response = WsResponse::HealthUpdate {
+                        database_id: database_id.clone(),
+                        status,
+                        uptime_seconds: 0,
+                        message_id: message_counter,
+                    };
+                    session_buffer.push(message_counter, response.clone()).await;
                     let _ = sender.send(Message::Text(
-                        serde_json::to_string(&WsResponse::HealthUpdate {
-                            database_id: database_id.clone(),
-                            status,
-                            uptime_seconds: 0,
-                        }).unwrap()
+                        serde_json::to_string(&response).unwrap()
                     )).await;
                 }
             }
         }
     }
+
+    // Cleanup: remove session buffer on disconnect
+    state.ws_buffer.remove(&session_id).await;
+    info!("WebSocket session {} disconnected, buffer cleaned up", session_id);
 }

@@ -26,6 +26,7 @@ use auth::share_token::ShareTokenManager;
 use audit::AuditService;
 use rate_limit::RateLimitService;
 use control_plane::query::cache::QueryCache;
+use api::websocket_buffer::WsMessageBuffer;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -39,6 +40,7 @@ pub struct AppState {
     pub audit_service: Option<Arc<AuditService>>,
     pub rate_limiter: Arc<RateLimitService>,
     pub query_cache: Arc<QueryCache>,
+    pub ws_buffer: Arc<WsMessageBuffer>,
 }
 
 impl AppState {
@@ -76,6 +78,7 @@ impl AppState {
             audit_service,
             rate_limiter,
             query_cache: Arc::new(QueryCache::new()),
+            ws_buffer: Arc::new(WsMessageBuffer::new()),
         })
     }
 }
