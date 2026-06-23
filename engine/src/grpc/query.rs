@@ -176,11 +176,11 @@ impl QueryService for QueryGrpcService {
         }))
     }
 
-    type StreamQueryStream = ReceiverStream<Result<QueryChunk, Status>>;
+    type StreamQueryStream = ReceiverStream<Result<QueryResultRow, Status>>;
 
     async fn stream_query(
         &self,
-        request: Request<StreamQueryRequest>,
+        request: Request<ExecuteQueryRequest>,
     ) -> Result<Response<Self::StreamQueryStream>, Status> {
         let req = request.into_inner();
 
@@ -217,7 +217,7 @@ impl QueryService for QueryGrpcService {
         tokio::spawn(async move {
             let mut offset = 0;
             let mut chunk_index = 0;
-            let mut total_rows = 0;
+            let mut _total_rows = 0;
 
             loop {
                 if chunk_index >= max_chunks {
@@ -241,7 +241,12 @@ impl QueryService for QueryGrpcService {
                     break;
                 }
 
-                let rows: Vec<QueryResultRow> = result.rows.iter().map(|row| {
+                let row_count = result.rows.len();
+                _total_rows += row_count;
+                let is_last = row_count < chunk_size;
+
+                // Stream each row individually
+                for row in &result.rows {
                     let values: Vec<Value> = row.iter().map(|cell| {
                         match cell {
                             serde_json::Value::Null => Value { kind: Some(crate::grpc::generated::value::Kind::NullValue("NULL".to_string())) },
@@ -259,20 +264,10 @@ impl QueryService for QueryGrpcService {
                             _ => Value { kind: Some(crate::grpc::generated::value::Kind::StringValue(cell.to_string())) },
                         }
                     }).collect();
-                    QueryResultRow { values }
-                }).collect();
 
-                total_rows += rows.len();
-                let is_last = rows.len() < chunk_size;
-
-                if tx.send(Ok(QueryChunk {
-                    columns: result.columns.clone(),
-                    rows,
-                    is_last,
-                    total_rows: total_rows as i64,
-                    chunk_index,
-                })).await.is_err() {
-                    break;
+                    if tx.send(Ok(QueryResultRow { values })).await.is_err() {
+                        break;
+                    }
                 }
 
                 if is_last {

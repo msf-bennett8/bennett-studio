@@ -126,18 +126,14 @@ impl ShareTokenManager {
         
         let (encoding_key, decoding_key) = if key_path.exists() {
             info!("Loading existing signing key from {:?}", key_path);
-            let pem = tokio::fs::read_to_string(&key_path).await?;
-            let encoding = EncodingKey::from_ed_pem(pem.as_bytes())?;
-            let decoding = DecodingKey::from_ed_pem(pem.as_bytes())?;
+            let secret = tokio::fs::read(&key_path).await?;
+            let encoding = EncodingKey::from_secret(&secret);
+            let decoding = DecodingKey::from_secret(&secret);
             (encoding, decoding)
         } else {
-            info!("Generating new Ed25519 signing key at {:?}", key_path);
-            // Generate Ed25519 key pair using ring or ed25519-dalek
-            // For now, use a generated secret - in production use proper keygen
+            info!("Generating new HMAC-SHA256 signing key at {:?}", key_path);
             let secret = Self::generate_secret();
-            let pem = format!("-----BEGIN PRIVATE KEY-----\n{}\n-----END PRIVATE KEY-----",
-                base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &secret));
-            tokio::fs::write(&key_path, &pem).await?;
+            tokio::fs::write(&key_path, &secret).await?;
             let encoding = EncodingKey::from_secret(&secret);
             let decoding = DecodingKey::from_secret(&secret);
             (encoding, decoding)

@@ -45,7 +45,7 @@ pub async fn handle_mysql_client(
     let auth_result = match validate_wire_auth(&state, actual_share_code, &password, peer_addr).await {
         Ok(r) => r,
         Err(e) => {
-            send_mysql_error(&mut client_stream, 1045, 1, "28000", &format!("Access denied: {}", e)).await?;
+            send_mysql_error(&mut client_stream, 1, 1045, "28000", &format!("Access denied: {}", e)).await?;
             return Ok(());
         }
     };
@@ -60,13 +60,13 @@ pub async fn handle_mysql_client(
     let mut db_stream = match TcpStream::connect(format!("127.0.0.1:{}", db_port)).await {
         Ok(s) => s,
         Err(e) => {
-            send_mysql_error(&mut client_stream, 2003, 1, "HY000", &format!("Cannot connect to database: {}", e)).await?;
+            send_mysql_error(&mut client_stream, 1, 2003, "HY000", &format!("Cannot connect to database: {}", e)).await?;
             return Ok(());
         }
     };
     
     // Bidirectional proxy with audit logging
-    proxy_bidirectional(client_stream, db_stream, &auth_result, state.audit_service.clone()).await?;
+    proxy_bidirectional(client_stream, db_stream, auth_result, state.audit_service.clone()).await?;
     
     Ok(())
 }
@@ -252,19 +252,19 @@ async fn read_mysql_packet(
 async fn proxy_bidirectional(
     client: TcpStream,
     db: TcpStream,
-    auth: &WireAuthResult,
+    auth: WireAuthResult,
     audit_service: Option<Arc<crate::audit::AuditService>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let (mut client_read, mut client_write) = client.into_split();
     let (mut db_read, mut db_write) = db.into_split();
-    
+
     let rls_filter = auth.validated.rls.clone();
-    let permission = auth.validated.permission.clone();
-    
+    let permission_str = auth.validated.permission.as_str().to_string();
+
     let db_id = auth.db_instance.id.clone();
     let peer_addr = auth.peer_addr;
-    let permission = auth.validated.permission.as_str().to_string();
-    
+    let validated_code = auth.validated.code.clone();
+
     let client_to_db = tokio::spawn(async move {
         let mut buf = Vec::with_capacity(8192);
         let mut packet_buf = Vec::new();
@@ -273,14 +273,14 @@ async fn proxy_bidirectional(
         let log_query = |sql: &str, success: bool, rows: i64, elapsed_ms: i64| {
             if let Some(ref audit) = audit_service {
                 let entry = crate::audit::create_entry(
-                    &auth.validated.code,
+                    &validated_code,
                     &db_id,
                     &peer_addr.to_string(),
                     sql,
                     rows,
                     elapsed_ms,
                     success,
-                    &permission,
+                    &permission_str,
                 );
                 let _ = audit.log_query(entry);
             }
@@ -311,7 +311,7 @@ async fn proxy_bidirectional(
                                 let sql = sql.trim_end_matches('\0');
                                 
                                 // Validate SQL
-                                let perm = crate::auth::share_token::SharePermission::from_str(&permission);
+                                let perm = crate::auth::share_token::SharePermission::from_str(&permission_str);
                                 if let Err(e) = crate::connect_rpc::validate_shared_sql(sql, &perm) {
                                     tracing::warn!("Blocked query: {:?}", e);
                                     let _ = send_mysql_error_packet(&mut db_write, 1, 42000, &format!("{:?}", e)).await;
@@ -389,7 +389,7 @@ async fn proxy_bidirectional(
         _ = db_to_client => {},
     }
     
-    info!("MySQL wire proxy closed for {}", auth.peer_addr);
+    info!("MySQL wire proxy closed for {}", peer_addr);
     Ok(())
 }
 

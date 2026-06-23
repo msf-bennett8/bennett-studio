@@ -305,6 +305,10 @@ fn extract_table_factor(
                 extract_table_factor(&join.relation, tables);
             }
         }
+        TableFactor::Function { .. } => {}
+        TableFactor::JsonTable { .. } => {}
+        TableFactor::MatchRecognize { .. } => {}
+        // OuterJoin is handled as part of joins in TableFactor::Table
     }
 }
 

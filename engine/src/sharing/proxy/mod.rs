@@ -110,14 +110,24 @@ async fn handle_connection(
     
     match protocol {
         WireProtocol::MySQL => {
-        let result = mysql::handle_mysql_client(client_stream, peer_addr, state, cert_manager).await;
-        router.disconnect(port).await;
-        result.map_err(|e| format!("MySQL proxy error: {}", e))?;
+            let mysql_result = match mysql::handle_mysql_client(client_stream, peer_addr, state, cert_manager).await {
+                Ok(()) => Ok(()),
+                Err(e) => Err(format!("MySQL proxy error: {}", e)),
+            };
+            let _ = router.disconnect(port).await;
+            if let Err(e) = mysql_result {
+                return Err(e.into());
+            }
         }
         WireProtocol::PostgreSQL => {
-            let result = postgres::handle_postgres_client(client_stream, peer_addr, state, cert_manager).await;
-            router.disconnect(port).await;
-            result.map_err(|e| format!("PostgreSQL proxy error: {}", e))?;
+            let pg_result = match postgres::handle_postgres_client(client_stream, peer_addr, state, cert_manager).await {
+                Ok(()) => Ok(()),
+                Err(e) => Err(format!("PostgreSQL proxy error: {}", e)),
+            };
+            let _ = router.disconnect(port).await;
+            if let Err(e) = pg_result {
+                return Err(e.into());
+            }
         }
         WireProtocol::Unknown => {
             warn!("Unknown wire protocol from {}, disconnecting", peer_addr);

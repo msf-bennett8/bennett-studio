@@ -13,13 +13,11 @@ use std::time::{SystemTime, Duration};
 pub struct CertManager {
     certs: RwLock<HashMap<String, ShareCert>>,
     ca_cert: Arc<Certificate>,
-    ca_key: Arc<KeyPair>,
 }
 
 /// Certificate bundle for a share
 struct ShareCert {
     cert: Arc<Certificate>,
-    key: Arc<KeyPair>,
     created_at: SystemTime,
     tls_acceptor: TlsAcceptor,
 }
@@ -32,7 +30,7 @@ impl CertManager {
         ca_params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
 
         let ca_key = KeyPair::generate().expect("Failed to generate CA key");
-        let ca_cert = Certificate::from_params(ca_params)
+        let ca_cert = ca_params.self_signed(&ca_key)
             .expect("Failed to generate CA cert");
 
         info!("Generated CA certificate for wire protocol TLS");
@@ -40,7 +38,6 @@ impl CertManager {
         Self {
             certs: RwLock::new(HashMap::new()),
             ca_cert: Arc::new(ca_cert),
-            ca_key: Arc::new(ca_key),
         }
     }
 
@@ -74,13 +71,11 @@ impl CertManager {
         params.subject_alt_names.push(rcgen::SanType::IpAddress(std::net::IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1))));
 
         let key = KeyPair::generate().map_err(|e| format!("Key generation failed: {}", e))?;
-        let cert = Certificate::from_params(params)
+        let cert = params.self_signed(&key)
             .map_err(|e| format!("Cert generation failed: {}", e))?;
 
-        // Sign with CA
-        let cert_pem = cert.serialize_pem_with_signer(&self.ca_cert)
-            .map_err(|e| format!("Cert signing failed: {}", e))?;
-
+        // Get PEM
+        let cert_pem = cert.pem();
         let key_pem = key.serialize_pem();
 
         // Build rustls config
@@ -103,7 +98,6 @@ impl CertManager {
         let mut certs = self.certs.write().await;
         certs.insert(share_code.to_string(), ShareCert {
             cert: Arc::new(cert),
-            key: Arc::new(key),
             created_at: SystemTime::now(),
             tls_acceptor: acceptor.clone(),
         });
@@ -115,7 +109,7 @@ impl CertManager {
 
     /// Export CA certificate for client trust
     pub fn ca_cert_pem(&self) -> String {
-        self.ca_cert.serialize_pem().unwrap_or_default()
+        self.ca_cert.pem()
     }
 
     /// Cleanup expired certificates

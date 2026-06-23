@@ -16,7 +16,7 @@ async fn main() {
         .init();
     
     // Initialize health check start time
-    crate::api::health::init_start_time();
+    bennett_engine::api::health::init_start_time();
 
     let state = match AppState::new().await {
         Ok(s) => s,
@@ -115,7 +115,7 @@ async fn main() {
     
     let grpc_state = state.clone();
     tokio::spawn(async move {
-        if let Err(e) = crate::grpc::start_grpc_server(grpc_state, grpc_port).await {
+        if let Err(e) = bennett_engine::grpc::start_grpc_server(grpc_state, grpc_port).await {
             tracing::error!("gRPC server error: {}", e);
         }
     });
@@ -130,7 +130,7 @@ async fn main() {
     
     let proxy_state = state.clone();
     tokio::spawn(async move {
-        let proxy = crate::sharing::proxy::WireProxyServer::new(proxy_state, proxy_port);
+        let proxy = bennett_engine::sharing::proxy::WireProxyServer::new(proxy_state, proxy_port);
         if let Err(e) = proxy.start().await {
             tracing::error!("Wire protocol proxy error: {}", e);
         }

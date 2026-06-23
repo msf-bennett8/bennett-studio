@@ -48,10 +48,18 @@ impl AppState {
         let home = dirs::home_dir()
             .ok_or_else(|| crate::runtime::container::docker::DockerError::Other("No home dir".to_string()))?;
         let data_dir = home.join(".bennett").join("data");
-        std::fs::create_dir_all(&data_dir).ok();
+        std::fs::create_dir_all(&data_dir).expect("Failed to create .bennett/data directory");
+
+        // sqlx SQLite URL format: use percent-encoding for spaces in path
+        let db_file = data_dir.join("shares.db");
+        let audit_file = data_dir.join("audit.db");
         
-        let db_path = format!("sqlite://{}", data_dir.join("shares.db").to_string_lossy());
-        let audit_path = format!("sqlite://{}", data_dir.join("audit.db").to_string_lossy());
+        // Percent-encode spaces and special characters for URL format
+        let db_path_encoded = db_file.to_string_lossy().replace(' ', "%20");
+        let audit_path_encoded = audit_file.to_string_lossy().replace(' ', "%20");
+        
+        let db_path = format!("sqlite:{}", db_path_encoded);
+        let audit_path = format!("sqlite:{}", audit_path_encoded);
         
         let share_store = ShareStore::new(&db_path).await
             .map_err(|e| crate::runtime::container::docker::DockerError::Other(e.to_string()))?;
