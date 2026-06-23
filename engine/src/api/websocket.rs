@@ -63,9 +63,9 @@ async fn handle_socket(socket: WebSocket, database_id: String, state: AppState) 
     let (mut sender, mut receiver) = socket.split();
     
     // Generate session ID for reconnection
-    let mut session_id = format!("ws-{}", uuid::Uuid::new_v4());
+    let session_id = format!("ws-{}", uuid::Uuid::new_v4());
     let mut message_counter: u64 = 0;
-    let mut is_reconnect = false;
+    let _is_reconnect = false;
     
     // Create or get message buffer for this session
     let session_buffer = state.ws_buffer.get_or_create(&session_id).await;

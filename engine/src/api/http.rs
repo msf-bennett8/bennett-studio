@@ -6,7 +6,6 @@ use axum::{
 use tracing::info;
 
 use crate::AppState;
-use crate::api::health::init_start_time;
 use crate::models::database::{
     ApiResponse, CreateDatabaseRequest, DatabaseInstance, DatabaseStatus, UpdateDatabaseRequest,
     DatabaseSource, UnlockDatabaseRequest, DatabaseStatusResponse, DatabaseCredentials,

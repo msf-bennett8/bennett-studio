@@ -5,7 +5,7 @@ use tokio::net::TcpStream;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tracing::{info, warn, error};
+use tracing::info;
 
 use crate::AppState;
 use crate::sharing::proxy::tls::CertManager;
@@ -111,7 +111,7 @@ async fn pg_proxy_bidirectional(
     let (mut db_read, mut db_write) = db.into_split();
     
     let rls_filter = auth.validated.rls.clone();
-    let permission = auth.validated.permission.clone();
+    let _permission = auth.validated.permission.clone();
     
     let db_id = auth.db_instance.id.clone();
     let peer_addr = auth.peer_addr;

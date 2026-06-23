@@ -15,7 +15,7 @@ pub mod router;
 use std::net::SocketAddr;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tracing::{info, warn, error};
+use tracing::{info, warn};
 use std::sync::Arc;
 
 use crate::AppState;
@@ -207,7 +207,7 @@ pub async fn validate_wire_auth(
     }
     
     // Rate limit check
-    let rate_key = format!("{}:{}", share_code, peer_addr.ip());
+    let _rate_key = format!("{}:{}", share_code, peer_addr.ip());
     if let Err(e) = state.rate_limiter.check(share_code, &peer_addr.ip()).await {
         // Log rate limit violation
         if let Some(audit) = &state.audit_service {

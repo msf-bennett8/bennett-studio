@@ -151,7 +151,7 @@ impl PolicyEngine {
         tables: &mut std::collections::HashSet<String>,
     ) {
         use sqlparser::ast::Statement;
-        use sqlparser::ast::TableFactor;
+        
 
         match stmt {
             Statement::Query(query) => {
@@ -182,7 +182,7 @@ impl PolicyEngine {
         tables: &mut std::collections::HashSet<String>,
     ) {
         use sqlparser::ast::SetExpr;
-        use sqlparser::ast::TableFactor;
+        
 
         match &*query.body {
             SetExpr::Select(select) => {

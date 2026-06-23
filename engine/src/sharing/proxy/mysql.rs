@@ -5,7 +5,7 @@ use tokio::net::TcpStream;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tracing::{info, warn, error};
+use tracing::info;
 
 use crate::AppState;
 use crate::sharing::proxy::tls::CertManager;
@@ -21,7 +21,7 @@ pub async fn handle_mysql_client(
     mut client_stream: TcpStream,
     peer_addr: SocketAddr,
     state: AppState,
-    cert_manager: Arc<CertManager>,
+    _cert_manager: Arc<CertManager>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Read handshake response (client sends auth info first in some modes)
     // Standard MySQL: server sends handshake first
@@ -32,7 +32,7 @@ pub async fn handle_mysql_client(
     send_mysql_handshake(&mut client_stream, share_code).await?;
     
     // Read client auth response
-    let (username, password, database) = read_mysql_auth_response(&mut client_stream).await?;
+    let (username, password, _database) = read_mysql_auth_response(&mut client_stream).await?;
     
     // Extract share code from username (format: bennett_SHARECODE)
     let actual_share_code = if username.starts_with("bennett_") {
@@ -57,7 +57,7 @@ pub async fn handle_mysql_client(
     
     // Connect to real MySQL server
     let db_port = auth_result.db_instance.port;
-    let mut db_stream = match TcpStream::connect(format!("127.0.0.1:{}", db_port)).await {
+    let db_stream = match TcpStream::connect(format!("127.0.0.1:{}", db_port)).await {
         Ok(s) => s,
         Err(e) => {
             send_mysql_error(&mut client_stream, 1, 2003, "HY000", &format!("Cannot connect to database: {}", e)).await?;
@@ -117,7 +117,7 @@ async fn send_mysql_handshake(
 async fn read_mysql_auth_response(
     stream: &mut TcpStream,
 ) -> Result<(String, String, String), Box<dyn std::error::Error>> {
-    let (seq, payload) = read_mysql_packet(stream).await?;
+    let (_seq, payload) = read_mysql_packet(stream).await?;
     
     // Parse HandshakeResponse41
     let capability_flags = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);

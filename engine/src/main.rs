@@ -2,7 +2,6 @@ use axum::Router;
 use std::net::SocketAddr;
 use tower_http::cors::CorsLayer;
 use tracing::info;
-use tokio::signal;
 
 use bennett_engine::{
     api::routes,
@@ -126,7 +125,16 @@ async fn main() {
     let proxy_port = std::env::var("BENNETT_WIRE_PORT")
         .ok()
         .and_then(|p| p.parse().ok())
-        .unwrap_or(3307);
+        .unwrap_or_else(|| {
+            let base_port = 13307;
+            for offset in 0..10 {
+                let port = base_port + offset;
+                if std::net::TcpListener::bind(("0.0.0.0", port)).is_ok() {
+                    return port;
+                }
+            }
+            panic!("No available port found in range 13307-13316");
+        });
     
     let proxy_state = state.clone();
     tokio::spawn(async move {

@@ -3,15 +3,13 @@
 
 use axum::{
     extract::State,
-    response::{IntoResponse, Response},
+    response::Response,
     body::Body,
-    Json,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use tokio_stream::wrappers::ReceiverStream;
 use futures_util::StreamExt;
-use tracing::{info, warn};
+use tracing::info;
 
 use crate::AppState;
 use crate::connect_rpc::{

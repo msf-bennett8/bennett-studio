@@ -1,6 +1,6 @@
 // Network utilities
 
-use std::net::{IpAddr, Ipv4Addr, TcpStream};
+use std::net::{IpAddr, TcpStream};
 
 /// Detect the primary LAN IP address of this machine
 /// Strategy: Connect to a known public IP (Google DNS 8.8.8.8:53)

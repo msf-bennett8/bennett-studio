@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{info, warn};
+use tracing::info;
 
 /// Port mapping for wire protocol proxy
 /// MySQL default: 3307 (maps to local 3306)

@@ -3,19 +3,18 @@
 
 use axum::{
     extract::State,
-    response::{IntoResponse, Response},
+    response::Response,
     body::Body,
     Json,
 };
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use tracing::{info, warn};
 
 use crate::AppState;
 use crate::connect_rpc::{
     connect_error, connect_response, validate_share_request,
-    parse_connect_request, filter_columns,
+    parse_connect_request,
 };
 
 // ============================================================================
@@ -582,7 +581,7 @@ pub async fn stream_schema_updates(
         }
     }).collect();
 
-    let elapsed = start.elapsed().as_millis() as i64;
+    let _elapsed = start.elapsed().as_millis() as i64;
     info!("Schema stream started for share {}: {} tables", req.share_code, tables.len());
 
     // For Connect-RPC over HTTP/1.1, we use SSE-style streaming

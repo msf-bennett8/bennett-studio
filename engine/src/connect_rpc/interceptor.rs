@@ -6,7 +6,7 @@ use axum::{
     middleware::Next,
     response::Response,
 };
-use tracing::{warn, info};
+use tracing::info;
 
 use crate::AppState;
 
@@ -32,7 +32,7 @@ pub async fn auth_interceptor(
 /// For Connect-RPC, extracts share_code from JSON body when possible
 pub async fn rate_limit_interceptor(
     State(state): State<AppState>,
-    mut req: Request,
+    req: Request,
     next: Next,
 ) -> Response {
     // Extract client IP

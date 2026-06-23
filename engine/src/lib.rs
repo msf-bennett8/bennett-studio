@@ -68,10 +68,13 @@ impl AppState {
             .map_err(|e| crate::runtime::container::docker::DockerError::Other(e.to_string()))?;
         
         // Initialize audit service (optional - don't fail if it doesn't work)
-        let audit_service = AuditService::new(&audit_path).await.ok();
-        if audit_service.is_none() {
-            tracing::warn!("Audit service failed to initialize - continuing without audit logging");
-        }
+        let audit_service = match AuditService::new(&audit_path).await {
+            Ok(s) => Some(s),
+            Err(e) => {
+                tracing::warn!("Audit service failed to initialize: {} - continuing without audit logging", e);
+                None
+            }
+        };
         
         let rate_limiter = Arc::new(RateLimitService::new());
         

@@ -3,7 +3,7 @@
 
 use tonic::{Request, Response, Status};
 use tokio_stream::wrappers::ReceiverStream;
-use tracing::{info, warn};
+use tracing::info;
 
 use crate::AppState;
 use crate::grpc::generated::{
@@ -160,7 +160,7 @@ impl SchemaService for SchemaGrpcService {
             let initial_hash = compute_schema_hash(&initial_schema);
             last_schema_hash = Some(initial_hash);
 
-            let tables: Vec<TableSchema> = initial_schema.into_iter().map(|t| TableSchema {
+            let _tables: Vec<TableSchema> = initial_schema.into_iter().map(|t| TableSchema {
                 name: t.name,
                 columns: t.columns.into_iter().map(|c| ColumnSchema {
                     name: c.name,

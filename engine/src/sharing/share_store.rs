@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::{sqlite::SqlitePoolOptions, Pool, Sqlite, Row};
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{info, warn, error};
+use tracing::{info, error};
 
 /// Share record in database
 #[derive(Debug, Clone, Serialize, Deserialize)]

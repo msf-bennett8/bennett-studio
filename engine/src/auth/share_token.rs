@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{info, warn};
+use tracing::info;
 
 /// JWT claims for a share token
 #[derive(Debug, Clone, Serialize, Deserialize)]

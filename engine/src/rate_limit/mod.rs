@@ -3,7 +3,6 @@
 //! Prevents abuse and ensures fair resource sharing
 
 use governor::{Quota, RateLimiter, clock::DefaultClock, state::keyed::DefaultKeyedStateStore};
-use nonzero_ext::nonzero;
 use std::net::IpAddr;
 use std::sync::Arc;
 use tokio::sync::RwLock;

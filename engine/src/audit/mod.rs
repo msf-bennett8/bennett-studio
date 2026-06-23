@@ -191,9 +191,9 @@ impl AuditService {
     pub async fn query(
         &self,
         share_code: Option<&str>,
-        db_id: Option<&str>,
-        from: Option<DateTime<Utc>>,
-        to: Option<DateTime<Utc>>,
+        _db_id: Option<&str>,
+        _from: Option<DateTime<Utc>>,
+        _to: Option<DateTime<Utc>>,
         limit: i64,
     ) -> Result<Vec<AuditEntry>, sqlx::Error> {
         let mut query_str = "SELECT * FROM audit_log WHERE 1=1".to_string();
@@ -202,7 +202,7 @@ impl AuditService {
         // For now, simplified query without dynamic binds
         //let mut binds: Vec<Box<dyn sqlx::Encode<'_, sqlx::Sqlite> + sqlx::Type<sqlx::Sqlite> + Send>> = Vec::new();
         
-        if let Some(code) = share_code {
+        if let Some(_code) = share_code {
             query_str.push_str(" AND share_code = ?");
             // binds.push(Box::new(code)); // Simplified - real impl needs proper binding
         }

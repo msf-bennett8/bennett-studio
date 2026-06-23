@@ -136,7 +136,7 @@ impl WsMessageBuffer {
     /// Create or get a session buffer
     pub async fn get_or_create(&self, session_id: &str) -> SessionBuffer {
         let buffers = self.buffers.read().await;
-        if let Some(buffer) = buffers.get(session_id) {
+        if let Some(_buffer) = buffers.get(session_id) {
             return SessionBuffer {
                 messages: RwLock::new(VecDeque::new()),
                 max_size: self.max_size,

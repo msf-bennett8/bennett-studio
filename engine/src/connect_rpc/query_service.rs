@@ -4,12 +4,8 @@
 use axum::{
     extract::State,
     response::{IntoResponse, Response},
-    http::StatusCode,
-    body::Body,
-    Json,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use tracing::{info, warn, error};
 
 use crate::AppState;

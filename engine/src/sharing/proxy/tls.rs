@@ -5,7 +5,7 @@ use rcgen::{Certificate, CertificateParams, KeyPair};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio_rustls::TlsAcceptor;
-use tracing::{info, warn};
+use tracing::info;
 use std::collections::HashMap;
 use std::time::{SystemTime, Duration};
 

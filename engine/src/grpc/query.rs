@@ -3,7 +3,7 @@
 
 use tonic::{Request, Response, Status};
 use tokio_stream::wrappers::ReceiverStream;
-use tracing::{info, warn};
+use tracing::info;
 
 use crate::AppState;
 use crate::grpc::generated::{

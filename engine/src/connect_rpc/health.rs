@@ -1,7 +1,6 @@
 //! Connect-RPC health check
 
-use axum::{response::Response, Json};
-use crate::AppState;
+use axum::response::Response;
 
 /// Simple health check for Connect-RPC
 pub async fn connect_health() -> Response {

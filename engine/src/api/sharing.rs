@@ -279,7 +279,7 @@ pub async fn validate_share(
     }
     
     // Get database info
-    let db_name = {
+    let _db_name = {
         let dbs = state.databases.lock().unwrap();
         dbs.iter().find(|d| d.id == record.db_id)
             .map(|d| d.name.clone())

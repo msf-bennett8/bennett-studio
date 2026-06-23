@@ -196,7 +196,7 @@ fn extract_tables_from_statement(
     tables: &mut std::collections::HashSet<String>,
 ) {
     use sqlparser::ast::Statement;
-    use sqlparser::ast::TableFactor;
+    
 
     match stmt {
         Statement::Query(query) => {
@@ -238,7 +238,7 @@ fn extract_tables_from_query(
     query: &sqlparser::ast::Query,
     tables: &mut std::collections::HashSet<String>,
 ) {
-    use sqlparser::ast::{SetExpr, TableFactor};
+    use sqlparser::ast::SetExpr;
 
     match &*query.body {
         SetExpr::Select(select) => {
