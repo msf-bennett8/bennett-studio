@@ -12,7 +12,7 @@ pub fn grpc_web_proxy() -> GrpcWebLayer {
 }
 
 /// Full service builder with gRPC-Web, CORS, and compression
-pub fn grpc_service_stack() -> ServiceBuilder<tower::ServiceBuilder> {
+pub fn grpc_service_stack() -> tower::ServiceBuilder<tower::layer::util::Stack<tower_http::compression::CompressionLayer, tower::layer::util::Stack<tower_http::cors::CorsLayer, tower::layer::util::Stack<GrpcWebLayer, tower::layer::util::Identity>>>> {
     ServiceBuilder::new()
         .layer(GrpcWebLayer::new())
         .layer(tower_http::cors::CorsLayer::permissive())

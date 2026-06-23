@@ -38,9 +38,9 @@ impl SchemaService for SchemaGrpcService {
         let start = std::time::Instant::now();
         
         // Validate
-        let validated = validate_share_request(&self.state, &req.share_code, &req.token)
+        let validated = validate_share_request(&self.state, &req.share_code, &req.token, None)
             .await
-            .map_err(|e| map_error_to_status(&e))?;
+            .map_err(|e| map_error_to_status(&format!("{:?}", e)))?;
         
         // Find database
         let db_instance = {
@@ -96,7 +96,6 @@ impl SchemaService for SchemaGrpcService {
             database_name: db_instance.name,
             database_type: db_instance.db_type,
             database_version: db_instance.version,
-            error: String::new(),
         }))
     }
 
@@ -109,9 +108,9 @@ impl SchemaService for SchemaGrpcService {
         let req = request.into_inner();
 
         // Validate share
-        let validated = validate_share_request(&self.state, &req.share_code, &req.token)
+        let validated = validate_share_request(&self.state, &req.share_code, &req.token, None)
             .await
-            .map_err(|e| map_error_to_status(&e))?;
+            .map_err(|e| map_error_to_status(&format!("{:?}", e)))?;
 
         let db_id = validated.db_id.clone();
         let share_code = req.share_code.clone();
@@ -161,7 +160,7 @@ impl SchemaService for SchemaGrpcService {
             let initial_hash = compute_schema_hash(&initial_schema);
             last_schema_hash = Some(initial_hash);
 
-            let tables = initial_schema.into_iter().map(|t| TableSchema {
+            let tables: Vec<TableSchema> = initial_schema.into_iter().map(|t| TableSchema {
                 name: t.name,
                 columns: t.columns.into_iter().map(|c| ColumnSchema {
                     name: c.name,
@@ -258,9 +257,9 @@ impl SchemaService for SchemaGrpcService {
     ) -> Result<Response<GetTableColumnsResponse>, Status> {
         let req = request.into_inner();
 
-        let validated = validate_share_request(&self.state, &req.share_code, &req.token)
+        let validated = validate_share_request(&self.state, &req.share_code, &req.token, None)
             .await
-            .map_err(|e| map_error_to_status(&e))?;
+            .map_err(|e| map_error_to_status(&format!("{:?}", e)))?;
 
         let db_instance = {
             let dbs = self.state.databases.lock().unwrap();
@@ -297,7 +296,6 @@ impl SchemaService for SchemaGrpcService {
         Ok(Response::new(GetTableColumnsResponse {
             success: true,
             columns,
-            error: String::new(),
         }))
     }
 
@@ -307,9 +305,9 @@ impl SchemaService for SchemaGrpcService {
     ) -> Result<Response<GetTableIndexesResponse>, Status> {
         let req = request.into_inner();
 
-        let validated = validate_share_request(&self.state, &req.share_code, &req.token)
+        let validated = validate_share_request(&self.state, &req.share_code, &req.token, None)
             .await
-            .map_err(|e| map_error_to_status(&e))?;
+            .map_err(|e| map_error_to_status(&format!("{:?}", e)))?;
 
         let db_instance = {
             let dbs = self.state.databases.lock().unwrap();
@@ -343,7 +341,6 @@ impl SchemaService for SchemaGrpcService {
         Ok(Response::new(GetTableIndexesResponse {
             success: true,
             indexes,
-            error: String::new(),
         }))
     }
 
@@ -353,9 +350,9 @@ impl SchemaService for SchemaGrpcService {
     ) -> Result<Response<GetTableConstraintsResponse>, Status> {
         let req = request.into_inner();
 
-        let validated = validate_share_request(&self.state, &req.share_code, &req.token)
+        let validated = validate_share_request(&self.state, &req.share_code, &req.token, None)
             .await
-            .map_err(|e| map_error_to_status(&e))?;
+            .map_err(|e| map_error_to_status(&format!("{:?}", e)))?;
 
         let db_instance = {
             let dbs = self.state.databases.lock().unwrap();
@@ -388,7 +385,6 @@ impl SchemaService for SchemaGrpcService {
         Ok(Response::new(GetTableConstraintsResponse {
             success: true,
             constraints,
-            error: String::new(),
         }))
     }
 }

@@ -9,13 +9,12 @@ pub mod schema_service;
 pub mod export_service;
 pub mod interceptor;
 pub mod router;
+pub mod health;
 
 use axum::{
-    response::{IntoResponse, Response},
-    http::{StatusCode, header, HeaderMap},
+    response::Response,
+    http::{StatusCode, header},
     body::Body,
-    extract::State,
-    Json,
 };
 use serde_json::json;
 use crate::AppState;
@@ -209,19 +208,19 @@ fn extract_tables_from_statement(
             }
             extract_tables_from_query(query, tables);
         }
-        Statement::Insert { table_name, .. } => {
-            tables.insert(table_name.to_string());
+        Statement::Insert(insert) => {
+            tables.insert(insert.table_name.to_string());
         }
         Statement::Update { table, .. } => {
             tables.insert(table.to_string());
         }
-        Statement::Delete { table_name, .. } => {
-            if let Some(name) = table_name {
-                tables.insert(name.to_string());
+        Statement::Delete(delete) => {
+            for table in &delete.tables {
+                tables.insert(table.to_string());
             }
         }
-        Statement::CreateTable { name, .. } => {
-            tables.insert(name.to_string());
+        Statement::CreateTable(create) => {
+            tables.insert(create.name.to_string());
         }
         Statement::AlterTable { name, .. } => {
             tables.insert(name.to_string());
@@ -301,12 +300,6 @@ fn extract_table_factor(
         TableFactor::Pivot { .. } => {}
         TableFactor::Unpivot { .. } => {}
         TableFactor::NestedJoin { table_with_joins, .. } => {
-            extract_table_factor(&table_with_joins.relation, tables);
-            for join in &table_with_joins.joins {
-                extract_table_factor(&join.relation, tables);
-            }
-        }
-        TableFactor::OuterJoin { table_with_joins, .. } => {
             extract_table_factor(&table_with_joins.relation, tables);
             for join in &table_with_joins.joins {
                 extract_table_factor(&join.relation, tables);

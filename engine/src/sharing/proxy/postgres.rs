@@ -80,7 +80,7 @@ async fn handle_startup(
     send_pg_parameter_status(&mut client_stream, "application_name", "bennett-proxy").await?;
     
     // Send ReadyForQuery
-    send_pg_ready_for_query(&mut client_stream, 'I').await?; // 'I' = Idle
+    send_pg_ready_for_query(&mut client_stream, b'I').await?; // 'I' = Idle
     
     info!("PostgreSQL wire proxy: authenticated {} for db {}", peer_addr, auth_result.db_instance.name);
     
@@ -163,11 +163,12 @@ async fn pg_proxy_bidirectional(
                         if msg_type == b'Q' {
                             if let Ok(sql) = std::str::from_utf8(&msg_data[5..msg_data.len() - 1]) {
                                 // Validate SQL
-                                if let Err(e) = crate::connect_rpc::validate_shared_sql(sql, &permission) {
-                                    tracing::warn!("Blocked PostgreSQL query: {}", e);
-                                    let _ = send_pg_error_direct(&mut db_write, "42501", &format!("{}", e)).await;
+                                let perm = crate::auth::share_token::SharePermission::from_str(&permission);
+                                if let Err(e) = crate::connect_rpc::validate_shared_sql(sql, &perm) {
+                                    tracing::warn!("Blocked PostgreSQL query: {:?}", e);
+                                    let _ = send_pg_error_direct(&mut db_write, "42501", &format!("{:?}", e)).await;
                                     // Send ReadyForQuery to unblock client
-                                    let _ = send_pg_ready_direct(&mut db_write, 'I').await;
+                                    let _ = send_pg_ready_direct(&mut db_write, b'I').await;
                                     continue;
                                 }
                                 

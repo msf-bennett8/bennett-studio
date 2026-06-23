@@ -87,7 +87,7 @@ pub struct CreateShareResponse {
         .build_client(true)
         .file_descriptor_set_path(out_dir.join("bennett_descriptor.bin"))
         .out_dir(out_dir)
-        .compile(&existing_protos, &[proto_dir.to_str().unwrap()])
+        .compile_protos(&existing_protos, &[proto_dir.to_str().unwrap()])
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
 
     // Rewrite mod.rs to include generated files
@@ -96,10 +96,7 @@ pub struct CreateShareResponse {
 
 pub mod bennett {
     pub mod v1 {
-        include!("share.rs");
-        include!("query.rs");
-        include!("schema.rs");
-        include!("export.rs");
+        include!("bennett.v1.rs");
     }
 }
 

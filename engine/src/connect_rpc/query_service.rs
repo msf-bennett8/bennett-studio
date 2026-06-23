@@ -76,10 +76,13 @@ pub struct ExecuteWriteResponse {
 /// POST /bennett.v1.QueryService/ExecuteQuery
 pub async fn execute_query(
     State(state): State<AppState>,
-    Json(body): Json<serde_json::Value>,
     request: axum::extract::Request,
 ) -> Response {
-    let client_ip = request.extensions().get::<crate::api::middleware::ClientIp>().map(|c| c.0);
+    let (parts, body) = request.into_parts();
+    let bytes = axum::body::to_bytes(body, usize::MAX).await.unwrap_or_default();
+    let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
+    let client_ip = parts.extensions.get::<crate::api::middleware::ClientIp>().map(|c| c.0);
+    let headers = parts.headers;
     
     let req: ExecuteQueryRequest = match parse_connect_request(&body.to_string()) {
         Ok(r) => r,
@@ -205,7 +208,7 @@ pub async fn execute_query(
             validated.permission.as_str(),
         );
         // Session ID from request headers if available
-        if let Some(session_id) = request.headers().get("x-session-id").and_then(|h| h.to_str().ok()) {
+        if let Some(session_id) = headers.get("x-session-id").and_then(|h| h.to_str().ok()) {
             entry.user_agent = Some(format!("session:{}", session_id));
         }
         let _ = audit.log_query(entry).await;
@@ -229,18 +232,19 @@ pub async fn execute_query(
 /// POST /bennett.v1.QueryService/ExecuteWrite
 pub async fn execute_write(
     State(state): State<AppState>,
-    Json(body): Json<serde_json::Value>,
     request: axum::extract::Request,
 ) -> Response {
+    let (parts, body) = request.into_parts();
+    let bytes = axum::body::to_bytes(body, usize::MAX).await.unwrap_or_default();
+    let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
+    let client_ip = parts.extensions.get::<crate::api::middleware::ClientIp>().map(|c| c.0);
+
     let req: ExecuteWriteRequest = match parse_connect_request(&body.to_string()) {
         Ok(r) => r,
         Err(resp) => return resp,
     };
     
     let start = std::time::Instant::now();
-    
-    // Extract client IP from request extensions (set by middleware)
-        let client_ip = request.extensions().get::<crate::api::middleware::ClientIp>().map(|c| c.0);
     
     // Validate share and token
     let validated = match validate_share_request(&state, &req.share_code, &req.token, client_ip).await {
@@ -315,9 +319,12 @@ pub async fn execute_write(
 /// Stream query results in chunks using SSE for browser compatibility
 pub async fn stream_query(
     State(state): State<AppState>,
-    Json(body): Json<serde_json::Value>,
     request: axum::extract::Request,
 ) -> Response {
+    let (parts, body) = request.into_parts();
+    let bytes = axum::body::to_bytes(body, usize::MAX).await.unwrap_or_default();
+    let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
+    let client_ip = parts.extensions.get::<crate::api::middleware::ClientIp>().map(|c| c.0);
     #[derive(Debug, Deserialize)]
     struct StreamQueryRequest {
         share_code: String,
@@ -331,8 +338,6 @@ pub async fn stream_query(
 
     fn default_chunk_size() -> i32 { 1000 }
     fn default_max_chunks() -> i32 { 100 }
-
-    let client_ip = request.extensions().get::<crate::api::middleware::ClientIp>().map(|c| c.0);
 
     let req: StreamQueryRequest = match parse_connect_request(&body.to_string()) {
         Ok(r) => r,
@@ -399,7 +404,7 @@ pub async fn stream_query(
     );
 
     // Stream via SSE
-    let (tx, rx) = tokio::sync::mpsc::channel(16);
+    let (tx, rx) = tokio::sync::mpsc::channel::<Result<axum::response::sse::Event, std::convert::Infallible>>(16);
     let total_rows = filtered_rows.len() as i32;
     let columns = filtered_columns.clone();
 
@@ -407,13 +412,14 @@ pub async fn stream_query(
         let chunk_size = chunk_size as usize;
         let chunks = filtered_rows.chunks(chunk_size);
 
+        let chunk_count = chunks.len();
         for (index, chunk) in chunks.enumerate().take(max_chunks as usize) {
             let chunk_data = serde_json::json!({
                 "chunk_index": index,
                 "columns": &columns,
                 "rows": chunk,
                 "row_count": chunk.len(),
-                "is_last": index == chunks.len() - 1 || index == max_chunks as usize - 1,
+                "is_last": index == chunk_count - 1 || index == max_chunks as usize - 1,
             });
 
             let event = axum::response::sse::Event::default()
@@ -439,6 +445,6 @@ pub async fn stream_query(
         .into_response()
 }
 
-/// POST /bennett.v1.QueryService/StreamQuery
-/// Streaming query execution complete
-/// Features: SSE chunked streaming, column projection, RLS enforcement, backpressure handling
+// POST /bennett.v1.QueryService/StreamQuery
+// Streaming query execution complete
+// Features: SSE chunked streaming, column projection, RLS enforcement, backpressure handling

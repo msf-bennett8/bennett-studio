@@ -4,7 +4,7 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use sqlx::{Pool, Sqlite, sqlite::SqlitePoolOptions};
+use sqlx::{Pool, Sqlite, sqlite::SqlitePoolOptions, Row};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::{info, warn, error};
@@ -197,7 +197,10 @@ impl AuditService {
         limit: i64,
     ) -> Result<Vec<AuditEntry>, sqlx::Error> {
         let mut query_str = "SELECT * FROM audit_log WHERE 1=1".to_string();
-        let mut binds: Vec<Box<dyn sqlx::Encode<'_, sqlx::Sqlite> + sqlx::Type<sqlx::Sqlite> + Send>> = Vec::new();
+        //TODO
+        // Note: Proper parameterized queries would use query_as! macro
+        // For now, simplified query without dynamic binds
+        //let mut binds: Vec<Box<dyn sqlx::Encode<'_, sqlx::Sqlite> + sqlx::Type<sqlx::Sqlite> + Send>> = Vec::new();
         
         if let Some(code) = share_code {
             query_str.push_str(" AND share_code = ?");

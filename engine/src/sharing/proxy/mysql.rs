@@ -45,7 +45,7 @@ pub async fn handle_mysql_client(
     let auth_result = match validate_wire_auth(&state, actual_share_code, &password, peer_addr).await {
         Ok(r) => r,
         Err(e) => {
-            send_mysql_error(&mut client_stream, 1045, "28000", &format!("Access denied: {}", e)).await?;
+            send_mysql_error(&mut client_stream, 1045, 1, "28000", &format!("Access denied: {}", e)).await?;
             return Ok(());
         }
     };
@@ -60,7 +60,7 @@ pub async fn handle_mysql_client(
     let mut db_stream = match TcpStream::connect(format!("127.0.0.1:{}", db_port)).await {
         Ok(s) => s,
         Err(e) => {
-            send_mysql_error(&mut client_stream, 2003, "HY000", &format!("Cannot connect to database: {}", e)).await?;
+            send_mysql_error(&mut client_stream, 2003, 1, "HY000", &format!("Cannot connect to database: {}", e)).await?;
             return Ok(());
         }
     };
@@ -306,14 +306,15 @@ async fn proxy_bidirectional(
                         let packet = packet_buf.drain(..4 + len).collect::<Vec<_>>();
                         
                         // Intercept COM_QUERY packets (command byte 0x03)
-                        let modified = if packet.len() > 4 && packet[4] == 0x03 {
+                        if packet.len() > 4 && packet[4] == 0x03 {
                             if let Ok(sql) = std::str::from_utf8(&packet[5..]) {
                                 let sql = sql.trim_end_matches('\0');
                                 
                                 // Validate SQL
-                                if let Err(e) = crate::connect_rpc::validate_shared_sql(sql, &permission) {
-                                    tracing::warn!("Blocked query: {}", e);
-                                    let _ = send_mysql_error_packet(&mut db_write, 1, 42000, &format!("{}", e)).await;
+                                let perm = crate::auth::share_token::SharePermission::from_str(&permission);
+                                if let Err(e) = crate::connect_rpc::validate_shared_sql(sql, &perm) {
+                                    tracing::warn!("Blocked query: {:?}", e);
+                                    let _ = send_mysql_error_packet(&mut db_write, 1, 42000, &format!("{:?}", e)).await;
                                     continue;
                                 }
                                 

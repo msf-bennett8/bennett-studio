@@ -127,8 +127,8 @@ impl ShareTokenManager {
         let (encoding_key, decoding_key) = if key_path.exists() {
             info!("Loading existing signing key from {:?}", key_path);
             let pem = tokio::fs::read_to_string(&key_path).await?;
-            let encoding = EncodingKey::from_ed_pem(&pem)?;
-            let decoding = DecodingKey::from_ed_pem(&pem)?;
+            let encoding = EncodingKey::from_ed_pem(pem.as_bytes())?;
+            let decoding = DecodingKey::from_ed_pem(pem.as_bytes())?;
             (encoding, decoding)
         } else {
             info!("Generating new Ed25519 signing key at {:?}", key_path);

@@ -87,7 +87,7 @@ impl QueryCache {
         
         let entry = QueryCacheEntry {
             result,
-            created_at: std::sync::time::Instant::now(),
+            created_at: std::time::Instant::now(),
             tables,
         };
         
@@ -102,12 +102,13 @@ impl QueryCache {
             .filter(|k| k.db_id == db_id)
             .collect();
         
+        let count = to_remove.len();
         for key in to_remove {
             self.cache.remove(&key).await;
         }
-        
-        if !to_remove.is_empty() {
-            info!("Invalidated {} cache entries for db {}", to_remove.len(), db_id);
+
+        if count > 0 {
+            info!("Invalidated {} cache entries for db {}", count, db_id);
         }
     }
     
@@ -169,12 +170,13 @@ impl QueryCache {
             })
             .collect();
         
+        let count = to_remove.len();
         for key in to_remove {
             self.cache.remove(&key).await;
         }
-        
-        if !to_remove.is_empty() {
-            tracing::info!("Invalidated {} cache entries for tables {:?}", to_remove.len(), tables);
+
+        if count > 0 {
+            tracing::info!("Invalidated {} cache entries for tables {:?}", count, tables);
         }
     }
     

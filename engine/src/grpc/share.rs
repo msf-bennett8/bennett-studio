@@ -14,6 +14,11 @@ use crate::grpc::generated::{
 use crate::utils::bennett_code::generate_share_code;
 use crate::auth::share_token::{SharePermission, build_share_url};
 use crate::sharing::share_store::ShareRecord;
+
+fn get_share_base_url() -> String {
+    std::env::var("BENNETT_SHARE_BASE_URL")
+        .unwrap_or_else(|_| "https://share.bennett.studio".to_string())
+}
 use chrono::Utc;
 
 pub struct ShareGrpcService {
@@ -46,16 +51,19 @@ impl ShareService for ShareGrpcService {
         let code = generate_share_code();
         let permission = if req.permission.is_empty() { "ro" } else { &req.permission };
         let perm = SharePermission::from_str(permission);
+        let perm_str = perm.as_str().to_string();
         let tables = if req.tables.is_empty() { vec!["*".to_string()] } else { req.tables.clone() };
         let duration = req.duration_hours.clamp(1, 168);
         let host_id = format!("host-{}", uuid::Uuid::new_v4().to_string().split('-').next().unwrap_or("unknown"));
-        
+
         // Create JWT
         let token_manager = self.state.token_manager.read().await;
         let token_result = token_manager.create_token(
             code.clone(),
             db.id.clone(),
             host_id.clone(),
+            None, // host
+            None, // port
             perm,
             tables.clone(),
             None, // cols
@@ -73,8 +81,10 @@ impl ShareService for ShareGrpcService {
             code: code.clone(),
             db_id: db.id.clone(),
             host_id,
+            host: None,
+            port: None,
             token_jti: token_result.jti.clone(),
-            permission: perm.as_str().to_string(),
+            permission: perm_str,
             tables: serde_json::to_string(&tables).unwrap_or_else(|_| r#"["*"]"#.to_string()),
             cols: None,
             rls: if req.rls.is_empty() { None } else { Some(req.rls) },
@@ -119,15 +129,14 @@ impl ShareService for ShareGrpcService {
                         } else {
                             "active".to_string()
                         };
-                        
+
                         let tables: Vec<String> = serde_json::from_str(&record.tables)
                             .unwrap_or_else(|_| vec!["*".to_string()]);
-                        
+
+                        let code = record.code.clone();
                         all_shares.push(ShareLink {
-                            code: record.code,
-                            url: format!("{}/db/{}", 
-                                std::env::var("BENNETT_SHARE_BASE_URL").unwrap_or_else(|_| "https://share.bennett.studio".to_string()),
-                                record.code),
+                            code: code.clone(),
+                            url: build_share_url(&get_share_base_url(), &code, "..."),
                             db_id: record.db_id,
                             db_name: db.name.clone(),
                             db_type: db.db_type.clone(),
@@ -145,10 +154,11 @@ impl ShareService for ShareGrpcService {
                 }
             }
         }
-        
+
+        let total = all_shares.len() as i32;
         Ok(Response::new(ListSharesResponse {
             shares: all_shares,
-            total: all_shares.len() as i32,
+            total,
         }))
     }
 

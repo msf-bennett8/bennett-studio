@@ -1,8 +1,7 @@
 //! TLS certificate management for wire protocol proxy
 //! Auto-generates self-signed certs per share, rotated every 24h
 
-use rcgen::{Certificate, CertificateParams, KeyPair, SignatureAlgorithm};
-use rustls::{ServerConfig, pki_types::PrivateKeyDer};
+use rcgen::{Certificate, CertificateParams, KeyPair};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio_rustls::TlsAcceptor;
@@ -28,22 +27,23 @@ struct ShareCert {
 impl CertManager {
     pub fn new() -> Self {
         // Generate CA certificate
-        let mut ca_params = CertificateParams::new(vec!["bennett-studio-ca.local".to_string()]);
+        let mut ca_params = CertificateParams::new(vec!["bennett-studio-ca.local".to_string()])
+            .expect("Failed to create CA params");
         ca_params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
-        
+
         let ca_key = KeyPair::generate().expect("Failed to generate CA key");
-        let ca_cert = Certificate::from_params(ca_params, &ca_key)
+        let ca_cert = Certificate::from_params(ca_params)
             .expect("Failed to generate CA cert");
-        
+
         info!("Generated CA certificate for wire protocol TLS");
-        
+
         Self {
             certs: RwLock::new(HashMap::new()),
             ca_cert: Arc::new(ca_cert),
             ca_key: Arc::new(ca_key),
         }
     }
-    
+
     /// Get or create TLS acceptor for a share
     pub async fn get_acceptor(&self, share_code: &str) -> Option<TlsAcceptor> {
         // Check cache
@@ -57,48 +57,48 @@ impl CertManager {
                 }
             }
         }
-        
+
         // Generate new cert
         self.generate_cert(share_code).await.ok()
     }
-    
+
     /// Generate a new certificate for a share
     async fn generate_cert(&self, share_code: &str) -> Result<TlsAcceptor, String> {
         let mut params = CertificateParams::new(vec![
             format!("{}.share.bennett.studio", share_code),
             "localhost".to_string(),
             "127.0.0.1".to_string(),
-        ]);
-        
+        ]).map_err(|e| format!("Failed to create cert params: {}", e))?;
+
         // Add SANs for IP addresses
         params.subject_alt_names.push(rcgen::SanType::IpAddress(std::net::IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1))));
-        
+
         let key = KeyPair::generate().map_err(|e| format!("Key generation failed: {}", e))?;
-        let cert = Certificate::from_params(params, &key)
+        let cert = Certificate::from_params(params)
             .map_err(|e| format!("Cert generation failed: {}", e))?;
-        
-        // Self-sign with CA
-        let cert_pem = cert.serialize_pem_with_signer(&self.ca_cert, &self.ca_key)
-            .map_err(|e| format!("Signing failed: {}", e))?;
-        
+
+        // Sign with CA
+        let cert_pem = cert.serialize_pem_with_signer(&self.ca_cert)
+            .map_err(|e| format!("Cert signing failed: {}", e))?;
+
         let key_pem = key.serialize_pem();
-        
+
         // Build rustls config
         let cert_chain = rustls_pemfile::certs(&mut cert_pem.as_bytes())
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| format!("Cert parse failed: {}", e))?;
-        
-        let key = rustls_pemfile::private_key(&mut key_pem.as_bytes())
+
+        let key_der = rustls_pemfile::private_key(&mut key_pem.as_bytes())
             .map_err(|e| format!("Key parse failed: {}", e))?
             .ok_or_else(|| "No private key found".to_string())?;
-        
-        let config = ServerConfig::builder()
+
+        let config = tokio_rustls::rustls::ServerConfig::builder()
             .with_no_client_auth()
-            .with_single_cert(cert_chain, key)
+            .with_single_cert(cert_chain, key_der)
             .map_err(|e| format!("TLS config failed: {}", e))?;
-        
+
         let acceptor = TlsAcceptor::from(Arc::new(config));
-        
+
         // Cache
         let mut certs = self.certs.write().await;
         certs.insert(share_code.to_string(), ShareCert {
@@ -107,17 +107,17 @@ impl CertManager {
             created_at: SystemTime::now(),
             tls_acceptor: acceptor.clone(),
         });
-        
+
         info!("Generated TLS certificate for share {}", share_code);
-        
+
         Ok(acceptor)
     }
-    
+
     /// Export CA certificate for client trust
     pub fn ca_cert_pem(&self) -> String {
         self.ca_cert.serialize_pem().unwrap_or_default()
     }
-    
+
     /// Cleanup expired certificates
     pub async fn cleanup(&self) {
         let mut certs = self.certs.write().await;
@@ -129,7 +129,7 @@ impl CertManager {
             })
             .map(|(k, _)| k.clone())
             .collect();
-        
+
         for key in expired {
             certs.remove(&key);
             info!("Cleaned up expired TLS cert for {}", key);

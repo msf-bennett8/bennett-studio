@@ -157,9 +157,10 @@ pub async fn list_shares(
                     let tables: Vec<String> = serde_json::from_str(&record.tables)
                         .unwrap_or_else(|_| vec!["*".to_string()]);
                     
+                    let code = record.code.clone();
                     all_shares.push(ShareLink {
                         code: record.code,
-                        url: build_share_url(&get_share_base_url(), &record.code, "..."),
+                        url: build_share_url(&get_share_base_url(), &code, "..."),
                         db_id: record.db_id,
                         db_name: db.name.clone(),
                         db_type: db.db_type.clone(),

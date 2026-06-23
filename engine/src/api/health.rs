@@ -26,12 +26,7 @@ pub struct ComponentHealth {
     pub latency_ms: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ApiResponse<T> {
-    pub success: bool,
-    pub data: Option<T>,
-    pub error: Option<String>,
-}
+pub use crate::models::database::ApiResponse;
 
 static START_TIME: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
 
@@ -120,8 +115,8 @@ pub async fn comprehensive_health_check(
 }
 
 /// Simple health check (backward compatible)
-pub async fn simple_health_check() -> Json<ApiResponse<serde_json::Value>> {
-    Json(ApiResponse::success(serde_json::json!({
+pub async fn simple_health_check() -> Json<crate::models::database::ApiResponse<serde_json::Value>> {
+    Json(crate::models::database::ApiResponse::success(serde_json::json!({
         "status": "ok",
         "version": env!("CARGO_PKG_VERSION"),
         "phase": 6

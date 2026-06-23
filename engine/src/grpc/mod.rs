@@ -34,7 +34,7 @@ pub async fn start_grpc_server(
             Some(
                 tonic_reflection::server::Builder::configure()
                     .register_encoded_file_descriptor_set(generated::FILE_DESCRIPTOR_SET)
-                    .build()?
+                    .build_v1()?
             )
         };
     
@@ -46,20 +46,20 @@ pub async fn start_grpc_server(
     // gRPC-Web proxy layer
     let web_proxy = web_proxy::grpc_web_proxy();
     
-    let mut server = Server::builder()
+    let mut router = Server::builder()
         .accept_http1(true) // Required for gRPC-Web
-        .layer(web_proxy);
-    
-    // Add reflection if available
-    if let Some(reflection) = reflection_service {
-        server = server.add_service(reflection);
-    }
-    
-    server
+        .layer(web_proxy)
         .add_service(generated::share_service_server::ShareServiceServer::new(share_service))
         .add_service(generated::query_service_server::QueryServiceServer::new(query_service))
         .add_service(generated::schema_service_server::SchemaServiceServer::new(schema_service))
-        .add_service(generated::export_service_server::ExportServiceServer::new(export_service))
+        .add_service(generated::export_service_server::ExportServiceServer::new(export_service));
+
+    // Add reflection if available
+    if let Some(reflection) = reflection_service {
+        router = router.add_service(reflection);
+    }
+
+    router
         .serve(addr)
         .await?;
     
@@ -103,10 +103,10 @@ pub fn json_to_prost_value(v: &serde_json::Value) -> prost_types::Value {
             prost_types::Value { kind: Some(Kind::ListValue(prost_types::ListValue { values })) }
         }
         serde_json::Value::Object(obj) => {
-            let fields: std::collections::HashMap<String, prost_types::Value> = obj
-                .iter()
-                .map(|(k, v)| (k.clone(), json_to_prost_value(v)))
-                .collect();
+        let fields: std::collections::BTreeMap<String, prost_types::Value> = obj
+            .iter()
+            .map(|(k, v)| (k.clone(), json_to_prost_value(v)))
+            .collect();
             prost_types::Value { kind: Some(Kind::StructValue(prost_types::Struct { fields })) }
         }
     }

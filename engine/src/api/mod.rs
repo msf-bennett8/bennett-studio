@@ -4,7 +4,7 @@ pub mod middleware;
 pub mod websocket;
 pub mod websocket_buffer;
 pub mod sharing;
-pub mod connect_rpc;
+// pub mod connect_rpc; // Module is at crate root: src/connect_rpc/mod.rs
 
 use axum::{
     routing::{get, post, put, delete},
@@ -64,6 +64,6 @@ pub fn routes() -> Router<AppState> {
         .route("/api/health", get(crate::api::health::comprehensive_health_check))
         .route("/metrics", get(metrics_endpoint))
         // Phase 2: Connect-RPC full service endpoints
-        .route("/bennett.v1.HealthService/Check", post(crate::connect_rpc::connect_health))
-        .merge(crate::connect_rpc::connect_routes())
+        .route("/bennett.v1.HealthService/Check", post(crate::connect_rpc::health::connect_health))
+        .merge(crate::connect_rpc::router::connect_routes())
 }

@@ -19,7 +19,8 @@ use tracing::{info, warn, error};
 use std::sync::Arc;
 
 use crate::AppState;
-use crate::auth::share_token::ShareTokenManager;
+use crate::sharing::proxy::tls::CertManager;
+use crate::sharing::proxy::router::ProxyRouter;
 
 /// Wire protocol proxy server
 pub struct WireProxyServer {
@@ -109,14 +110,14 @@ async fn handle_connection(
     
     match protocol {
         WireProtocol::MySQL => {
-            let result = mysql::handle_mysql_client(client_stream, peer_addr, state, cert_manager).await;
-            router.disconnect(port).await;
-            result?;
+        let result = mysql::handle_mysql_client(client_stream, peer_addr, state, cert_manager).await;
+        router.disconnect(port).await;
+        result.map_err(|e| format!("MySQL proxy error: {}", e))?;
         }
         WireProtocol::PostgreSQL => {
             let result = postgres::handle_postgres_client(client_stream, peer_addr, state, cert_manager).await;
             router.disconnect(port).await;
-            result?;
+            result.map_err(|e| format!("PostgreSQL proxy error: {}", e))?;
         }
         WireProtocol::Unknown => {
             warn!("Unknown wire protocol from {}, disconnecting", peer_addr);
@@ -133,6 +134,16 @@ enum WireProtocol {
     MySQL,
     PostgreSQL,
     Unknown,
+}
+
+impl std::fmt::Display for WireProtocol {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            WireProtocol::MySQL => write!(f, "MySQL"),
+            WireProtocol::PostgreSQL => write!(f, "PostgreSQL"),
+            WireProtocol::Unknown => write!(f, "Unknown"),
+        }
+    }
 }
 
 /// Validate share token from wire protocol connection

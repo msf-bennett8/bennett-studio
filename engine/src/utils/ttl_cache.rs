@@ -25,7 +25,7 @@ pub struct TtlCache<K, V> {
 impl<K, V> TtlCache<K, V>
 where
     K: Eq + Hash + Clone + Send + Sync + 'static,
-    V: Send + Sync + 'static,
+    V: Send + Sync + Clone + 'static,
 {
     pub fn new(default_ttl: Duration, max_size: usize) -> Self {
         Self {

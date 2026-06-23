@@ -10,7 +10,7 @@ license = "MIT"
 tokio = { version = "1", features = ["full"] }
 axum = { version = "0.7", features = ["ws", "http2"] }
 tower = "0.4"
-tower-http = { version = "0.5", features = ["cors", "trace", "compression-gzip"] }
+tower-http = { version = "0.5", features = ["cors", "trace", "compression-gzip", "fs"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tracing = "0.1"
@@ -35,7 +35,6 @@ prost = "0.13"
 tonic = { version = "0.12", features = ["transport", "tls"] }
 tonic-web = "0.12"
 tonic-reflection = "0.12"
-tower-http = { version = "0.5", features = ["cors", "trace", "compression-gzip", "fs"] }
 bytes = "1.6"
 futures = "0.3"
 
@@ -46,19 +45,26 @@ tokio-stream = "0.1"
 arrow = "53"
 parquet = "53"
 
-[build-dependencies]
-tonic-build = "0.12"
+# Network utilities
+get_if_addrs = "0.5"
 
 # Phase 2: SQL parsing for table extraction and validation
 sqlparser = "0.52"
 
 # Phase 5: Wire Protocol Proxy + Security
 tokio-rustls = "0.26"
+rustls = "0.23"
 rustls-pemfile = "2.0"
 rcgen = "0.13"
 ring = "0.17"
 governor = "0.6"
 nonzero_ext = "0.3"
+
+# gRPC protobuf types
+prost-types = "0.13"
+
+[build-dependencies]
+tonic-build = "0.12"
 
 [dev-dependencies]
 tokio-test = "0.4"

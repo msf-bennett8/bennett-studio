@@ -2,7 +2,7 @@
 //! Validates share tokens on incoming requests
 
 use axum::{
-    extract::Request,
+    extract::{Request, State},
     middleware::Next,
     response::Response,
 };
@@ -37,10 +37,15 @@ pub async fn rate_limit_interceptor(
 ) -> Response {
     // Extract client IP
     let client_ip = req.extensions().get::<crate::api::middleware::ClientIp>().map(|c| c.0);
-    let ip = client_ip.unwrap_or(std::net::IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1));
+    let ip = client_ip.unwrap_or(std::net::IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1)));
 
     // Try to extract share_code from request body (best effort for Connect-RPC)
-    let share_code = if let Ok(body) = axum::body::to_bytes(req.body_mut(), 4096).await {
+    let headers = req.headers().clone();
+    let extensions = req.extensions().clone();
+    let uri = req.uri().clone();
+    let method = req.method().clone();
+
+    let (share_code, req) = if let Ok(body) = axum::body::to_bytes(req.into_body(), 4096).await {
         // Parse JSON body to extract share_code
         let code = if let Ok(json) = serde_json::from_slice::<serde_json::Value>(&body) {
             json.get("shareCode")
@@ -52,10 +57,19 @@ pub async fn rate_limit_interceptor(
         };
 
         // Reconstruct body for downstream handlers
-        *req.body_mut() = axum::body::Body::from(body);
-        code
+        let mut new_req = Request::new(axum::body::Body::from(body));
+        *new_req.headers_mut() = headers;
+        *new_req.extensions_mut() = extensions;
+        *new_req.uri_mut() = uri;
+        *new_req.method_mut() = method;
+        (code, new_req)
     } else {
-        "unknown".to_string()
+        let mut new_req = Request::new(axum::body::Body::empty());
+        *new_req.headers_mut() = headers;
+        *new_req.extensions_mut() = extensions;
+        *new_req.uri_mut() = uri;
+        *new_req.method_mut() = method;
+        ("unknown".to_string(), new_req)
     };
 
     // Check rate limit

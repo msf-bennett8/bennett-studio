@@ -162,15 +162,15 @@ impl PolicyEngine {
                 }
                 Self::extract_tables_from_query(query, tables);
             }
-            Statement::Insert { table_name, .. } => {
-                tables.insert(table_name.to_string());
+            Statement::Insert(insert) => {
+                tables.insert(insert.table_name.to_string());
             }
             Statement::Update { table, .. } => {
                 tables.insert(table.to_string());
             }
-            Statement::Delete { table_name, .. } => {
-                if let Some(name) = table_name {
-                    tables.insert(name.to_string());
+            Statement::Delete(delete) => {
+                for table in &delete.tables {
+                    tables.insert(table.to_string());
                 }
             }
             _ => {}

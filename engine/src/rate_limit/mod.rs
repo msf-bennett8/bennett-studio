@@ -19,8 +19,8 @@ pub struct RateLimitService {
 impl RateLimitService {
     pub fn new() -> Self {
         // Default: 100 requests per second, burst of 50
-        let default_quota = Quota::per_second(nonzero!(100u32))
-            .allow_burst(nonzero!(50u32));
+        let default_quota = Quota::per_second(std::num::NonZeroU32::new(100).unwrap())
+            .allow_burst(std::num::NonZeroU32::new(50).unwrap());
         
         Self {
             limiters: Arc::new(RwLock::new(HashMap::new())),
@@ -64,8 +64,8 @@ impl RateLimitService {
     
     /// Configure custom quota for a share
     pub async fn set_quota(&self, share_code: &str, requests_per_second: u32, burst: u32) {
-        let rps = nonzero!(requests_per_second);
-        let burst = nonzero!(burst);
+        let rps = std::num::NonZeroU32::new(requests_per_second).unwrap_or(std::num::NonZeroU32::new(1).unwrap());
+        let burst = std::num::NonZeroU32::new(burst).unwrap_or(std::num::NonZeroU32::new(1).unwrap());
         let quota = Quota::per_second(rps).allow_burst(burst);
         
         let new_limiter = Arc::new(RateLimiter::keyed(quota));
@@ -90,8 +90,8 @@ pub struct GlobalRateLimiter {
 impl GlobalRateLimiter {
     pub fn new() -> Self {
         // Very restrictive: 10 req/s, burst of 5
-        let quota = Quota::per_second(nonzero!(10u32))
-            .allow_burst(nonzero!(5u32));
+        let quota = Quota::per_second(std::num::NonZeroU32::new(10).unwrap())
+            .allow_burst(std::num::NonZeroU32::new(5).unwrap());
         
         Self {
             limiter: Arc::new(RateLimiter::keyed(quota)),

@@ -10,6 +10,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio_stream::wrappers::ReceiverStream;
+use futures_util::StreamExt;
 use tracing::{info, warn};
 
 use crate::AppState;
@@ -70,10 +71,12 @@ pub struct ExportChunk {
 /// POST /bennett.v1.ExportService/ExportCsv
 pub async fn export_csv(
     State(state): State<AppState>,
-    Json(body): Json<serde_json::Value>,
     request: axum::extract::Request,
 ) -> Response {
-    let client_ip = request.extensions().get::<crate::api::middleware::ClientIp>().map(|c| c.0);
+    let (parts, body) = request.into_parts();
+    let bytes = axum::body::to_bytes(body, usize::MAX).await.unwrap_or_default();
+    let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
+    let client_ip = parts.extensions.get::<crate::api::middleware::ClientIp>().map(|c| c.0);
     let req: ExportRequest = match parse_connect_request(&body.to_string()) {
         Ok(r) => r,
         Err(resp) => return resp,
@@ -89,8 +92,11 @@ pub async fn export_csv(
 /// POST /bennett.v1.ExportService/ExportJson
 pub async fn export_json(
     State(state): State<AppState>,
-    Json(body): Json<serde_json::Value>,
+    request: axum::extract::Request,
 ) -> Response {
+    let (_parts, body) = request.into_parts();
+    let bytes = axum::body::to_bytes(body, usize::MAX).await.unwrap_or_default();
+    let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
     let req: ExportRequest = match parse_connect_request(&body.to_string()) {
         Ok(r) => r,
         Err(resp) => return resp,
@@ -106,10 +112,12 @@ pub async fn export_json(
 /// POST /bennett.v1.ExportService/ExportParquet
 pub async fn export_parquet(
     State(state): State<AppState>,
-    Json(body): Json<serde_json::Value>,
     request: axum::extract::Request,
 ) -> Response {
-    let client_ip = request.extensions().get::<crate::api::middleware::ClientIp>().map(|c| c.0);
+    let (parts, body) = request.into_parts();
+    let bytes = axum::body::to_bytes(body, usize::MAX).await.unwrap_or_default();
+    let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
+    let client_ip = parts.extensions.get::<crate::api::middleware::ClientIp>().map(|c| c.0);
     let req: ExportRequest = match parse_connect_request(&body.to_string()) {
         Ok(r) => r,
         Err(resp) => return resp,
@@ -125,8 +133,11 @@ pub async fn export_parquet(
 /// POST /bennett.v1.ExportService/ExportTableDump
 pub async fn export_table_dump(
     State(state): State<AppState>,
-    Json(body): Json<serde_json::Value>,
+    request: axum::extract::Request,
 ) -> Response {
+    let (_parts, body) = request.into_parts();
+    let bytes = axum::body::to_bytes(body, usize::MAX).await.unwrap_or_default();
+    let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
     let req: ExportTableRequest = match parse_connect_request(&body.to_string()) {
         Ok(r) => r,
         Err(resp) => return resp,
@@ -135,6 +146,7 @@ pub async fn export_table_dump(
     // Build SELECT * query
     let sql = format!(r#"SELECT * FROM "{}""#, req.table_name);
     
+    let format = req.format.clone();
     let export_req = ExportRequest {
         share_code: req.share_code,
         token: req.token,
@@ -142,8 +154,8 @@ pub async fn export_table_dump(
         format: req.format,
         include_headers: true,
     };
-    
-    execute_export(None, state, export_req, &req.format).await
+
+    execute_export(None, state, export_req, &format).await
 }
 
 // ============================================================================
@@ -278,7 +290,9 @@ async fn execute_export(
         }
     });
     
-    let body = Body::from_stream(ReceiverStream::new(rx));
+    let body = Body::from_stream(ReceiverStream::new(rx).map(|chunk: Result<ExportChunk, std::convert::Infallible>| {
+        chunk.map(|c| axum::body::Bytes::from(c.data))
+    }));
     
     Response::builder()
         .status(axum::http::StatusCode::OK)

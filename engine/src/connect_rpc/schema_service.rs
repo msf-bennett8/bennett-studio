@@ -4,8 +4,10 @@
 use axum::{
     extract::State,
     response::{IntoResponse, Response},
+    body::Body,
     Json,
 };
+use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::{info, warn};
@@ -180,10 +182,12 @@ fn filter_schema_columns(
 /// POST /bennett.v1.SchemaService/GetSchema
 pub async fn get_schema(
     State(state): State<AppState>,
-    Json(body): Json<serde_json::Value>,
     request: axum::extract::Request,
 ) -> Response {
-    let client_ip = request.extensions().get::<crate::api::middleware::ClientIp>().map(|c| c.0);
+    let (parts, body) = request.into_parts();
+    let bytes = axum::body::to_bytes(body, usize::MAX).await.unwrap_or_default();
+    let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
+    let client_ip = parts.extensions.get::<crate::api::middleware::ClientIp>().map(|c| c.0);
     let req: GetSchemaRequest = match parse_connect_request(&body.to_string()) {
         Ok(r) => r,
         Err(resp) => return resp,
@@ -501,8 +505,11 @@ pub async fn get_table_constraints(
 /// Returns newline-delimited JSON stream
 pub async fn stream_schema_updates(
     State(state): State<AppState>,
-    Json(body): Json<serde_json::Value>,
+    request: axum::extract::Request,
 ) -> Response {
+    let (_parts, body) = request.into_parts();
+    let bytes = axum::body::to_bytes(body, usize::MAX).await.unwrap_or_default();
+    let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
     let req: GetSchemaRequest = match parse_connect_request(&body.to_string()) {
         Ok(r) => r,
         Err(resp) => return resp,
@@ -602,6 +609,6 @@ pub async fn stream_schema_updates(
         .unwrap()
 }
 
-/// SchemaService implementation complete
-/// Features: Full schema introspection, PK/FK detection, index/constraints fetching,
-/// column-level permission filtering, audit logging, schema streaming
+// SchemaService implementation complete
+// Features: Full schema introspection, PK/FK detection, index/constraints fetching,
+// column-level permission filtering, audit logging, schema streaming

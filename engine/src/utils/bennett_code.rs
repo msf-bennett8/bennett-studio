@@ -3,7 +3,7 @@
 //! Format: YMDHM + random (ACQPFDAQ7P)
 //! A=Year(2026), C=Month(3), Q=Day(27), P=Hour(15), F=MinuteBlock(50-59), A=ExactMin(0-9), Q7P=Random
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Utc, Datelike, Timelike};
 use rand::Rng;
 
 const BASE_YEAR: i32 = 2026;

@@ -22,6 +22,8 @@ pub enum DockerError {
     ImageError(String),
     #[error("Port already in use: {0}")]
     PortConflict(u16),
+    #[error("Other error: {0}")]
+    Other(String),
 }
 
 pub struct DockerRuntime {

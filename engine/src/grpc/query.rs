@@ -11,7 +11,6 @@ use crate::grpc::generated::{
     ExecuteQueryRequest, ExecuteQueryResponse,
     ExecuteWriteRequest, ExecuteWriteResponse,
     QueryResultRow, Value,
-    StreamQueryRequest, QueryChunk,
 };
 use crate::connect_rpc::{
     validate_share_request, validate_shared_sql, require_write_permission, apply_rls,
@@ -38,13 +37,13 @@ impl QueryService for QueryGrpcService {
         let start = std::time::Instant::now();
         
         // Validate share
-        let validated = validate_share_request(&self.state, &req.share_code, &req.token)
+        let validated = validate_share_request(&self.state, &req.share_code, &req.token, None)
             .await
-            .map_err(|e| map_error_to_status(&e))?;
+            .map_err(|e| map_error_to_status(&format!("{:?}", e)))?;
         
         // Validate SQL
         validate_shared_sql(&req.sql, &validated.permission)
-            .map_err(|e| map_error_to_status(&e))?;
+            .map_err(|e| map_error_to_status(&format!("{:?}", e)))?;
         
         // Apply RLS
         let sql = apply_rls(&req.sql, validated.rls.as_deref());
@@ -86,13 +85,13 @@ impl QueryService for QueryGrpcService {
         let rows: Vec<QueryResultRow> = result.rows.iter().map(|row| {
             let values: Vec<Value> = row.iter().map(|cell| {
                 match cell {
-                    serde_json::Value::Null => Value { kind: Some(crate::grpc::generated::value::Kind::NullValue(0)) },
+                    serde_json::Value::Null => Value { kind: Some(crate::grpc::generated::value::Kind::NullValue("NULL".to_string())) },
                     serde_json::Value::Bool(b) => Value { kind: Some(crate::grpc::generated::value::Kind::BoolValue(*b)) },
                     serde_json::Value::Number(n) => {
                         if let Some(i) = n.as_i64() {
-                            Value { kind: Some(crate::grpc::generated::value::Kind::Int64Value(i)) }
+                            Value { kind: Some(crate::grpc::generated::value::Kind::IntValue(i)) }
                         } else if let Some(f) = n.as_f64() {
-                            Value { kind: Some(crate::grpc::generated::value::Kind::DoubleValue(f)) }
+                            Value { kind: Some(crate::grpc::generated::value::Kind::FloatValue(f)) }
                         } else {
                             Value { kind: Some(crate::grpc::generated::value::Kind::StringValue(n.to_string())) }
                         }
@@ -125,17 +124,17 @@ impl QueryService for QueryGrpcService {
         let start = std::time::Instant::now();
         
         // Validate share
-        let validated = validate_share_request(&self.state, &req.share_code, &req.token)
+        let validated = validate_share_request(&self.state, &req.share_code, &req.token, None)
             .await
-            .map_err(|e| map_error_to_status(&e))?;
+            .map_err(|e| map_error_to_status(&format!("{:?}", e)))?;
         
         // Require write permission
         require_write_permission(&validated.permission)
-            .map_err(|e| map_error_to_status(&e))?;
+            .map_err(|e| map_error_to_status(&format!("{:?}", e)))?;
         
         // Validate SQL
         validate_shared_sql(&req.sql, &validated.permission)
-            .map_err(|e| map_error_to_status(&e))?;
+            .map_err(|e| map_error_to_status(&format!("{:?}", e)))?;
         
         // Apply RLS
         let sql = apply_rls(&req.sql, validated.rls.as_deref());
@@ -185,12 +184,12 @@ impl QueryService for QueryGrpcService {
     ) -> Result<Response<Self::StreamQueryStream>, Status> {
         let req = request.into_inner();
 
-        let validated = validate_share_request(&self.state, &req.share_code, &req.token)
+        let validated = validate_share_request(&self.state, &req.share_code, &req.token, None)
             .await
-            .map_err(|e| map_error_to_status(&e))?;
+            .map_err(|e| map_error_to_status(&format!("{:?}", e)))?;
 
         validate_shared_sql(&req.sql, &validated.permission)
-            .map_err(|e| map_error_to_status(&e))?;
+            .map_err(|e| map_error_to_status(&format!("{:?}", e)))?;
 
         let sql = apply_rls(&req.sql, validated.rls.as_deref());
         let chunk_size = 1000; // Default chunk size
@@ -245,13 +244,13 @@ impl QueryService for QueryGrpcService {
                 let rows: Vec<QueryResultRow> = result.rows.iter().map(|row| {
                     let values: Vec<Value> = row.iter().map(|cell| {
                         match cell {
-                            serde_json::Value::Null => Value { kind: Some(crate::grpc::generated::value::Kind::NullValue(0)) },
+                            serde_json::Value::Null => Value { kind: Some(crate::grpc::generated::value::Kind::NullValue("NULL".to_string())) },
                             serde_json::Value::Bool(b) => Value { kind: Some(crate::grpc::generated::value::Kind::BoolValue(*b)) },
                             serde_json::Value::Number(n) => {
                                 if let Some(i) = n.as_i64() {
-                                    Value { kind: Some(crate::grpc::generated::value::Kind::Int64Value(i)) }
+                                    Value { kind: Some(crate::grpc::generated::value::Kind::IntValue(i)) }
                                 } else if let Some(f) = n.as_f64() {
-                                    Value { kind: Some(crate::grpc::generated::value::Kind::DoubleValue(f)) }
+                                    Value { kind: Some(crate::grpc::generated::value::Kind::FloatValue(f)) }
                                 } else {
                                     Value { kind: Some(crate::grpc::generated::value::Kind::StringValue(n.to_string())) }
                                 }

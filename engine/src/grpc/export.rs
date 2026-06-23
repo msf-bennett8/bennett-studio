@@ -35,21 +35,24 @@ impl ExportService for ExportGrpcService {
         &self,
         request: Request<ExportRequest>,
     ) -> Result<Response<Self::ExportCsvStream>, Status> {
-        self.stream_export(request.into_inner(), "csv").await
+        let stream = self.stream_export(request.into_inner(), "csv").await?;
+        Ok(Response::new(stream))
     }
 
     async fn export_json(
         &self,
         request: Request<ExportRequest>,
     ) -> Result<Response<Self::ExportJsonStream>, Status> {
-        self.stream_export(request.into_inner(), "json").await
+        let stream = self.stream_export(request.into_inner(), "json").await?;
+        Ok(Response::new(stream))
     }
 
     async fn export_parquet(
         &self,
         request: Request<ExportRequest>,
     ) -> Result<Response<Self::ExportParquetStream>, Status> {
-        self.stream_export(request.into_inner(), "parquet").await
+        let stream = self.stream_export(request.into_inner(), "parquet").await?;
+        Ok(Response::new(stream))
     }
 
     async fn export_table_dump(
@@ -57,6 +60,7 @@ impl ExportService for ExportGrpcService {
         request: Request<ExportTableRequest>,
     ) -> Result<Response<Self::ExportTableDumpStream>, Status> {
         let req = request.into_inner();
+        let format = req.format.clone();
         let export_req = ExportRequest {
             share_code: req.share_code,
             token: req.token,
@@ -64,7 +68,8 @@ impl ExportService for ExportGrpcService {
             format: req.format,
             include_headers: true,
         };
-        self.stream_export(export_req, &req.format).await
+        let stream = self.stream_export(export_req, &format).await?;
+        Ok(Response::new(stream))
     }
 }
 
@@ -77,12 +82,12 @@ impl ExportGrpcService {
         let start = std::time::Instant::now();
         
         // Validate
-        let validated = validate_share_request(&self.state, &req.share_code, &req.token)
+        let validated = validate_share_request(&self.state, &req.share_code, &req.token, None)
             .await
-            .map_err(|e| map_error_to_status(&e))?;
+            .map_err(|e| map_error_to_status(&format!("{:?}", e)))?;
         
         validate_shared_sql(&req.sql, &validated.permission)
-            .map_err(|e| map_error_to_status(&e))?;
+            .map_err(|e| map_error_to_status(&format!("{:?}", e)))?;
         
         // Find database
         let db_instance = {
@@ -114,9 +119,10 @@ impl ExportGrpcService {
         let data = match format {
             "csv" => self.format_csv(&result.columns, &result.rows, req.include_headers),
             "json" => self.format_json(&result.columns, &result.rows),
-            "parquet" => self.format_parquet(&result.columns, &result.rows)
+            "parquet" => String::from_utf8(self.format_parquet(&result.columns, &result.rows)
+                .map_err(|e| Status::internal(format!("Parquet encoding failed: {}", e)))?)
                 .map_err(|e| Status::internal(format!("Parquet encoding failed: {}", e)))?,
-            _ => return Err(Status::invalid_argument(format!("Unsupported format: {}", format))),
+            _ => return Err(Status::invalid_argument("Unsupported format")),
         };
         
         info!("gRPC export on {}: {} rows as {} in {}ms", req.share_code, result.row_count, format, elapsed);
