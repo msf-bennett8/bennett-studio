@@ -75,7 +75,11 @@ async fn main() {
                 .allow_headers([
                     axum::http::header::CONTENT_TYPE,
                     axum::http::header::AUTHORIZATION,
-                ]),
+                    axum::http::header::HeaderName::from_static("x-share-code"),
+                    axum::http::header::HeaderName::from_static("x-share-token"),
+                    axum::http::header::HeaderName::from_static("x-requested-with"),
+                ])
+                .allow_credentials(true),
         )
         .with_state(state.clone());
 

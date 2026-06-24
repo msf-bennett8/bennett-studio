@@ -8,6 +8,7 @@ import type {
   TableSchema,
   AutocompleteSuggestion,
 } from '@bennett/shared';
+import { API_BASE_URL } from './api';
 
 // Import SDK from shared package
 import { BennettShareClient, createClient } from '@bennett/sdk';
@@ -61,25 +62,42 @@ class RemoteApiService {
 
   /**
    * Validate a share before connecting
+   * Uses the backend validation endpoint instead of direct host connection
+   * This works even when the host is behind NAT/firewall
    */
   async validateShare(url: string): Promise<ValidateShareResponse> {
     const parsed = this.parseShareUrl(url);
     if (!parsed) {
       throw new Error('Invalid share URL format. Expected: https://host/db/CODE?t=TOKEN');
     }
-    
-    const client = createClient(parsed.code, parsed.token, parsed.baseUrl);
-    const response = await client.getSchema();
-    
-    // If getSchema succeeds, share is valid
+
+    // Use the local backend for validation (share.bennett.studio is not a real domain in dev)
+    const validateUrl = `${API_BASE_URL}/api/shares/${parsed.code}/validate`;
+
+    const response = await fetch(validateUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: parsed.code, token: parsed.token }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Validation failed: HTTP ${response.status} - ${errorText}`);
+    }
+
+    const result = await response.json();
+    if (!result.success) {
+      throw new Error(result.error || 'Share validation failed');
+    }
+
     return {
       valid: true,
       code: parsed.code,
-      db_id: response.databaseName || parsed.code,
-      permission: 'ro' as SharePermission, // Will be updated from actual validation
-      tables: response.tables.map(t => t.name),
-      expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-      host_online: true,
+      db_id: result.data.db_id,
+      permission: result.data.permission as SharePermission,
+      tables: result.data.tables,
+      expires_at: result.data.expires_at,
+      host_online: result.data.host_online,
     };
   }
 
@@ -91,12 +109,12 @@ class RemoteApiService {
     if (!parsed) {
       throw new Error('Invalid share URL');
     }
-    
+
     const connection: RemoteConnection = {
       id: `conn-${Date.now()}`,
       code: parsed.code,
       token: parsed.token,
-      baseUrl: parsed.baseUrl,
+      baseUrl: API_BASE_URL, // Use local backend, not the fake share domain
       dbId: '',
       dbName: '',
       dbType: '',
@@ -106,25 +124,38 @@ class RemoteApiService {
       lastActivity: new Date().toISOString(),
       status: 'connecting',
     };
-    
+
     try {
-      const client = this.getClient(connection);
-      const schema = await client.getSchema();
-      
-      if (!schema.success) {
-        throw new Error(schema.error || 'Failed to fetch schema');
+      // Fetch schema via share-specific backend endpoint (validates token + returns schema)
+      const schemaResponse = await fetch(`${API_BASE_URL}/api/shares/${parsed.code}/schema`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Share-Token': parsed.token,
+        },
+      });
+
+      if (!schemaResponse.ok) {
+        throw new Error(`Schema fetch failed: HTTP ${schemaResponse.status}`);
       }
-      
-      connection.dbId = schema.databaseName || parsed.code;
-      connection.dbName = schema.databaseName || 'Remote Database';
-      connection.dbType = schema.databaseType || 'unknown';
-      connection.tables = schema.tables.map(t => t.name);
+
+      const schemaData = await schemaResponse.json();
+      if (!schemaData.success) {
+        throw new Error(schemaData.error || 'Failed to fetch schema');
+      }
+
+      const schema = schemaData.data;
+
+      connection.dbId = parsed.code;
+      connection.dbName = 'Remote Database';
+      connection.dbType = 'unknown';
+      connection.tables = schema.map((t: any) => t.name);
       connection.status = 'connected';
       connection.lastActivity = new Date().toISOString();
-      
+
       // Cache schema
-      this.cacheSchema(connection.code, schema.tables);
-      
+      this.cacheSchema(connection.code, schema);
+
       return connection;
     } catch (error) {
       connection.status = 'error';
