@@ -19,6 +19,15 @@ reqwest = { version = "0.12", features = ["blocking", "json"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1", features = ["rt-multi-thread"] }
+tracing = "0.1"
+
+# Secure token storage — OS-native keychain/credential manager
+# Features: sync-secret-service (blocking Linux API), crypto-openssl (encryption)
+# For async: use "async-secret-service" with tokio runtime
+keyring = { version = "3", features = ["sync-secret-service", "crypto-openssl"] }
+aes-gcm = "0.10"
+rand = "0.8"
+base64 = "0.22"
 
 [features]
 default = ["custom-protocol"]

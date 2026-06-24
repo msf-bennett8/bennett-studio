@@ -6,7 +6,7 @@ import type { ShareLink, SharePermission } from '@bennett/shared';
 
 export function SharePage() {
   const { databases } = useDatabaseStore();
-  const { shares, loading, error, creating, fetchShares, createShare, revokeShare, clearError } = useShareStore();
+  const { shares, loading, error, creating, fetchShares, createShare, revokeShare, getShareUrl, clearError } = useShareStore();
   
   const runningDbs = databases.filter(d => d.status === 'running');
   
@@ -32,20 +32,27 @@ export function SharePage() {
     }
   }, [runningDbs]);
 
-  const handleCopy = async (url: string, code: string) => {
+  const handleCopy = async (share: ShareLink) => {
+    const fullUrl = await getShareUrl(share.code);
+    
+    if (!fullUrl || fullUrl.includes('...')) {
+      // Token not in vault — show warning with option to regenerate
+      setCreateError('Full share link not available. Token was created in a different session or vault was cleared. Please create a new share.');
+      return;
+    }
+    
     try {
-      await navigator.clipboard.writeText(url);
-      setCopiedCode(code);
+      await navigator.clipboard.writeText(fullUrl);
+      setCopiedCode(share.code);
       setTimeout(() => setCopiedCode(null), 2000);
     } catch {
-      // Fallback: create temporary textarea
       const textarea = document.createElement('textarea');
-      textarea.value = url;
+      textarea.value = fullUrl;
       document.body.appendChild(textarea);
       textarea.select();
       document.execCommand('copy');
       document.body.removeChild(textarea);
-      setCopiedCode(code);
+      setCopiedCode(share.code);
       setTimeout(() => setCopiedCode(null), 2000);
     }
   };
@@ -203,11 +210,11 @@ export function SharePage() {
                   </div>
                   {isActive && (
                     <>
-                      <button 
-                        onClick={() => handleCopy(share.url, share.code)} 
-                        className="p-2 rounded-lg transition-all hover:opacity-80" 
-                        style={{ backgroundColor: 'var(--bgTertiary)' }} 
-                        title="Copy link"
+                      <button
+                        onClick={() => handleCopy(share)}
+                        className="p-2 rounded-lg transition-all hover:opacity-80"
+                        style={{ backgroundColor: 'var(--bgTertiary)' }}
+                        title="Copy full share link"
                       >
                         {copiedCode === share.code ? <Check size={16} style={{ color: 'var(--accentSuccess)' }} /> : <Copy size={16} />}
                       </button>

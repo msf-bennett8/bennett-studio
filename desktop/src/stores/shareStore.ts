@@ -1,17 +1,21 @@
 import { create } from 'zustand';
 import { shareApi } from '../services/shareApi';
-import type { ShareLink, CreateShareRequest } from '@bennett/shared';
+import { vaultService } from '../services/vaultService';
+import type { ShareLink, CreateShareRequest, StoredToken } from '@bennett/shared';
 
 interface ShareState {
   shares: ShareLink[];
   loading: boolean;
   error: string | null;
   creating: boolean;
+  vaultAvailable: boolean;
 
   fetchShares: () => Promise<void>;
   createShare: (req: CreateShareRequest) => Promise<ShareLink | null>;
   revokeShare: (code: string) => Promise<boolean>;
+  getShareUrl: (code: string) => Promise<string | null>;
   clearError: () => void;
+  initVault: () => Promise<void>;
 }
 
 export const useShareStore = create<ShareState>((set, get) => ({
@@ -19,6 +23,16 @@ export const useShareStore = create<ShareState>((set, get) => ({
   loading: false,
   error: null,
   creating: false,
+  vaultAvailable: false,
+
+  initVault: async () => {
+    try {
+      const status = await vaultService.status();
+      set({ vaultAvailable: status.available });
+    } catch {
+      set({ vaultAvailable: false });
+    }
+  },
 
   fetchShares: async () => {
     set({ loading: true, error: null });
@@ -35,15 +49,30 @@ export const useShareStore = create<ShareState>((set, get) => ({
     set({ creating: true, error: null });
     try {
       const result = await shareApi.createShare(req);
-      await get().fetchShares(); // Refresh list
-      set({ creating: false });
       
-      // Build full ShareLink from response
+      // Store token in OS keychain
+      const tokenEntry: StoredToken = {
+        code: result.code,
+        token: result.token,
+        dbId: req.database_id,
+        dbName: '', // Will be filled by fetch
+        createdAt: new Date().toISOString(),
+        expiresAt: result.expires_at,
+      };
+      
+      try {
+        await vaultService.setToken(tokenEntry);
+      } catch (e) {
+        console.warn('Failed to store token in vault:', e);
+        // Continue — token will be lost on reload but share works now
+      }
+
+      // Build ShareLink for UI
       const newShare: ShareLink = {
         code: result.code,
         url: result.url,
         db_id: req.database_id,
-        db_name: '', // Will be filled by fetch
+        db_name: '',
         db_type: '',
         permission: req.permission || 'ro',
         tables: req.tables || ['*'],
@@ -52,7 +81,12 @@ export const useShareStore = create<ShareState>((set, get) => ({
         guest_count: 0,
         status: 'active',
       };
-      
+
+      set(state => ({
+        shares: [newShare, ...state.shares],
+        creating: false,
+      }));
+
       return newShare;
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to create share';
@@ -65,8 +99,15 @@ export const useShareStore = create<ShareState>((set, get) => ({
     try {
       const success = await shareApi.revokeShare(code, 'host_revoked');
       if (success) {
+        // Remove from vault
+        try {
+          await vaultService.removeToken(code);
+        } catch (e) {
+          console.warn('Failed to remove token from vault:', e);
+        }
+        
         set(state => ({
-          shares: state.shares.map(s => 
+          shares: state.shares.map(s =>
             s.code === code ? { ...s, status: 'revoked' as const } : s
           ),
         }));
@@ -77,6 +118,25 @@ export const useShareStore = create<ShareState>((set, get) => ({
       set({ error: msg });
       return false;
     }
+  },
+
+  // Reconstruct full URL with token from vault
+  getShareUrl: async (code: string) => {
+    const share = get().shares.find(s => s.code === code);
+    if (!share) return null;
+    
+    // Try vault first
+    try {
+      const token = await vaultService.getToken(code);
+      if (token) {
+        return `https://share.bennett.studio/db/${code}?t=${token}`;
+      }
+    } catch (e) {
+      console.warn('Vault retrieval failed:', e);
+    }
+    
+    // Fallback: return truncated URL (can't copy full link)
+    return share.url;
   },
 
   clearError: () => set({ error: null }),

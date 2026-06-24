@@ -15,6 +15,11 @@ export {
 } from './grpcClient';
 
 export {
+  vault,
+  getVaultStatus,
+} from './vault';
+
+export {
   resolveHost,
   preloadHosts,
   clearResolverCache,
@@ -31,3 +36,9 @@ export type {
   ConstraintSchema,
   ExportResult,
 } from './client';
+
+export type {
+  StoredToken,
+  TokenVault,
+  VaultStatus,
+} from '@bennett/shared';

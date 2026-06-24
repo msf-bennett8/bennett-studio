@@ -157,3 +157,31 @@ export interface AutocompleteSuggestion {
   sortText?: string;
   documentation?: string;
 }
+
+// ============================================================================
+// Token Vault Types — Secure share token storage
+// ============================================================================
+
+export interface StoredToken {
+  code: string;
+  token: string;
+  dbId: string;
+  dbName: string;
+  createdAt: string;
+  expiresAt: string;
+}
+
+export interface TokenVault {
+  getToken(code: string): Promise<string | null>;
+  setToken(token: StoredToken): Promise<void>;
+  removeToken(code: string): Promise<void>;
+  listTokens(): Promise<StoredToken[]>;
+  clear(): Promise<void>;
+  status?(): Promise<VaultStatus>;
+}
+
+export interface VaultStatus {
+  available: boolean;
+  type: 'tauri_secure' | 'indexeddb_encrypted' | 'memory';
+  initialized: boolean;
+}
