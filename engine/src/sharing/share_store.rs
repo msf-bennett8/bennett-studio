@@ -200,7 +200,19 @@ impl ShareStore {
         .bind(Utc::now().to_rfc3339())
         .fetch_all(&self.pool)
         .await?;
-        
+
+        Ok(rows.into_iter().map(Self::row_to_share).collect())
+    }
+
+    /// List ALL shares for a database (including revoked and expired) — for admin view
+    pub async fn list_all_shares_by_db(&self, db_id: &str) -> anyhow::Result<Vec<ShareRecord>> {
+        let rows = sqlx::query(
+            "SELECT * FROM shares WHERE db_id = ? ORDER BY created_at DESC"
+        )
+        .bind(db_id)
+        .fetch_all(&self.pool)
+        .await?;
+
         Ok(rows.into_iter().map(Self::row_to_share).collect())
     }
     

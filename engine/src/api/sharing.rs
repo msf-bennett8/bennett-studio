@@ -143,7 +143,7 @@ pub async fn list_shares(
     let mut all_shares = Vec::new();
     
     for db in &dbs {
-        match state.share_store.list_shares_by_db(&db.id).await {
+        match state.share_store.list_all_shares_by_db(&db.id).await {
             Ok(shares) => {
                 for record in shares {
                     let status = if record.revoked {

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Share2, Copy, Check, Globe, Lock, Users, Clock, X, Trash2, AlertCircle, Loader2 } from 'lucide-react';
+import { ConfirmModal } from '../components/ui/ConfirmModal';
 import { useDatabaseStore } from '../stores/databaseStore';
 import { useShareStore } from '../stores/shareStore';
 import type { ShareLink, SharePermission } from '@bennett/shared';
@@ -19,6 +20,16 @@ export function SharePage() {
   const [createError, setCreateError] = useState<string | null>(null);
   const [copyError, setCopyError] = useState<string | null>(null);
   const [filter, setFilter] = useState<'active' | 'all' | 'revoked' | 'expired'>('active');
+  
+  // Confirmation modal state
+  const [confirmModal, setConfirmModal] = useState<{
+    open: boolean;
+    type: 'revoke' | 'delete';
+    code: string;
+    title: string;
+    message: string;
+    confirmText: string;
+  } | null>(null);
 
   // Load shares on mount + init vault
   useEffect(() => {
@@ -68,18 +79,37 @@ export function SharePage() {
     }
   };
 
-  const handleRevoke = async (code: string) => {
-    if (!confirm('Are you sure you want to revoke this share? All guests will be disconnected.')) {
-      return;
-    }
-    await revokeShare(code);
+  const openRevokeConfirm = (code: string) => {
+    setConfirmModal({
+      open: true,
+      type: 'revoke',
+      code,
+      title: 'Revoke Share Access',
+      message: 'All connected guests will be immediately disconnected. The share will be marked as revoked but can still be viewed in history.',
+      confirmText: 'Revoke Access',
+    });
   };
 
-  const handleDelete = async (code: string) => {
-    if (!confirm('Are you sure you want to PERMANENTLY DELETE this share? This cannot be undone.')) {
-      return;
+  const openDeleteConfirm = (code: string) => {
+    setConfirmModal({
+      open: true,
+      type: 'delete',
+      code,
+      title: 'Permanently Delete Share',
+      message: 'This share will be permanently removed from the database. Any guests with this link will see a "not found" error.',
+      confirmText: 'Delete Permanently',
+    });
+  };
+
+  const handleConfirmAction = async () => {
+    if (!confirmModal) return;
+    const { type, code } = confirmModal;
+    setConfirmModal(null);
+    if (type === 'revoke') {
+      await revokeShare(code);
+    } else {
+      await deleteShare(code);
     }
-    await deleteShare(code);
   };
 
   const handleCreate = async () => {
@@ -272,7 +302,7 @@ export function SharePage() {
                         {copiedCode === share.code ? <Check size={16} style={{ color: 'var(--accentSuccess)' }} /> : <Copy size={16} />}
                       </button>
                       <button
-                        onClick={() => handleRevoke(share.code)}
+                        onClick={() => openRevokeConfirm(share.code)}
                         className="p-2 rounded-lg transition-all hover:bg-red-500/20"
                         style={{ backgroundColor: 'var(--bgTertiary)' }}
                         title="Revoke access"
@@ -280,7 +310,7 @@ export function SharePage() {
                         <X size={16} style={{ color: 'var(--accentError)' }} />
                       </button>
                       <button
-                        onClick={() => handleDelete(share.code)}
+                        onClick={() => openDeleteConfirm(share.code)}
                         className="p-2 rounded-lg transition-all hover:bg-red-500/40"
                         style={{ backgroundColor: 'var(--bgTertiary)' }}
                         title="Permanently delete"
@@ -324,6 +354,20 @@ export function SharePage() {
           </div>
         )}
       </div>
+
+      {/* Confirm Modal */}
+      {confirmModal?.open && (
+        <ConfirmModal
+          open={confirmModal.open}
+          type={confirmModal.type}
+          title={confirmModal.title}
+          message={confirmModal.message}
+          code={confirmModal.code}
+          confirmText={confirmModal.confirmText}
+          onConfirm={handleConfirmAction}
+          onCancel={() => setConfirmModal(null)}
+        />
+      )}
 
       {showCreateModal && (
         <div className="fixed inset-0 flex items-center justify-center z-50" style={{ backgroundColor: 'var(--bgOverlay)' }}>
