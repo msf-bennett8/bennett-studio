@@ -30,6 +30,10 @@ export interface DatabaseInstance {
   is_discovered?: boolean;
   credentials?: DatabaseCredentials;
   is_unlocked?: boolean;
+  isRemote?: boolean;
+  shareCode?: string;
+  remotePermission?: string;
+  remoteHost?: string;
 }
 
 export interface UnlockDatabaseRequest {

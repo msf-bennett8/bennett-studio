@@ -1,5 +1,6 @@
 import { create } from 'zustand';
-import { api, DatabaseInstance, CreateDatabaseRequest, EnvFileSuggestion } from '../services/api';
+import { api, DatabaseInstance, CreateDatabaseRequest, EnvFileSuggestion, DatabaseSource } from '../services/api';
+import { useRemoteConnectionStore } from './remoteConnectionStore';
 
 interface DatabaseState {
   databases: DatabaseInstance[];
@@ -71,6 +72,27 @@ export const useDatabaseStore = create<DatabaseState>((set, get) => ({
     }
   },
 
+  getRemoteDatabases: () => {
+    const { connections } = useRemoteConnectionStore.getState();
+    return connections
+      .filter(c => c.status === 'connected')
+      .map(c => ({
+        id: c.id,
+        name: `${c.dbName || c.code} (Remote)`,
+        type: (c.dbType || 'postgres') as 'postgres' | 'mysql' | 'mariadb' | 'sqlite' | 'redis',
+        version: '',
+        status: 'running' as const,
+        port: 0,
+        size: '',
+        created_at: c.connectedAt,
+        source: 'bennett' as DatabaseSource,
+        isRemote: true,
+        shareCode: c.code,
+        remotePermission: c.permission,
+        remoteHost: c.baseUrl,
+      }));
+  },
+
   discoverLocalDatabases: async () => {
     set({ loading: true, error: null });
     try {
@@ -137,6 +159,28 @@ export const useDatabaseStore = create<DatabaseState>((set, get) => ({
     filter?: string;
   }) => {
     set({ tableDataLoading: true, error: null });
+
+    // Check if this is a remote database
+    const remoteDb = get().getRemoteDatabases().find(d => d.id === dbId);
+    if (remoteDb) {
+      const { connections } = useRemoteConnectionStore.getState();
+      const conn = connections.find(c => c.id === dbId);
+      if (!conn) {
+        set({ error: 'Remote connection not found', tableDataLoading: false });
+        return;
+      }
+      try {
+        const data = await remoteApi.fetchTableData(conn, table, options);
+        set({ tableData: data, tableDataLoading: false });
+      } catch (err) {
+        set({
+          error: err instanceof Error ? err.message : 'Failed to fetch remote table data',
+          tableDataLoading: false,
+        });
+      }
+      return;
+    }
+
     try {
       const data = await api.getTableData(dbId, {
         table,

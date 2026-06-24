@@ -1,9 +1,11 @@
 import { useState, useEffect, useMemo } from 'react';
 import {
   Search, Filter, ArrowUpDown, Plus, Pencil, Trash2, X, ChevronLeft, ChevronRight,
-  Database, Table2, RefreshCw, Save, AlertCircle
+  Database, Table2, RefreshCw, Save, AlertCircle, Globe
 } from 'lucide-react';
 import { useDatabaseStore } from '../stores/databaseStore';
+import { useRemoteConnectionStore } from '../stores/remoteConnectionStore';
+import { remoteApi } from '../services/remoteApi';
 import { api } from '../services/api';
 
 export function DataPage() {
@@ -24,9 +26,11 @@ export function DataPage() {
     insertRow,
     error,
     clearError,
+    getRemoteDatabases,
   } = useDatabaseStore();
 
-  const runningDbs = databases.filter(d => d.status === 'running');
+  const { connections: remoteConnections } = useRemoteConnectionStore();
+  const runningDbs = [...databases.filter(d => d.status === 'running'), ...getRemoteDatabases()];
   const [tables, setTables] = useState<{ name: string; columns: { name: string; data_type: string; nullable: boolean }[] }[]>([]);
   const [tablesLoading, setTablesLoading] = useState(false);
 
@@ -63,6 +67,31 @@ export function DataPage() {
       return;
     }
     setTablesLoading(true);
+
+    if (selectedDatabase.isRemote) {
+      const conn = remoteConnections.find(c => c.id === selectedDatabase.id);
+      if (!conn) {
+        setTables([]);
+        setTablesLoading(false);
+        return;
+      }
+      remoteApi.fetchSchema(conn)
+        .then(schema => {
+          const mapped = schema.map(t => ({
+            name: t.name,
+            columns: t.columns.map(c => ({
+              name: c.name,
+              data_type: c.dataType,
+              nullable: c.nullable,
+            })),
+          }));
+          setTables(mapped);
+        })
+        .catch(() => setTables([]))
+        .finally(() => setTablesLoading(false));
+      return;
+    }
+
     api.getSchema(selectedDatabase.id)
       .then(schema => setTables(schema))
       .catch(() => setTables([]))
@@ -117,19 +146,55 @@ export function DataPage() {
     const pk = editingRow[primaryKeyColumn];
     const data = { ...editForm };
     delete data[primaryKeyColumn]; // Don't update PK
-    await updateRow(selectedDatabase.id, selectedTable, pk, primaryKeyColumn, data);
+
+    if (selectedDatabase.isRemote) {
+      const conn = remoteConnections.find(c => c.id === selectedDatabase.id);
+      if (!conn) return;
+      // Build UPDATE SQL for remote
+      const setClause = Object.entries(data)
+        .map(([k, v]) => `"${k}" = ${typeof v === 'string' ? `'${v}'` : v}`)
+        .join(', ');
+      const sql = `UPDATE "${selectedTable}" SET ${setClause} WHERE "${primaryKeyColumn}" = ${typeof pk === 'string' ? `'${pk}'` : pk}`;
+      await remoteApi.executeWrite(conn, sql);
+    } else {
+      await updateRow(selectedDatabase.id, selectedTable, pk, primaryKeyColumn, data);
+    }
+
     clearEditingRow();
     setEditForm({});
     loadData();
   };
 
-  const handleDeleteRow = async () => {
-    if (!selectedDatabase || !selectedTable || !editingRow) return;
-    if (!confirm('Are you sure you want to delete this row?')) return;
-    const pk = editingRow[primaryKeyColumn];
-    await deleteRow(selectedDatabase.id, selectedTable, pk, primaryKeyColumn);
-    clearEditingRow();
-    setEditForm({});
+  const handleSaveAddRow = async () => {
+    if (!selectedDatabase || !selectedTable) return;
+
+    const payload = { ...addRowForm };
+    const pkCol = tableColumns.find((c: any) => c.is_primary_key);
+
+    if (pkCol) {
+      if (idMode === 'default') {
+        // Omit PK from payload — let DB auto-generate or backend inject UUID
+        delete payload[pkCol.name];
+      } else if (idMode === 'null') {
+        // Explicitly set to null
+        payload[pkCol.name] = null;
+      }
+    }
+
+    if (selectedDatabase.isRemote) {
+      const conn = remoteConnections.find(c => c.id === selectedDatabase.id);
+      if (!conn) return;
+      const columns = Object.keys(payload).map(k => `"${k}"`).join(', ');
+      const values = Object.values(payload).map(v => typeof v === 'string' ? `'${v}'` : v === null ? 'NULL' : String(v)).join(', ');
+      const sql = `INSERT INTO "${selectedTable}" (${columns}) VALUES (${values})`;
+      await remoteApi.executeWrite(conn, sql);
+    } else {
+      await insertRow(selectedDatabase.id, selectedTable, payload);
+    }
+
+    setShowAddRow(false);
+    setAddRowForm({});
+    setIdMode('default');
     loadData();
   };
 
@@ -146,7 +211,14 @@ export function DataPage() {
     if (!selectedDatabase || !selectedTable) return;
     setIdMode('default'); // Reset to default on open
     try {
-      const cols = await api.getTableColumns(selectedDatabase.id, selectedTable);
+      let cols;
+      if (selectedDatabase.isRemote) {
+        const conn = remoteConnections.find(c => c.id === selectedDatabase.id);
+        if (!conn) throw new Error('Remote connection not found');
+        cols = await remoteApi.getTableColumns(conn, selectedTable);
+      } else {
+        cols = await api.getTableColumns(selectedDatabase.id, selectedTable);
+      }
       setTableColumns(cols);
       // Pre-fill form: omit auto-generated PKs, use defaults where available
       const initialForm: Record<string, any> = {};
@@ -223,7 +295,9 @@ export function DataPage() {
             }}
           >
             {runningDbs.map(db => (
-              <option key={db.id} value={db.id}>{db.name} ({db.type})</option>
+              <option key={db.id} value={db.id}>
+                {db.isRemote ? `${db.name} 🔗` : `${db.name} (${db.type})`}
+              </option>
             ))}
             {runningDbs.length === 0 && <option>No running databases</option>}
           </select>

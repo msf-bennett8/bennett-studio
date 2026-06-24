@@ -1,12 +1,15 @@
 import { useState, useMemo, useEffect } from 'react';
-import { Table2, Columns, Key, Link2, Search, Database, Hash, Filter, ArrowRight, AlertCircle } from 'lucide-react';
+import { Table2, Columns, Key, Link2, Search, Database, Hash, Filter, ArrowRight, AlertCircle, Globe } from 'lucide-react';
 import { api } from '../services/api';
 import { useDatabaseStore } from '../stores/databaseStore';
+import { useRemoteConnectionStore } from '../stores/remoteConnectionStore';
+import { remoteApi } from '../services/remoteApi';
 import type { ColumnSchema } from '../services/dataService';
 
 export function SchemaPage() {
-  const { databases } = useDatabaseStore();
-  const runningDbs = databases.filter(d => d.status === 'running');
+  const { databases, getRemoteDatabases } = useDatabaseStore();
+  const { connections: remoteConnections } = useRemoteConnectionStore();
+  const runningDbs = [...databases.filter(d => d.status === 'running'), ...getRemoteDatabases()];
   const [selectedDb, setSelectedDb] = useState<string>('');
   const [selectedTable, setSelectedTable] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState('');
@@ -30,6 +33,63 @@ export function SchemaPage() {
     if (!selectedDb) return;
     setLoading(true);
     setError(null);
+
+    const remoteDb = runningDbs.find(d => d.id === selectedDb && d.isRemote);
+    if (remoteDb) {
+      // Remote schema fetch
+      const conn = remoteConnections.find(c => c.id === selectedDb);
+      if (!conn) {
+        setError('Remote connection not found');
+        setLoading(false);
+        return;
+      }
+      remoteApi.fetchSchema(conn)
+        .then(schema => {
+          const mapped = schema.map(t => ({
+            name: t.name,
+            engine: conn.dbType || 'postgres',
+            version: 'remote',
+            row_count: t.estimatedRowCount || 0,
+            size: t.tableSize || '-',
+            columns: t.columns.map(c => ({
+              name: c.name,
+              type: c.dataType,
+              nullable: c.nullable,
+              is_primary: c.isPrimaryKey,
+              is_foreign: c.isForeignKey,
+              default: c.defaultValue,
+              constraints: c.nullable ? [] : ['NOT NULL'],
+              description: c.comment || '',
+            })),
+            indexes: t.indexes.map(i => ({
+              name: i.name,
+              columns: i.columns,
+              type: i.indexType,
+              unique: i.isUnique,
+            })),
+            constraints: t.constraints.map(c => ({
+              name: c.name,
+              type: c.constraintType,
+              columns: c.columns,
+              definition: c.definition,
+            })),
+            triggers: [],
+          }));
+          setTables(mapped);
+          if (mapped.length > 0) {
+            setSelectedTable(mapped[0].name);
+            setSelectedTableData(mapped[0]);
+          }
+          setMetadata({ database_name: conn.dbName || conn.code, engine: conn.dbType || 'remote', version: 'remote', total_tables: mapped.length });
+          setLoading(false);
+        })
+        .catch(err => {
+          setError(err instanceof Error ? err.message : 'Failed to load remote schema');
+          setLoading(false);
+        });
+      return;
+    }
+
     api.getSchema(selectedDb)
       .then(schema => {
         const mapped = schema.map(t => ({
@@ -119,7 +179,9 @@ export function SchemaPage() {
             onChange={e => setSelectedDb(e.target.value)}
           >
             {runningDbs.map(db => (
-              <option key={db.id} value={db.id}>{db.name} ({db.type})</option>
+              <option key={db.id} value={db.id}>
+                {db.isRemote ? `${db.name} 🔗` : `${db.name} (${db.type})`}
+              </option>
             ))}
             {runningDbs.length === 0 && <option>No running databases</option>}
           </select>

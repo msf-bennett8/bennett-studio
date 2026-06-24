@@ -331,6 +331,72 @@ class RemoteApiService {
   }
 
   /**
+   * Get table columns (for DataPage add-row compatibility)
+   */
+  async getTableColumns(connection: RemoteConnection, table: string): Promise<{
+    name: string;
+    data_type: string;
+    nullable: boolean;
+    has_default: boolean;
+    is_primary_key: boolean;
+    column_default: string | null;
+  }[]> {
+    const schema = await this.fetchSchema(connection);
+    const tableSchema = schema.find(t => t.name === table);
+    if (!tableSchema) throw new Error(`Table ${table} not found in schema`);
+
+    return tableSchema.columns.map(c => ({
+      name: c.name,
+      data_type: c.dataType,
+      nullable: c.nullable,
+      has_default: !!c.defaultValue,
+      is_primary_key: c.isPrimaryKey,
+      column_default: c.defaultValue || null,
+    }));
+  }
+
+  /**
+   * Fetch table data with pagination (for DataPage compatibility)
+   */
+  async fetchTableData(
+    connection: RemoteConnection,
+    table: string,
+    options: {
+      limit?: number;
+      offset?: number;
+      order_by?: string;
+      order_dir?: 'ASC' | 'DESC';
+      filter?: string;
+    } = {}
+  ): Promise<{ columns: string[]; rows: any[][]; row_count: number; total_count: number }> {
+    const limit = options.limit || 50;
+    const offset = options.offset || 0;
+
+    let sql = `SELECT * FROM "${table}"`;
+    if (options.filter) {
+      sql += ` WHERE ${options.filter}`;
+    }
+    if (options.order_by) {
+      sql += ` ORDER BY "${options.order_by}" ${options.order_dir || 'ASC'}`;
+    }
+    sql += ` LIMIT ${limit} OFFSET ${offset}`;
+
+    const result = await this.executeQuery(connection, sql);
+
+    // Also get total count
+    const countSql = `SELECT COUNT(*) FROM "${table}"${options.filter ? ` WHERE ${options.filter}` : ''}`;
+    const countResult = await this.executeQuery(connection, countSql);
+    const totalCount = countResult.rows[0]?.[0] || 0;
+
+    return {
+      columns: result.columns,
+      rows: result.rows,
+      row_count: result.rowCount,
+      total_count: Number(totalCount),
+    };
+  }
+
+  /**
    * Export query results
    */
   async exportQuery(connection: RemoteConnection, sql: string, format: 'csv' | 'json'): Promise<string> {

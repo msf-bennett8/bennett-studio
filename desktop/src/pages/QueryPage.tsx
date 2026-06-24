@@ -1,15 +1,18 @@
 import { useState, useEffect } from 'react';
-import { Play, Copy, Check, Download, Clock, Save, FileText, AlertCircle, Database } from 'lucide-react';
+import { Play, Copy, Check, Download, Clock, Save, FileText, AlertCircle, Database, Globe } from 'lucide-react';
 import { api, DatabaseInstance } from '../services/api';
 import { useDatabaseStore } from '../stores/databaseStore';
+import { useRemoteConnectionStore } from '../stores/remoteConnectionStore';
+import { remoteApi } from '../services/remoteApi';
 
 interface QueryResult {
   columns: string[]; rows: any[][]; executionTime: number; rowCount: number;
 }
 
 export function QueryPage() {
-  const { databases } = useDatabaseStore();
-  const runningDbs = databases.filter(d => d.status === 'running');
+  const { databases, getRemoteDatabases } = useDatabaseStore();
+  const { connections: remoteConnections } = useRemoteConnectionStore();
+  const runningDbs = [...databases.filter(d => d.status === 'running'), ...getRemoteDatabases()];
   const [selectedDb, setSelectedDb] = useState<string>('');
   const [query, setQuery] = useState('SELECT * FROM users LIMIT 10;');
   const [results, setResults] = useState<QueryResult | null>(null);
@@ -30,12 +33,31 @@ export function QueryPage() {
     setIsExecuting(true);
     setError(null);
     const start = performance.now();
+
     try {
-      const res = await api.executeQuery(selectedDb, query);
+      const remoteDb = runningDbs.find(d => d.id === selectedDb && d.isRemote);
+      let res;
+
+      if (remoteDb) {
+        // Remote database — use remoteApi
+        const conn = remoteConnections.find(c => c.id === selectedDb);
+        if (!conn) throw new Error('Remote connection not found');
+        res = await remoteApi.executeQuery(conn, query);
+      } else {
+        // Local database — use regular api
+        const localRes = await api.executeQuery(selectedDb, query);
+        res = {
+          columns: localRes.columns,
+          rows: localRes.rows,
+          rowCount: localRes.row_count,
+          executionTimeMs: 0,
+        };
+      }
+
       setResults({
         columns: res.columns,
         rows: res.rows,
-        rowCount: res.row_count,
+        rowCount: res.rowCount,
         executionTime: Math.round(performance.now() - start),
       });
       setQueryHistory(prev => [query, ...prev.slice(0, 49)]);
@@ -124,10 +146,12 @@ export function QueryPage() {
               onChange={e => setSelectedDb(e.target.value)}
               disabled={runningDbs.length === 0}
             >
-              {runningDbs.map(db => (
-                <option key={db.id} value={db.id}>{db.name} ({db.type})</option>
-              ))}
-              {runningDbs.length === 0 && <option>No running databases</option>}
+            {runningDbs.map(db => (
+              <option key={db.id} value={db.id}>
+                {db.isRemote ? `${db.name} 🔗` : `${db.name} (${db.type})`}
+              </option>
+            ))}
+            {runningDbs.length === 0 && <option>No running databases</option>}
             </select>
             <button onClick={handleExecute} disabled={isExecuting || !selectedDb} className="btn-primary flex items-center gap-2 px-4 py-2 rounded-xl">
               <Play size={16} /> {isExecuting ? 'Executing...' : 'Execute'}
