@@ -111,6 +111,7 @@ pub async fn create_share(
         expires_at: token.expires_at,
         revoked: false,
         guest_count: 0,
+        pinned: false,
     };
     
     if let Err(e) = state.share_store.create_share(&record).await {
@@ -169,6 +170,7 @@ pub async fn list_shares(
                         expires_at: record.expires_at,
                         created_at: record.created_at,
                         guest_count: record.guest_count,
+                        pinned: record.pinned,
                         status,
                     });
                 }
@@ -185,6 +187,33 @@ pub async fn list_shares(
         shares: all_shares,
         total,
     })))
+}
+
+/// POST /api/shares/:code/pin — Toggle pin status for a share
+pub async fn toggle_pin_share(
+    Path(code): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<crate::models::database::ApiResponse<serde_json::Value>>, StatusCode> {
+    match state.share_store.toggle_pin_share(&code).await {
+        Ok(true) => {
+            info!("Toggled pin for share {}", code);
+            Ok(Json(crate::models::database::ApiResponse::success(serde_json::json!({
+                "pinned": true,
+                "code": code
+            }))))
+        }
+        Ok(false) => {
+            Ok(Json(crate::models::database::ApiResponse::error(
+                format!("Share {} not found", code)
+            )))
+        }
+        Err(e) => {
+            warn!("Failed to toggle pin for share {}: {}", code, e);
+            Ok(Json(crate::models::database::ApiResponse::error(
+                "Failed to toggle pin".to_string()
+            )))
+        }
+    }
 }
 
 /// DELETE /api/shares/:code/permanent — Hard delete a share (permanent removal)

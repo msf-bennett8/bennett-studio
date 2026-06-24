@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Share2, Copy, Check, Globe, Lock, Users, Clock, X, Trash2, AlertCircle, Loader2 } from 'lucide-react';
+import { Share2, Copy, Check, Globe, Lock, Users, Clock, X, Trash2, Pin, PinOff, AlertCircle, Loader2 } from 'lucide-react';
 import { ConfirmModal } from '../components/ui/ConfirmModal';
 import { useDatabaseStore } from '../stores/databaseStore';
 import { useShareStore } from '../stores/shareStore';
@@ -7,7 +7,7 @@ import type { ShareLink, SharePermission } from '@bennett/shared';
 
 export function SharePage() {
   const { databases } = useDatabaseStore();
-  const { shares, loading, error, creating, fetchShares, createShare, revokeShare, deleteShare, getShareUrl, initVault, clearError } = useShareStore();
+  const { shares, loading, error, creating, fetchShares, createShare, revokeShare, deleteShare, togglePin, getShareUrl, initVault, clearError } = useShareStore();
   
   const runningDbs = databases.filter(d => d.status === 'running');
   
@@ -19,7 +19,7 @@ export function SharePage() {
   const [tables, setTables] = useState<string[]>(['*']);
   const [createError, setCreateError] = useState<string | null>(null);
   const [copyError, setCopyError] = useState<string | null>(null);
-  const [filter, setFilter] = useState<'active' | 'all' | 'revoked' | 'expired'>('active');
+  const [filter, setFilter] = useState<'active' | 'pinned' | 'all' | 'revoked' | 'expired'>('active');
   
   // Confirmation modal state
   const [confirmModal, setConfirmModal] = useState<{
@@ -211,7 +211,7 @@ export function SharePage() {
 
       {/* Filter tabs */}
       <div className="flex items-center gap-2 mb-4">
-        {(['active', 'all', 'revoked', 'expired'] as const).map((f) => (
+        {(['active', 'pinned', 'all', 'revoked', 'expired'] as const).map((f) => (
           <button
             key={f}
             onClick={() => setFilter(f)}
@@ -222,6 +222,7 @@ export function SharePage() {
             }}
           >
             {f === 'active' ? `Active (${shares.filter(s => s.status === 'active').length})` :
+             f === 'pinned' ? `Pinned (${shares.filter(s => s.pinned).length})` :
              f === 'all' ? `All (${shares.length})` :
              f === 'revoked' ? `Revoked (${shares.filter(s => s.status === 'revoked').length})` :
              `Expired (${shares.filter(s => s.status === 'expired').length})`}
@@ -229,12 +230,22 @@ export function SharePage() {
         ))}
       </div>
         
-        {shares.filter((share) => {
-          if (filter === 'active') return share.status === 'active';
-          if (filter === 'revoked') return share.status === 'revoked';
-          if (filter === 'expired') return share.status === 'expired';
-          return true;
-        }).map((share) => {
+        {shares
+          .filter((share) => {
+            if (filter === 'active') return share.status === 'active';
+            if (filter === 'pinned') return share.pinned;
+            if (filter === 'revoked') return share.status === 'revoked';
+            if (filter === 'expired') return share.status === 'expired';
+            return true;
+          })
+          .sort((a, b) => {
+            // Pinned shares always on top
+            if (a.pinned && !b.pinned) return -1;
+            if (!a.pinned && b.pinned) return 1;
+            // Then sort by created_at desc
+            return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+          })
+          .map((share) => {
           const PermIcon = getPermissionIcon(share.permission);
           const isActive = share.status === 'active';
           const isExpired = share.status === 'expired';
@@ -300,6 +311,16 @@ export function SharePage() {
                         title="Copy full share link"
                       >
                         {copiedCode === share.code ? <Check size={16} style={{ color: 'var(--accentSuccess)' }} /> : <Copy size={16} />}
+                      </button>
+                      <button
+                        onClick={() => togglePin(share.code)}
+                        className="p-2 rounded-lg transition-all hover:opacity-80"
+                        style={{ 
+                          backgroundColor: share.pinned ? 'var(--accentPrimary)' : 'var(--bgTertiary)',
+                        }}
+                        title={share.pinned ? 'Unpin share' : 'Pin share'}
+                      >
+                        {share.pinned ? <PinOff size={16} style={{ color: 'var(--textInverse)' }} /> : <Pin size={16} style={{ color: 'var(--textMuted)' }} />}
                       </button>
                       <button
                         onClick={() => openRevokeConfirm(share.code)}

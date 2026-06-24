@@ -42,6 +42,21 @@ export const shareApi = {
     return result.data;
   },
 
+    // Toggle pin status for a share
+  togglePin: async (code: string): Promise<boolean> => {
+    const response = await fetch(`${API_BASE_URL}/api/shares/${code}/pin`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+
+    const result = await response.json();
+    return result.success;
+  },
+  
   // Hard delete a share (permanent removal)
   deleteShare: async (code: string): Promise<boolean> => {
     const response = await fetch(`${API_BASE_URL}/api/shares/${code}/permanent`, {

@@ -100,6 +100,24 @@ export const useShareStore = create<ShareState>((set, get) => ({
     }
   },
 
+    togglePin: async (code) => {
+    try {
+      const success = await shareApi.togglePin(code);
+      if (success) {
+        set(state => ({
+          shares: state.shares.map(s =>
+            s.code === code ? { ...s, pinned: !s.pinned } : s
+          ),
+        }));
+      }
+      return success;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to toggle pin';
+      set({ error: msg });
+      return false;
+    }
+  },
+
   deleteShare: async (code) => {
     try {
       const success = await shareApi.deleteShare(code);

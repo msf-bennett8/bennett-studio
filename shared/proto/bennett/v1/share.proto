@@ -58,6 +58,7 @@ message ShareLink {
   string created_at = 9;
   int32 guest_count = 10;
   string status = 11;  // "active", "expired", "revoked"
+  bool pinned = 12;
 }
 
 message RevokeShareRequest {

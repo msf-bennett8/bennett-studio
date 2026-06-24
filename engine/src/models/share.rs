@@ -24,6 +24,7 @@ pub struct ShareLink {
     pub expires_at: DateTime<Utc>,
     pub created_at: DateTime<Utc>,
     pub guest_count: i32,
+    pub pinned: bool,
     pub status: ShareStatus,
 }
 

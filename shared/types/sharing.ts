@@ -15,6 +15,7 @@ export interface ShareLink {
   expires_at: string;
   created_at: string;
   guest_count: number;
+  pinned: boolean;
   status: 'active' | 'expired' | 'revoked';
 }
 

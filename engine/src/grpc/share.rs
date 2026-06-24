@@ -92,6 +92,7 @@ impl ShareService for ShareGrpcService {
             expires_at: token_result.expires_at,
             revoked: false,
             guest_count: 0,
+            pinned: false,
         };
         
         self.state.share_store.create_share(&record).await
@@ -145,6 +146,7 @@ impl ShareService for ShareGrpcService {
                             expires_at: record.expires_at.to_rfc3339(),
                             created_at: record.created_at.to_rfc3339(),
                             guest_count: record.guest_count,
+                            pinned: record.pinned,
                             status,
                         });
                     }

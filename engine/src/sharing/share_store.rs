@@ -28,6 +28,7 @@ pub struct ShareRecord {
     pub expires_at: DateTime<Utc>,
     pub revoked: bool,
     pub guest_count: i32,
+    pub pinned: bool,
 }
 
 /// Guest session record
@@ -106,7 +107,8 @@ impl ShareStore {
                 created_at TEXT NOT NULL,
                 expires_at TEXT NOT NULL,
                 revoked INTEGER NOT NULL DEFAULT 0,
-                guest_count INTEGER NOT NULL DEFAULT 0
+                guest_count INTEGER NOT NULL DEFAULT 0,
+                pinned INTEGER NOT NULL DEFAULT 0
             );
             
             CREATE INDEX IF NOT EXISTS idx_shares_db_id ON shares(db_id);
@@ -146,8 +148,8 @@ impl ShareStore {
     pub async fn create_share(&self, record: &ShareRecord) -> anyhow::Result<()> {
         sqlx::query(
             r#"
-            INSERT INTO shares (code, db_id, host_id, host, port, token_jti, permission, tables, cols, rls, created_at, expires_at, revoked, guest_count)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO shares (code, db_id, host_id, host, port, token_jti, permission, tables, cols, rls, created_at, expires_at, revoked, guest_count, pinned)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#
         )
         .bind(&record.code)
@@ -164,6 +166,7 @@ impl ShareStore {
         .bind(record.expires_at.to_rfc3339())
         .bind(record.revoked as i32)
         .bind(record.guest_count)
+        .bind(record.pinned as i32)
         .execute(&self.pool)
         .await?;
         
@@ -329,6 +332,35 @@ impl ShareStore {
         
         Ok(())
     }
+
+        /// Toggle pin status for a share
+    pub async fn toggle_pin_share(&self, code: &str) -> anyhow::Result<bool> {
+        // Get current pin status
+        let current = sqlx::query("SELECT pinned FROM shares WHERE code = ?")
+            .bind(code)
+            .fetch_optional(&self.pool)
+            .await?;
+
+        if let Some(row) = current {
+            let pinned: i32 = row.get("pinned");
+            let new_pinned = if pinned == 0 { 1 } else { 0 };
+
+            let result = sqlx::query("UPDATE shares SET pinned = ? WHERE code = ?")
+                .bind(new_pinned)
+                .bind(code)
+                .execute(&self.pool)
+                .await?;
+
+            if result.rows_affected() > 0 {
+                info!("Toggled pin for share {} to {}", code, new_pinned);
+                Ok(true)
+            } else {
+                Ok(false)
+            }
+        } else {
+            Ok(false)
+        }
+    }
     
     /// Hard delete a share from the database (permanent removal)
     pub async fn hard_delete_share(&self, code: &str) -> anyhow::Result<bool> {
@@ -411,6 +443,7 @@ impl ShareStore {
                 .unwrap_or_else(|_| Utc::now()),
             revoked: row.get::<i32, _>("revoked") != 0,
             guest_count: row.get("guest_count"),
+            pinned: row.get::<i32, _>("pinned") != 0,
         }
     }
 }
