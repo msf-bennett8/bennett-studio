@@ -93,11 +93,21 @@ async fn main() {
             panic!("No available port found in range 3001-3010");
         });
 
-    // Start gRPC server on port 3002 (or BENNETT_GRPC_PORT)
+    // Start gRPC server on a port derived from engine port (engine_port + 100)
+    // This ensures no conflict even with dynamic port allocation
     let grpc_port = std::env::var("BENNETT_GRPC_PORT")
         .ok()
         .and_then(|p| p.parse().ok())
-        .unwrap_or(3002);
+        .unwrap_or_else(|| {
+            let base_port = port + 100; // Always offset from actual engine port
+            for offset in 0..10 {
+                let port = base_port + offset;
+                if std::net::TcpListener::bind(("0.0.0.0", port)).is_ok() {
+                    return port;
+                }
+            }
+            panic!("No available gRPC port found in range {}-{}", base_port, base_port + 9);
+        });
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     info!("Bennett Engine starting on http://{}", addr);
