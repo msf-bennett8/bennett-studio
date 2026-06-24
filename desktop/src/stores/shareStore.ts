@@ -35,6 +35,11 @@ export const useShareStore = create<ShareState>((set, get) => ({
   },
 
   fetchShares: async () => {
+    // Initialize vault on first fetch
+    if (!get().vaultAvailable) {
+      await get().initVault();
+    }
+    
     set({ loading: true, error: null });
     try {
       const result = await shareApi.listShares();

@@ -30,31 +30,33 @@ pub struct VaultEntry {
 /// Store a share token in the OS keychain
 #[command]
 pub async fn vault_store_token(entry: VaultToken) -> Result<bool, String> {
-    let entry_name = format!("{}{}", VAULT_USERNAME_PREFIX, entry.code);
-    
+    let code = entry.code.clone(); // Save before shadowing
+    let entry_name = format!("{}{}", VAULT_USERNAME_PREFIX, code);
+
     // Use keyring crate for cross-platform secure storage
-    let entry = keyring::Entry::new(VAULT_SERVICE_NAME, &entry_name)
+    // keyring v3: Entry::new returns Result<Entry, Error>
+    let keyring_entry = keyring::Entry::new(VAULT_SERVICE_NAME, &entry_name)
         .map_err(|e| format!("Failed to create keyring entry: {}", e))?;
-    
+
     // Store encrypted token
-    entry.set_password(&entry.token)
+    keyring_entry.set_password(&entry.token)
         .map_err(|e| format!("Failed to store token: {}", e))?;
-    
+
     // Store metadata in a separate entry (non-sensitive, for listing)
     let meta_entry = keyring::Entry::new(VAULT_SERVICE_NAME, &format!("{}-meta", entry_name))
         .map_err(|e| format!("Failed to create meta entry: {}", e))?;
-    
+
     let meta = serde_json::json!({
         "db_id": entry.db_id,
         "db_name": entry.db_name,
         "created_at": entry.created_at,
         "expires_at": entry.expires_at,
     });
-    
+
     meta_entry.set_password(&meta.to_string())
         .map_err(|e| format!("Failed to store metadata: {}", e))?;
-    
-    info!("Stored token for share {} in OS keychain", entry.code);
+
+    info!("Stored token for share {} in OS keychain", code);
     Ok(true)
 }
 
@@ -118,13 +120,16 @@ pub async fn vault_remove_token(code: String) -> Result<bool, String> {
 #[command]
 pub async fn vault_status() -> Result<VaultStatus, String> {
     // Test keyring availability
-    let test_entry = keyring::Entry::new(VAULT_SERVICE_NAME, "test-availability");
-    let available = test_entry.set_password("test").is_ok();
+    // keyring v3: Entry::new returns Result<Entry, Error>
+    let test_entry = keyring::Entry::new(VAULT_SERVICE_NAME, "test-availability")
+        .map_err(|e| format!("Keyring not available: {}", e))?;
     
+    let available = test_entry.set_password("test").is_ok();
+
     if available {
         let _ = test_entry.delete_credential();
     }
-    
+
     Ok(VaultStatus {
         available,
         r#type: "tauri_secure".to_string(),

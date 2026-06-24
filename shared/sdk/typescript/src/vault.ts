@@ -18,11 +18,11 @@ async function getVault(): Promise<TokenVault> {
   
   if (isTauri()) {
     // Desktop — use Tauri secure storage
-    const { vaultService } = await import('./vaultDesktop');
+    const { vaultService } = await import('../../../../desktop/src/services/vaultService');
     vaultInstance = vaultService;
   } else {
     // Web — use encrypted IndexedDB
-    const { tokenVault } = await import('./vaultWeb');
+    const { tokenVault } = await import('../../../../web/src/services/tokenVault');
     vaultInstance = tokenVault;
   }
   
@@ -53,7 +53,8 @@ export const vault: TokenVault = {
 };
 
 export async function getVaultStatus(): Promise<VaultStatus> {
-  return (await getVault()).status?.() ?? {
+  const v = await getVault();
+  return v.status?.() ?? {
     available: true,
     type: isTauri() ? 'tauri_secure' : 'indexeddb_encrypted',
     initialized: true,

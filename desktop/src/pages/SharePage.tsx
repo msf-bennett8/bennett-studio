@@ -6,7 +6,7 @@ import type { ShareLink, SharePermission } from '@bennett/shared';
 
 export function SharePage() {
   const { databases } = useDatabaseStore();
-  const { shares, loading, error, creating, fetchShares, createShare, revokeShare, getShareUrl, clearError } = useShareStore();
+  const { shares, loading, error, creating, fetchShares, createShare, revokeShare, getShareUrl, initVault, clearError } = useShareStore();
   
   const runningDbs = databases.filter(d => d.status === 'running');
   
@@ -17,10 +17,17 @@ export function SharePage() {
   const [duration, setDuration] = useState<number>(24);
   const [tables, setTables] = useState<string[]>(['*']);
   const [createError, setCreateError] = useState<string | null>(null);
+  const [copyError, setCopyError] = useState<string | null>(null);
 
-  // Load shares on mount
+  // Load shares on mount + init vault
   useEffect(() => {
-    fetchShares();
+    // Initialize vault first, then fetch shares
+    const initAndFetch = async () => {
+      await initVault();
+      fetchShares();
+    };
+    initAndFetch();
+    
     const interval = setInterval(fetchShares, 30000); // Refresh every 30s
     return () => clearInterval(interval);
   }, []);
@@ -34,12 +41,15 @@ export function SharePage() {
 
   const handleCopy = async (share: ShareLink) => {
     const fullUrl = await getShareUrl(share.code);
-    
+
     if (!fullUrl || fullUrl.includes('...')) {
-      // Token not in vault — show warning with option to regenerate
-      setCreateError('Full share link not available. Token was created in a different session or vault was cleared. Please create a new share.');
+      // Token not in vault — show warning in the share list
+      setCopyError('Full share link not available. This token was created in a different session, browser, or was cleared. Create a new share to get a fresh link.');
+      setTimeout(() => setCopyError(null), 5000);
       return;
     }
+
+    setCopyError(null);
     
     try {
       await navigator.clipboard.writeText(fullUrl);
@@ -135,6 +145,15 @@ export function SharePage() {
 
       {error && (
         <div className="mb-6 p-4 rounded-xl flex items-center gap-3" style={{ backgroundColor: 'rgba(255,68,68,0.1)', border: '1px solid var(--accentError)' }}>
+          {copyError && (
+            <div className="mb-6 p-4 rounded-xl flex items-center gap-3" style={{ backgroundColor: 'rgba(255,170,0,0.1)', border: '1px solid var(--accentWarning)' }}>
+              <AlertCircle size={20} style={{ color: 'var(--accentWarning)' }} />
+              <div className="flex-1">
+                <p style={{ color: 'var(--accentWarning)' }}>{copyError}</p>
+              </div>
+              <button onClick={() => setCopyError(null)} className="text-sm" style={{ color: 'var(--accentWarning)' }}>Dismiss</button>
+            </div>
+          )}
           <AlertCircle size={20} style={{ color: 'var(--accentError)' }} />
           <div className="flex-1">
             <p style={{ color: 'var(--accentError)' }}>{error}</p>
