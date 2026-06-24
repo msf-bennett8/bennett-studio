@@ -22,6 +22,7 @@ use crate::connect_rpc::{
 // ============================================================================
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ExportRequest {
     pub share_code: String,
     pub token: String,
@@ -36,6 +37,7 @@ fn default_true() -> bool {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ExportTableRequest {
     pub share_code: String,
     pub token: String,

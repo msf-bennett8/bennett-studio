@@ -105,14 +105,13 @@ export class BennettGrpcWebClient {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), this.timeout);
 
-    // Convert camelCase keys to snake_case for protobuf compatibility
-    const snakeCasePayload = this.toSnakeCase(payload);
+    // Server accepts camelCase natively
 
     try {
       const response = await fetch(url, {
         method: 'POST',
         headers: this.headers,
-        body: JSON.stringify(snakeCasePayload),
+        body: JSON.stringify(payload),
         signal: controller.signal,
         // Required for gRPC-Web/CORS
         mode: 'cors',

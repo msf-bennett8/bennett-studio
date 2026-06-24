@@ -22,6 +22,7 @@ use crate::connect_rpc::{
 // ============================================================================
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GetSchemaRequest {
     pub share_code: String,
     pub token: String,
@@ -83,6 +84,7 @@ pub struct ConstraintSchema {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GetTableColumnsRequest {
     pub share_code: String,
     pub token: String,
@@ -98,6 +100,7 @@ pub struct GetTableColumnsResponse {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GetTableIndexesRequest {
     pub share_code: String,
     pub token: String,
@@ -113,6 +116,7 @@ pub struct GetTableIndexesResponse {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GetTableConstraintsRequest {
     pub share_code: String,
     pub token: String,

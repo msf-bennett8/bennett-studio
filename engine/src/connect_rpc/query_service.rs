@@ -20,6 +20,7 @@ use crate::connect_rpc::{
 // ============================================================================
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ExecuteQueryRequest {
     pub share_code: String,
     pub token: String,
@@ -46,6 +47,7 @@ pub struct ExecuteQueryResponse {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ExecuteWriteRequest {
     pub share_code: String,
     pub token: String,
@@ -322,6 +324,7 @@ pub async fn stream_query(
     let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
     let client_ip = parts.extensions.get::<crate::api::middleware::ClientIp>().map(|c| c.0);
     #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "camelCase")]
     struct StreamQueryRequest {
         share_code: String,
         token: String,

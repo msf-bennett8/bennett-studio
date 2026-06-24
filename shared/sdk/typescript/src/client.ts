@@ -321,8 +321,7 @@ export class BennettShareClient {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), this.timeout);
 
-    // Convert camelCase keys to snake_case for protobuf compatibility
-    const snakeCasePayload = this.toSnakeCase(payload);
+    // Server accepts camelCase natively via #[serde(rename_all = "camelCase")]
 
     try {
       const response = await fetch(url, {
@@ -331,7 +330,7 @@ export class BennettShareClient {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
         },
-        body: JSON.stringify(snakeCasePayload),
+        body: JSON.stringify(payload),
         signal: controller.signal,
       });
       
