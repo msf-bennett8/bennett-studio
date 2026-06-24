@@ -302,13 +302,28 @@ export class BennettShareClient {
   }
 
   /**
+   * Convert camelCase keys to snake_case for protobuf JSON compatibility
+   */
+  private toSnakeCase(obj: Record<string, any>): Record<string, any> {
+    const result: Record<string, any> = {};
+    for (const [key, value] of Object.entries(obj)) {
+      const snakeKey = key.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`);
+      result[snakeKey] = value;
+    }
+    return result;
+  }
+
+  /**
    * Low-level Connect-RPC call
    */
   private async call<T>(method: string, payload: Record<string, any>): Promise<T> {
     const url = `${this.baseUrl}/${method}`;
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), this.timeout);
-    
+
+    // Convert camelCase keys to snake_case for protobuf compatibility
+    const snakeCasePayload = this.toSnakeCase(payload);
+
     try {
       const response = await fetch(url, {
         method: 'POST',
@@ -316,7 +331,7 @@ export class BennettShareClient {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
         },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(snakeCasePayload),
         signal: controller.signal,
       });
       

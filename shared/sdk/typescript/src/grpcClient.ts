@@ -86,6 +86,18 @@ export class BennettGrpcWebClient {
   }
 
   /**
+   * Convert camelCase keys to snake_case for protobuf JSON compatibility
+   */
+  private toSnakeCase(obj: Record<string, any>): Record<string, any> {
+    const result: Record<string, any> = {};
+    for (const [key, value] of Object.entries(obj)) {
+      const snakeKey = key.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`);
+      result[snakeKey] = value;
+    }
+    return result;
+  }
+
+  /**
    * Low-level gRPC-Web call using Connect-RPC protocol
    */
   private async call(method: string, payload: Record<string, any>): Promise<any> {
@@ -93,11 +105,14 @@ export class BennettGrpcWebClient {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), this.timeout);
 
+    // Convert camelCase keys to snake_case for protobuf compatibility
+    const snakeCasePayload = this.toSnakeCase(payload);
+
     try {
       const response = await fetch(url, {
         method: 'POST',
         headers: this.headers,
-        body: JSON.stringify(payload),
+        body: JSON.stringify(snakeCasePayload),
         signal: controller.signal,
         // Required for gRPC-Web/CORS
         mode: 'cors',

@@ -49,6 +49,7 @@ pub async fn rate_limit_interceptor(
         // Parse JSON body to extract share_code
         let code = if let Ok(json) = serde_json::from_slice::<serde_json::Value>(&body) {
             json.get("shareCode")
+                .or_else(|| json.get("share_code"))
                 .and_then(|v| v.as_str())
                 .unwrap_or("unknown")
                 .to_string()
