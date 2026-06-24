@@ -53,7 +53,7 @@ export function SchemaPage() {
             size: t.tableSize || '-',
             columns: t.columns.map(c => ({
               name: c.name,
-              type: c.dataType,
+              type: c.dataType || c.type || 'UNKNOWN',
               nullable: c.nullable,
               is_primary: c.isPrimaryKey,
               is_foreign: c.isForeignKey,
@@ -149,14 +149,18 @@ export function SchemaPage() {
     );
   }, [searchQuery, tables]);
 
-  const getTypeColor = (type: string) => {
-    if (type.includes('SERIAL') || type.includes('INTEGER')) return 'var(--accentInfo)';
-    if (type.includes('VARCHAR') || type.includes('TEXT')) return 'var(--accentSecondary)';
-    if (type.includes('DECIMAL') || type.includes('NUMERIC')) return 'var(--accentWarning)';
-    if (type.includes('TIMESTAMP') || type.includes('DATE')) return 'var(--accentSuccess)';
-    if (type.includes('BOOLEAN')) return 'var(--accentPrimary)';
-    if (type.includes('JSON')) return 'var(--accentError)';
-    if (type.includes('ENUM')) return 'var(--accentInfo)';
+  const getTypeColor = (type: string | undefined) => {
+    if (!type) return 'var(--textMuted)';
+    const upper = type.toUpperCase();
+    if (upper.includes('SERIAL') || upper.includes('INTEGER') || upper.includes('INT') || upper.includes('BIGINT') || upper.includes('SMALLINT')) return 'var(--accentInfo)';
+    if (upper.includes('VARCHAR') || upper.includes('TEXT') || upper.includes('CHAR') || upper.includes('STRING')) return 'var(--accentSecondary)';
+    if (upper.includes('DECIMAL') || upper.includes('NUMERIC') || upper.includes('FLOAT') || upper.includes('DOUBLE') || upper.includes('REAL')) return 'var(--accentWarning)';
+    if (upper.includes('TIMESTAMP') || upper.includes('DATE') || upper.includes('TIME')) return 'var(--accentSuccess)';
+    if (upper.includes('BOOLEAN') || upper.includes('BOOL')) return 'var(--accentPrimary)';
+    if (upper.includes('JSON') || upper.includes('JSONB')) return 'var(--accentError)';
+    if (upper.includes('ENUM') || upper.includes('SET')) return 'var(--accentInfo)';
+    if (upper.includes('BYTEA') || upper.includes('BLOB') || upper.includes('BINARY')) return 'var(--accentWarning)';
+    if (upper.includes('UUID')) return 'var(--accentPrimary)';
     return 'var(--textMuted)';
   };
 

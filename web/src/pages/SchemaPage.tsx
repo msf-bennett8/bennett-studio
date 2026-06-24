@@ -55,7 +55,7 @@ export function SchemaPage() {
             size: t.tableSize || '-',
             columns: t.columns.map(c => ({
               name: c.name,
-              type: c.dataType,
+              type: c.dataType || c.type || 'UNKNOWN',
               nullable: c.nullable,
               is_primary: c.isPrimaryKey,
               is_foreign: c.isForeignKey,
@@ -155,7 +155,7 @@ export function SchemaPage() {
                   <Table2 size={16} />
                   <span className="font-medium">{table.name}</span>
                 </div>
-                <span className="text-xs" style={{ color: 'var(--textMuted)' }}>{table.rowCount.toLocaleString()}</span>
+                <span className="text-xs" style={{ color: 'var(--textMuted)' }}>{(table.rowCount ?? 0).toLocaleString()}</span>
               </div>
             </button>
           ))}
@@ -163,13 +163,13 @@ export function SchemaPage() {
       </div>
 
       <div className="flex-1 overflow-auto p-8">
-        {selectedTableInfo && (
+        {selectedTableInfo && selectedTableInfo.columns && (
           <div>
             <div className="flex items-center justify-between mb-6">
               <div>
                 <h1 className="text-2xl font-bold" style={{ color: 'var(--textPrimary)' }}>{selectedTableInfo.name}</h1>
                 <div className="flex items-center gap-4 mt-2">
-                  <span className="text-sm" style={{ color: 'var(--textSecondary)' }}>{selectedTableInfo.columns.length} columns</span>
+                  <span className="text-sm" style={{ color: 'var(--textSecondary)' }}>{selectedTableInfo.columns?.length || 0} columns</span>
                 </div>
               </div>
               <button className="btn-secondary px-4 py-2 rounded-xl">View Data</button>
@@ -187,7 +187,7 @@ export function SchemaPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {selectedTableInfo.columns.map((column, index) => (
+                  {selectedTableInfo.columns?.map((column, index) => (
                     <tr key={index} style={{ backgroundColor: index % 2 === 0 ? 'var(--bgPrimary)' : 'var(--bgSecondary)', borderBottom: '1px solid var(--borderDefault)' }}>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
@@ -196,7 +196,7 @@ export function SchemaPage() {
                         </div>
                       </td>
                       <td className="px-4 py-3">
-                        <span className="text-xs px-2 py-1 rounded-full font-mono" style={{ backgroundColor: 'var(--bgTertiary)', color: 'var(--accentSecondary)' }}>{column.type}</span>
+                        <span className="text-xs px-2 py-1 rounded-full font-mono" style={{ backgroundColor: 'var(--bgTertiary)', color: 'var(--accentSecondary)' }}>{column.type || 'UNKNOWN'}</span>
                       </td>
                       <td className="px-4 py-3">
                         <span className="text-sm" style={{ color: column.nullable ? 'var(--accentWarning)' : 'var(--accentSuccess)' }}>{column.nullable ? 'YES' : 'NO'}</span>

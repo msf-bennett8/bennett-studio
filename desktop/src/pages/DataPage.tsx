@@ -8,6 +8,11 @@ import { useRemoteConnectionStore } from '../stores/remoteConnectionStore';
 import { remoteApi } from '../services/remoteApi';
 import { api } from '../services/api';
 
+// Debug: ensure remoteApi is loaded
+if (!remoteApi) {
+  console.error('remoteApi failed to import — check services/remoteApi.ts export');
+}
+
 export function DataPage() {
   const {
     databases,
@@ -30,6 +35,9 @@ export function DataPage() {
   } = useDatabaseStore();
 
   const { connections: remoteConnections } = useRemoteConnectionStore();
+  
+  // Ensure remoteApi is available
+  const remoteApiRef = remoteApi;
   const runningDbs = [...databases.filter(d => d.status === 'running'), ...getRemoteDatabases()];
   const [tables, setTables] = useState<{ name: string; columns: { name: string; data_type: string; nullable: boolean }[] }[]>([]);
   const [tablesLoading, setTablesLoading] = useState(false);
@@ -148,8 +156,15 @@ export function DataPage() {
     delete data[primaryKeyColumn]; // Don't update PK
 
     if (selectedDatabase.isRemote) {
+      if (!remoteApi) {
+        setError('Remote API not available. Please refresh the page.');
+        return;
+      }
       const conn = remoteConnections.find(c => c.id === selectedDatabase.id);
-      if (!conn) return;
+      if (!conn) {
+        setError('Remote connection not found');
+        return;
+      }
       // Build UPDATE SQL for remote
       const setClause = Object.entries(data)
         .map(([k, v]) => `"${k}" = ${typeof v === 'string' ? `'${v}'` : v}`)
@@ -171,8 +186,15 @@ export function DataPage() {
     const pk = editingRow[primaryKeyColumn];
 
     if (selectedDatabase.isRemote) {
+      if (!remoteApi) {
+        setError('Remote API not available. Please refresh the page.');
+        return;
+      }
       const conn = remoteConnections.find(c => c.id === selectedDatabase.id);
-      if (!conn) return;
+      if (!conn) {
+        setError('Remote connection not found');
+        return;
+      }
       const sql = `DELETE FROM "${selectedTable}" WHERE "${primaryKeyColumn}" = ${typeof pk === 'string' ? `'${pk}'` : pk}`;
       await remoteApi.executeWrite(conn, sql);
     } else {
@@ -199,6 +221,7 @@ export function DataPage() {
     try {
       let cols;
       if (selectedDatabase.isRemote) {
+        if (!remoteApi) throw new Error('Remote API not available');
         const conn = remoteConnections.find(c => c.id === selectedDatabase.id);
         if (!conn) throw new Error('Remote connection not found');
         cols = await remoteApi.getTableColumns(conn, selectedTable);
@@ -261,8 +284,15 @@ export function DataPage() {
     }
 
     if (selectedDatabase.isRemote) {
+      if (!remoteApi) {
+        setError('Remote API not available. Please refresh the page.');
+        return;
+      }
       const conn = remoteConnections.find(c => c.id === selectedDatabase.id);
-      if (!conn) return;
+      if (!conn) {
+        setError('Remote connection not found');
+        return;
+      }
       const columns = Object.keys(payload).map(k => `"${k}"`).join(', ');
       const values = Object.values(payload).map(v => typeof v === 'string' ? `'${v}'` : v === null ? 'NULL' : String(v)).join(', ');
       const sql = `INSERT INTO "${selectedTable}" (${columns}) VALUES (${values})`;

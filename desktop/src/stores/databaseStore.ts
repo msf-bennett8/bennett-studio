@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { api, DatabaseInstance, CreateDatabaseRequest, EnvFileSuggestion, DatabaseSource } from '../services/api';
+import { remoteApi } from '../services/remoteApi';
 import { useRemoteConnectionStore } from './remoteConnectionStore';
 
 interface DatabaseState {
