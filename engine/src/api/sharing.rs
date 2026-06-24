@@ -187,6 +187,33 @@ pub async fn list_shares(
     })))
 }
 
+/// DELETE /api/shares/:code/permanent — Hard delete a share (permanent removal)
+pub async fn delete_share(
+    Path(code): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<crate::models::database::ApiResponse<serde_json::Value>>, StatusCode> {
+    match state.share_store.hard_delete_share(&code).await {
+        Ok(true) => {
+            info!("Hard deleted share {}", code);
+            Ok(Json(crate::models::database::ApiResponse::success(serde_json::json!({
+                "deleted": true,
+                "code": code
+            }))))
+        }
+        Ok(false) => {
+            Ok(Json(crate::models::database::ApiResponse::error(
+                format!("Share {} not found", code)
+            )))
+        }
+        Err(e) => {
+            warn!("Failed to hard delete share {}: {}", code, e);
+            Ok(Json(crate::models::database::ApiResponse::error(
+                "Failed to delete share".to_string()
+            )))
+        }
+    }
+}
+
 /// DELETE /api/shares/:code — Revoke a share
 pub async fn revoke_share(
     Path(code): Path<String>,

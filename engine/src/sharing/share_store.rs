@@ -318,6 +318,35 @@ impl ShareStore {
         Ok(())
     }
     
+    /// Hard delete a share from the database (permanent removal)
+    pub async fn hard_delete_share(&self, code: &str) -> anyhow::Result<bool> {
+        let result = sqlx::query("DELETE FROM shares WHERE code = ?")
+            .bind(code)
+            .execute(&self.pool)
+            .await?;
+
+        if result.rows_affected() > 0 {
+            // Also clean up related guest sessions (CASCADE should handle this, but be explicit)
+            let _ = sqlx::query("DELETE FROM guest_sessions WHERE share_code = ?")
+                .bind(code)
+                .execute(&self.pool)
+                .await;
+            
+            // Remove from revoked tokens if present
+            if let Ok(Some(share)) = self.get_share(code).await {
+                let _ = sqlx::query("DELETE FROM revoked_tokens WHERE jti = ?")
+                    .bind(&share.token_jti)
+                    .execute(&self.pool)
+                    .await;
+            }
+
+            info!("Hard deleted share {}", code);
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
     /// Cleanup expired shares and stale sessions
     pub async fn cleanup_expired(&self) -> anyhow::Result<()> {
         let now = Utc::now().to_rfc3339();

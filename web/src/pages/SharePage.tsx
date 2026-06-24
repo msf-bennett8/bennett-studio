@@ -1,12 +1,12 @@
 import { useState, useEffect } from 'react';
-import { Share2, Copy, Check, Globe, Lock, Users, Clock, X, AlertCircle, Loader2 } from 'lucide-react';
+import { Share2, Copy, Check, Globe, Lock, Users, Clock, X, Trash2, AlertCircle, Loader2 } from 'lucide-react';
 import { useDatabaseStore } from '../stores/databaseStore';
 import { useShareStore } from '../stores/shareStore';
 import type { ShareLink, SharePermission } from '@bennett/shared';
 
 export function SharePage() {
   const { databases } = useDatabaseStore();
-  const { shares, loading, error, creating, fetchShares, createShare, revokeShare, getShareUrl, initVault, clearError } = useShareStore();
+  const { shares, loading, error, creating, fetchShares, createShare, revokeShare, deleteShare, getShareUrl, initVault, clearError } = useShareStore();
   
   const runningDbs = databases.filter(d => d.status === 'running');
   
@@ -18,6 +18,7 @@ export function SharePage() {
   const [tables, setTables] = useState<string[]>(['*']);
   const [createError, setCreateError] = useState<string | null>(null);
   const [copyError, setCopyError] = useState<string | null>(null);
+  const [filter, setFilter] = useState<'active' | 'all' | 'revoked' | 'expired'>('active');
 
   // Load shares on mount + init vault
   useEffect(() => {
@@ -72,6 +73,13 @@ export function SharePage() {
       return;
     }
     await revokeShare(code);
+  };
+
+  const handleDelete = async (code: string) => {
+    if (!confirm('Are you sure you want to PERMANENTLY DELETE this share? This cannot be undone.')) {
+      return;
+    }
+    await deleteShare(code);
   };
 
   const handleCreate = async () => {
@@ -143,17 +151,18 @@ export function SharePage() {
         </button>
       </div>
 
+      {copyError && (
+        <div className="mb-6 p-4 rounded-xl flex items-center gap-3" style={{ backgroundColor: 'rgba(255,170,0,0.1)', border: '1px solid var(--accentWarning)' }}>
+          <AlertCircle size={20} style={{ color: 'var(--accentWarning)' }} />
+          <div className="flex-1">
+            <p style={{ color: 'var(--accentWarning)' }}>{copyError}</p>
+          </div>
+          <button onClick={() => setCopyError(null)} className="text-sm" style={{ color: 'var(--accentWarning)' }}>Dismiss</button>
+        </div>
+      )}
+
       {error && (
         <div className="mb-6 p-4 rounded-xl flex items-center gap-3" style={{ backgroundColor: 'rgba(255,68,68,0.1)', border: '1px solid var(--accentError)' }}>
-          {copyError && (
-            <div className="mb-6 p-4 rounded-xl flex items-center gap-3" style={{ backgroundColor: 'rgba(255,170,0,0.1)', border: '1px solid var(--accentWarning)' }}>
-              <AlertCircle size={20} style={{ color: 'var(--accentWarning)' }} />
-              <div className="flex-1">
-                <p style={{ color: 'var(--accentWarning)' }}>{copyError}</p>
-              </div>
-              <button onClick={() => setCopyError(null)} className="text-sm" style={{ color: 'var(--accentWarning)' }}>Dismiss</button>
-            </div>
-          )}
           <AlertCircle size={20} style={{ color: 'var(--accentError)' }} />
           <div className="flex-1">
             <p style={{ color: 'var(--accentError)' }}>{error}</p>
@@ -169,8 +178,33 @@ export function SharePage() {
             <p style={{ color: 'var(--textSecondary)' }}>Loading shares...</p>
           </div>
         )}
+
+      {/* Filter tabs */}
+      <div className="flex items-center gap-2 mb-4">
+        {(['active', 'all', 'revoked', 'expired'] as const).map((f) => (
+          <button
+            key={f}
+            onClick={() => setFilter(f)}
+            className="px-3 py-1.5 rounded-lg text-xs font-medium transition-all"
+            style={{
+              backgroundColor: filter === f ? 'var(--accentPrimary)' : 'var(--bgTertiary)',
+              color: filter === f ? 'var(--textInverse)' : 'var(--textSecondary)',
+            }}
+          >
+            {f === 'active' ? `Active (${shares.filter(s => s.status === 'active').length})` :
+             f === 'all' ? `All (${shares.length})` :
+             f === 'revoked' ? `Revoked (${shares.filter(s => s.status === 'revoked').length})` :
+             `Expired (${shares.filter(s => s.status === 'expired').length})`}
+          </button>
+        ))}
+      </div>
         
-        {shares.map((share) => {
+        {shares.filter((share) => {
+          if (filter === 'active') return share.status === 'active';
+          if (filter === 'revoked') return share.status === 'revoked';
+          if (filter === 'expired') return share.status === 'expired';
+          return true;
+        }).map((share) => {
           const PermIcon = getPermissionIcon(share.permission);
           const isActive = share.status === 'active';
           const isExpired = share.status === 'expired';
@@ -237,13 +271,21 @@ export function SharePage() {
                       >
                         {copiedCode === share.code ? <Check size={16} style={{ color: 'var(--accentSuccess)' }} /> : <Copy size={16} />}
                       </button>
-                      <button 
-                        onClick={() => handleRevoke(share.code)} 
-                        className="p-2 rounded-lg transition-all hover:bg-red-500/20" 
-                        style={{ backgroundColor: 'var(--bgTertiary)' }} 
+                      <button
+                        onClick={() => handleRevoke(share.code)}
+                        className="p-2 rounded-lg transition-all hover:bg-red-500/20"
+                        style={{ backgroundColor: 'var(--bgTertiary)' }}
                         title="Revoke access"
                       >
                         <X size={16} style={{ color: 'var(--accentError)' }} />
+                      </button>
+                      <button
+                        onClick={() => handleDelete(share.code)}
+                        className="p-2 rounded-lg transition-all hover:bg-red-500/40"
+                        style={{ backgroundColor: 'var(--bgTertiary)' }}
+                        title="Permanently delete"
+                      >
+                        <Trash2 size={16} style={{ color: 'var(--accentError)' }} />
                       </button>
                     </>
                   )}

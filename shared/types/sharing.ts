@@ -63,6 +63,10 @@ export interface RevokeShareRequest {
   reason?: string;
 }
 
+export interface DeleteShareRequest {
+  code: string;
+}
+
 export interface ListSharesResponse {
   shares: ShareLink[];
   total: number;

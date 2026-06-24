@@ -42,6 +42,21 @@ export const shareApi = {
     return result.data;
   },
 
+  // Hard delete a share (permanent removal)
+  deleteShare: async (code: string): Promise<boolean> => {
+    const response = await fetch(`${API_BASE_URL}/api/shares/${code}/permanent`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+
+    const result = await response.json();
+    return result.success;
+  },
+
   // Revoke a share
   revokeShare: async (code: string, reason?: string): Promise<boolean> => {
     const response = await fetch(`${API_BASE_URL}/api/shares/${code}`, {

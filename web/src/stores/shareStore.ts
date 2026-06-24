@@ -100,6 +100,30 @@ export const useShareStore = create<ShareState>((set, get) => ({
     }
   },
 
+  deleteShare: async (code) => {
+    try {
+      const success = await shareApi.deleteShare(code);
+      if (success) {
+        // Remove from vault
+        try {
+          await vaultService.removeToken(code);
+        } catch (e) {
+          console.warn('Failed to remove token from vault:', e);
+        }
+
+        // Remove from state
+        set(state => ({
+          shares: state.shares.filter(s => s.code !== code),
+        }));
+      }
+      return success;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to delete share';
+      set({ error: msg });
+      return false;
+    }
+  },
+
   revokeShare: async (code) => {
     try {
       const success = await shareApi.revokeShare(code, 'host_revoked');
