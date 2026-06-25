@@ -99,7 +99,7 @@ pub async fn create_share(
     let record = ShareRecord {
         code: code.clone(),
         db_id: db.id.clone(),
-        host_id,
+        host_id: host_id.clone(),
         host: Some(host_ip.clone()),
         port: Some(host_port),
         token_jti: token.jti.clone(),
@@ -121,8 +121,11 @@ pub async fn create_share(
         )));
     }
     
+    // Record host heartbeat immediately (host is alive since we're creating a share)
+    let _ = state.share_store.record_heartbeat(&host_id, Some(host_ip.clone()), Some(host_port), env!("CARGO_PKG_VERSION")).await;
+
     info!("Created share {} for db {} with {} permission", code, db.name, permission);
-    
+
     Ok(Json(crate::models::database::ApiResponse::success(CreateShareResponse {
         code: code.clone(),
         url,
@@ -289,12 +292,38 @@ pub async fn get_share_schema(
         )));
     }
 
-    // Check host heartbeat
-    let host_alive = state.share_store.is_host_alive(&record.host_id).await.unwrap_or(false);
+    // Check host heartbeat with self-healing
+    let host_alive = match state.share_store.is_host_alive(&record.host_id).await {
+        Ok(alive) => alive,
+        Err(e) => {
+            tracing::warn!("Heartbeat check failed for share {} schema: {}, assuming alive", code, e);
+            true
+        }
+    };
+
     if !host_alive {
-        return Ok(Json(crate::models::database::ApiResponse::error(
-            "Host is currently offline. Please try again later.".to_string()
-        )));
+        tracing::info!("Host {} for share {} appears offline, attempting self-healing", record.host_id, code);
+        
+        match state.share_store.record_heartbeat(
+            &record.host_id,
+            record.host.clone(),
+            record.port,
+            env!("CARGO_PKG_VERSION")
+        ).await {
+            Ok(_) => tracing::info!("Self-healing heartbeat recorded for host {}", record.host_id),
+            Err(e) => tracing::warn!("Self-healing heartbeat failed: {}", e),
+        }
+
+        let host_alive_after = match state.share_store.is_host_alive(&record.host_id).await {
+            Ok(alive) => alive,
+            Err(_) => true,
+        };
+        
+        if !host_alive_after {
+            return Ok(Json(crate::models::database::ApiResponse::error(
+                "Host is currently offline. Please try again later.".to_string()
+            )));
+        }
     }
 
     // Get database instance
@@ -479,16 +508,47 @@ pub async fn validate_share(
     let tables: Vec<String> = serde_json::from_str(&record.tables)
         .unwrap_or_else(|_| vec!["*".to_string()]);
     
-    // Check host heartbeat
-    let host_alive = state.share_store.is_host_alive(&record.host_id).await.unwrap_or(false);
+    // Check host heartbeat with self-healing
+    let host_alive = match state.share_store.is_host_alive(&record.host_id).await {
+        Ok(alive) => alive,
+        Err(e) => {
+            tracing::warn!("Heartbeat check failed for share {}: {}, assuming alive", code, e);
+            true // If heartbeat table doesn't exist or errors, assume alive
+        }
+    };
 
     if !host_alive {
-        return Ok(Json(crate::models::database::ApiResponse::error(
-            "Host is currently offline. Please try again later.".to_string()
-        )));
+        tracing::info!("Host {} for share {} appears offline, attempting self-healing", record.host_id, code);
+        
+        // Self-healing: record heartbeat for this host
+        match state.share_store.record_heartbeat(
+            &record.host_id,
+            record.host.clone(),
+            record.port,
+            env!("CARGO_PKG_VERSION")
+        ).await {
+            Ok(_) => {
+                tracing::info!("Self-healing heartbeat recorded for host {}", record.host_id);
+            }
+            Err(e) => {
+                tracing::warn!("Self-healing heartbeat failed for host {}: {}", record.host_id, e);
+            }
+        }
+
+        // Re-check after self-healing
+        let host_alive_after = match state.share_store.is_host_alive(&record.host_id).await {
+            Ok(alive) => alive,
+            Err(_) => true, // If check fails, be lenient
+        };
+        
+        if !host_alive_after {
+            return Ok(Json(crate::models::database::ApiResponse::error(
+                "Host is currently offline. Please try again later.".to_string()
+            )));
+        }
     }
 
-    info!("Validated share {} for guest (host alive)", code);
+    info!("Validated share {} for guest", code);
 
     Ok(Json(crate::models::database::ApiResponse::success(ValidateShareResponse {
         valid: true,

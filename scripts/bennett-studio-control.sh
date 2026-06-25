@@ -9,14 +9,18 @@ PROJECT="$3"
 ENV="$4"
 
 if [ "$1" != "$USER_NAME" ]; then
-    echo "Usage: msf bennett <start|stop|clear|restart|status|logs|attach|tree> <project> <dev|prod>"
+    echo "Usage: msf bennett <start|restart|rebuild|stop|clear|build|status|logs|attach|tree> <project> <dev|prod>"
     exit 1
 fi
 
 if [ -z "$ACTION" ] || [ -z "$PROJECT" ] || [ -z "$ENV" ]; then
-    echo "Usage: msf bennett <start|stop|clear|restart|status|logs|attach|tree> <project> <dev|prod>"
+    echo "Usage: msf bennett <start|restart|rebuild|stop|clear|build|status|logs|attach|tree> <project> <dev|prod>"
     exit 1
 fi
+
+PROJECT_DIR="/home/msf_bennett/studio.dev/bennett studio"
+ENGINE_DIR="$PROJECT_DIR/engine"
+BINARY="$PROJECT_DIR/target/debug/bennett-engine"
 
 # Docker helper functions
 ask_docker() {
@@ -60,9 +64,8 @@ check_docker_required() {
     echo "   tmux new-session -s docker 'sudo dockerd'"
     echo ""
 
-    # Give user 15 seconds to start docker in another terminal
     echo "⏳ Waiting 15 seconds for Docker to start (Ctrl+C to cancel)..."
-    for i in 27 26 25 24 23 22 21 20 19 18 17 16 15 14 13 12 11 10 9 8 7 6 5 4 3 2 1; do
+    for i in 15 14 13 12 11 10 9 8 7 6 5 4 3 2 1; do
         if docker_is_running; then
             echo ""
             echo "✅ Docker detected! Proceeding..."
@@ -75,29 +78,6 @@ check_docker_required() {
     echo "❌ Docker still not running. Start it manually, then retry."
     echo ""
     return 1
-}
-
-start_docker() {
-    if docker_is_running; then
-        if ask_docker "Docker is already running. Restart?"; then
-            echo "🐳 Restarting Docker daemon..."
-            if tmux has-session -t docker 2>/dev/null; then
-                tmux kill-session -t docker 2>/dev/null
-                sleep 1
-            fi
-            sudo pkill -x dockerd 2>/dev/null
-            sleep 2
-            echo "🐳 Please start Docker manually: sudo dockerd"
-            echo "   (Cannot auto-start dockerd without passwordless sudo)"
-            return 1
-        else
-            echo "🐳 Docker left running."
-        fi
-    else
-        echo "🐳 Docker is not running."
-        echo "   Please start it first: sudo dockerd"
-        return 1
-    fi
 }
 
 stop_docker() {
@@ -127,26 +107,73 @@ clear_docker() {
     fi
 }
 
+# ============================================================================
+# Engine Build Helpers
+# ============================================================================
+
+build_engine() {
+    echo "🔨 Building Bennett Engine..."
+    echo "   Binary: $BINARY"
+    echo ""
+
+    # Kill any stale cargo processes that might hold the build lock
+    pkill -f "cargo.*bennett" 2>/dev/null || true
+    pkill -f "rustc.*bennett" 2>/dev/null || true
+    pkill -f "rust-lld" 2>/dev/null || true
+    sleep 2
+
+    cd "$ENGINE_DIR" || exit 1
+    if cargo build --bin bennett-engine 2>&1 | tee /tmp/bennett-engine-build.log; then
+        echo ""
+        echo "✅ Engine built successfully"
+        return 0
+    else
+        echo ""
+        echo "❌ Engine build failed!"
+        echo "   Check: cat /tmp/bennett-engine-build.log"
+        return 1
+    fi
+}
+
+# ============================================================================
+# Main Actions
+# ============================================================================
+
 case "$PROJECT" in
   oshocks)
-    # Delegate to existing oshocks controller
     ~/studio.dev/oshocks/scripts/oshocks-control.sh "$@"
     ;;
   bennett-studio)
     case "$ENV" in
       dev)
         case "$ACTION" in
+          # ------------------------------------------------------------------
+          # START: Fast start — build only if binary missing
+          # ------------------------------------------------------------------
           start)
             echo "=========================================="
             echo "  🚀 Starting Bennett Studio Dev Servers"
             echo "=========================================="
             echo ""
 
-            # Docker check
             if ! check_docker_required; then
                 exit 1
             fi
             echo ""
+
+            # Check if binary exists — build if missing
+            if [ ! -x "$BINARY" ]; then
+                echo "⚠️  Engine binary not found."
+                echo "   Running initial build (this takes ~10 min)..."
+                echo ""
+                if ! build_engine; then
+                    exit 1
+                fi
+                echo ""
+            else
+                echo "✅ Using pre-built engine: $BINARY"
+                echo ""
+            fi
 
             if tmux has-session -t bennett-studio-dev 2>/dev/null; then
               echo "⚠️  tmux session 'bennett-studio-dev' already exists!"
@@ -177,6 +204,103 @@ case "$PROJECT" in
             echo "  Servers survive terminal closes!"
             echo "=========================================="
             ;;
+
+          # ------------------------------------------------------------------
+          # RESTART: Stop + rebuild engine + start (keeps caches)
+          # ------------------------------------------------------------------
+          restart)
+            echo "=========================================="
+            echo "  🔄 Restarting Bennett Studio Dev Servers"
+            echo "=========================================="
+            echo ""
+
+            # Stop everything
+            if tmux has-session -t bennett-studio-dev 2>/dev/null; then
+              echo "📦 Stopping tmux session..."
+              tmux kill-session -t bennett-studio-dev
+            fi
+            echo "🔧 Stopping Engine..."
+            "$PROJECT_DIR/scripts/engine-control" stop 2>/dev/null || true
+            echo "🌐 Stopping Web..."
+            "$PROJECT_DIR/scripts/web-dev-control" stop 2>/dev/null || true
+            echo "🖥️  Stopping Desktop..."
+            "$PROJECT_DIR/scripts/desktop-dev-control" stop 2>/dev/null || true
+            echo ""
+
+            # Rebuild engine (does NOT run cargo clean — keeps dependency cache)
+            echo "🔨 Rebuilding engine..."
+            if ! build_engine; then
+                exit 1
+            fi
+            echo ""
+
+            # Start fresh
+            echo "🚀 Starting servers..."
+            "$0" bennett start bennett-studio dev
+            ;;
+
+          # ------------------------------------------------------------------
+          # REBUILD: Full clean rebuild — use when dependencies change
+          # ------------------------------------------------------------------
+          rebuild)
+            echo "=========================================="
+            echo "  🧱 Full Rebuild Bennett Studio Dev"
+            echo "=========================================="
+            echo ""
+
+            # Stop everything
+            if tmux has-session -t bennett-studio-dev 2>/dev/null; then
+              echo "📦 Stopping tmux session..."
+              tmux kill-session -t bennett-studio-dev
+            fi
+            "$PROJECT_DIR/scripts/engine-control" stop 2>/dev/null || true
+            "$PROJECT_DIR/scripts/web-dev-control" stop 2>/dev/null || true
+            "$PROJECT_DIR/scripts/desktop-dev-control" stop 2>/dev/null || true
+            echo ""
+
+            # Clean and rebuild
+            echo "🧹 Running cargo clean..."
+            cd "$PROJECT_DIR" || exit 1
+            cargo clean
+            echo ""
+
+            echo "🔨 Building engine from scratch..."
+            if ! build_engine; then
+                exit 1
+            fi
+            echo ""
+
+            # Start fresh
+            echo "🚀 Starting servers..."
+            "$0" bennett start bennett-studio dev
+            ;;
+
+          # ------------------------------------------------------------------
+          # BUILD: Compile engine only, don't start servers
+          # ------------------------------------------------------------------
+          build)
+            echo "=========================================="
+            echo "  🔨 Building Bennett Studio Engine"
+            echo "=========================================="
+            echo ""
+
+            if ! check_docker_required; then
+                exit 1
+            fi
+            echo ""
+
+            if ! build_engine; then
+                exit 1
+            fi
+            echo ""
+            echo "✅ Build complete. Start servers with:"
+            echo "   msf bennett start bennett-studio dev"
+            echo "=========================================="
+            ;;
+
+          # ------------------------------------------------------------------
+          # STOP
+          # ------------------------------------------------------------------
           stop)
             echo "=========================================="
             echo "  🛑 Stopping Bennett Studio Dev Servers"
@@ -189,18 +313,17 @@ case "$PROJECT" in
             fi
 
             echo "🔧 Stopping Engine..."
-            ~/studio.dev/bennett\ studio/scripts/engine-control stop 2>/dev/null || true
+            "$PROJECT_DIR/scripts/engine-control" stop 2>/dev/null || true
             echo ""
 
             echo "🌐 Stopping Web..."
-            ~/studio.dev/bennett\ studio/scripts/web-dev-control stop 2>/dev/null || true
+            "$PROJECT_DIR/scripts/web-dev-control" stop 2>/dev/null || true
             echo ""
 
             echo "🖥️  Stopping Desktop..."
-            ~/studio.dev/bennett\ studio/scripts/desktop-dev-control stop 2>/dev/null || true
+            "$PROJECT_DIR/scripts/desktop-dev-control" stop 2>/dev/null || true
             echo ""
 
-            # Docker prompt
             stop_docker
             echo ""
 
@@ -208,56 +331,64 @@ case "$PROJECT" in
             echo "  ✅ All servers stopped!"
             echo "=========================================="
             ;;
+
+          # ------------------------------------------------------------------
+          # CLEAR: Clear logs and caches (does NOT cargo clean anymore)
+          # ------------------------------------------------------------------
           clear)
             echo "=========================================="
             echo "  🧹 Clearing Bennett Studio Dev Caches"
             echo "=========================================="
             echo ""
 
-            # Docker prompt
             clear_docker
             echo ""
 
             echo "🧹 Clearing Engine..."
-            ~/studio.dev/bennett\ studio/scripts/engine-control clear 2>/dev/null || echo "Engine clear not available"
+            "$PROJECT_DIR/scripts/engine-control" clear 2>/dev/null || echo "Engine clear not available"
             echo ""
 
             echo "🧹 Clearing Web..."
-            ~/studio.dev/bennett\ studio/scripts/web-dev-control clear
+            "$PROJECT_DIR/scripts/web-dev-control" clear
             echo ""
 
             echo "🧹 Clearing Desktop..."
-            ~/studio.dev/bennett\ studio/scripts/desktop-dev-control clear
+            "$PROJECT_DIR/scripts/desktop-dev-control" clear
             echo ""
 
             echo "🧹 Clearing cargo build cache..."
-            cd ~/studio.dev/bennett\ studio || exit 1
+            cd "$PROJECT_DIR" || exit 1
             cargo clean 2>/dev/null || echo "Cargo clean not available"
             echo ""
 
             echo "=========================================="
             echo "  ✅ All caches cleared!"
+            echo "   Note: Next start will require full rebuild (~10 min)"
             echo "=========================================="
             ;;
-          restart)
-            "$0" bennett stop bennett-studio dev
-            sleep 1
-            "$0" bennett clear bennett-studio dev
-            sleep 1
-            "$0" bennett start bennett-studio dev
-            ;;
+
+          # ------------------------------------------------------------------
+          # STATUS, LOGS, ATTACH, TREE
+          # ------------------------------------------------------------------
           status)
             echo "=========================================="
             echo "  📊 Bennett Studio Dev Status"
             echo "=========================================="
             echo ""
             docker_status
-            ~/studio.dev/bennett\ studio/scripts/engine-control status
-            ~/studio.dev/bennett\ studio/scripts/web-dev-control status
-            ~/studio.dev/bennett\ studio/scripts/desktop-dev-control status
+            "$PROJECT_DIR/scripts/engine-control" status
+            "$PROJECT_DIR/scripts/web-dev-control" status
+            "$PROJECT_DIR/scripts/desktop-dev-control" status
+            echo ""
+            if [ -x "$BINARY" ]; then
+                echo "✅ Engine binary: $BINARY"
+            else
+                echo "⚠️  Engine binary not found — run: msf bennett build bennett-studio dev"
+            fi
             echo ""
             echo "=========================================="
             ;;
+
           logs)
             echo "=========================================="
             echo "  📜 Tailing Bennett Studio Dev Logs"
@@ -267,6 +398,7 @@ case "$PROJECT" in
             echo ""
             tail -f /tmp/bennett-engine.log /tmp/bennett-web.log /tmp/bennett-desktop.log /tmp/dockerd.log 2>/dev/null || echo "Some log files not found. Servers may not be running."
             ;;
+
           attach)
             if tmux has-session -t bennett-studio-dev 2>/dev/null; then
               echo "📎 Attaching to bennett-studio-dev tmux session..."
@@ -277,16 +409,18 @@ case "$PROJECT" in
               exit 1
             fi
             ;;
+
           tree)
             echo "=========================================="
             echo "  📁 Bennett Studio Project Tree"
             echo "=========================================="
             echo ""
-            cd ~/studio.dev/bennett\ studio || exit 1
+            cd "$PROJECT_DIR" || exit 1
             tree -L 5 -I 'node_modules|dist|build|target|vendor|.git|storage|*.sqlite'
             ;;
+
           *)
-            echo "Usage: msf bennett <start|stop|clear|restart|status|logs|attach|tree> bennett-studio dev"
+            echo "Usage: msf bennett <start|restart|rebuild|stop|clear|build|status|logs|attach|tree> bennett-studio dev"
             exit 1
             ;;
         esac

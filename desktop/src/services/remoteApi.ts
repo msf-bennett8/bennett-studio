@@ -115,6 +115,9 @@ class RemoteApiService {
       throw new Error('Invalid share URL');
     }
 
+    // Validate first — this triggers heartbeat self-healing if needed
+    await this.validateShare(url);
+
     const connection: RemoteConnection = {
       id: `conn-${Date.now()}`,
       code: parsed.code,

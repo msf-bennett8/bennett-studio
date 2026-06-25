@@ -423,6 +423,25 @@ impl ShareStore {
         }))
     }
 
+    /// Get all unique host_ids from active (non-revoked, non-expired) shares
+    pub async fn get_all_active_host_ids(&self) -> anyhow::Result<Vec<String>> {
+        let now = Utc::now().to_rfc3339();
+        
+        let rows = sqlx::query(
+            "SELECT DISTINCT host_id FROM shares WHERE revoked = 0 AND expires_at > ?"
+        )
+        .bind(&now)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let host_ids: Vec<String> = rows
+            .into_iter()
+            .map(|r| r.get::<String, _>("host_id"))
+            .collect();
+
+        Ok(host_ids)
+    }
+
     /// Cleanup stale heartbeats (> 7 days)
     pub async fn cleanup_stale_heartbeats(&self) -> anyhow::Result<u64> {
         let cutoff = (Utc::now() - Duration::days(7)).to_rfc3339();

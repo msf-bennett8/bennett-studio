@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { remoteApi } from '../services/remoteApi';
+import { useDatabaseStore } from './databaseStore';
 import type {
   RemoteConnection,
   RemoteQueryResult,
@@ -101,6 +102,25 @@ export const useRemoteConnectionStore = create<RemoteConnectionState>()(
             };
           });
 
+          // Sync to databaseStore so all pages see the new remote DB
+          const { selectDatabase } = useDatabaseStore.getState();
+          const remoteDb = {
+            id: connection.id,
+            name: `${connection.dbName || 'Remote Database'} ${connection.code}`,
+            type: (connection.dbType || 'postgres') as 'postgres' | 'mysql' | 'mariadb' | 'sqlite' | 'redis',
+            version: '',
+            status: 'running' as const,
+            port: 0,
+            size: '',
+            created_at: connection.connectedAt,
+            source: 'bennett' as any,
+            isRemote: true,
+            shareCode: connection.code,
+            remotePermission: connection.permission,
+            remoteHost: connection.baseUrl,
+          };
+          selectDatabase(remoteDb);
+
           // Fetch schema immediately
           get().refreshSchema();
         } catch (err) {
@@ -149,6 +169,29 @@ export const useRemoteConnectionStore = create<RemoteConnectionState>()(
         if (reconnectedActiveId) {
           set({ activeConnectionId: reconnectedActiveId });
           get().refreshSchema();
+
+          // Sync reconnected remote DB to databaseStore so all pages see it
+          const { connections } = get();
+          const activeConn = connections.find(c => c.id === reconnectedActiveId);
+          if (activeConn) {
+            const { selectDatabase } = useDatabaseStore.getState();
+            const remoteDb = {
+              id: activeConn.id,
+              name: `${activeConn.dbName || 'Remote Database'} ${activeConn.code}`,
+              type: (activeConn.dbType || 'postgres') as 'postgres' | 'mysql' | 'mariadb' | 'sqlite' | 'redis',
+              version: '',
+              status: 'running' as const,
+              port: 0,
+              size: '',
+              created_at: activeConn.connectedAt,
+              source: 'bennett' as any,
+              isRemote: true,
+              shareCode: activeConn.code,
+              remotePermission: activeConn.permission,
+              remoteHost: activeConn.baseUrl,
+            };
+            selectDatabase(remoteDb);
+          }
         }
       },
 

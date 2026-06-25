@@ -32,26 +32,37 @@ async fn main() {
         std::process::exit(1);
     }
 
-        // Start host heartbeat background task
+    // Start host heartbeat background task — beats for ALL active shares
     let heartbeat_store = state.share_store.clone();
-    let heartbeat_host_id = format!("host-{}", uuid::Uuid::new_v4().to_string().split('-').next().unwrap_or("unknown"));
     let heartbeat_ip = bennett_engine::utils::net::detect_lan_ip().unwrap_or_else(|| "127.0.0.1".to_string());
     let heartbeat_port = std::env::var("BENNETT_ENGINE_PORT")
         .ok()
         .and_then(|p| p.parse().ok())
         .unwrap_or(3001u16);
-    
+
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(30));
         loop {
             interval.tick().await;
-            if let Err(e) = heartbeat_store.record_heartbeat(
-                &heartbeat_host_id,
-                Some(heartbeat_ip.clone()),
-                Some(heartbeat_port),
-                env!("CARGO_PKG_VERSION"),
-            ).await {
-                tracing::warn!("Heartbeat failed: {}", e);
+            
+            // Get all active shares and send heartbeat for each unique host_id
+            // This ensures heartbeats match the host_id stored in share records
+            match heartbeat_store.get_all_active_host_ids().await {
+                Ok(host_ids) => {
+                    for host_id in host_ids {
+                        if let Err(e) = heartbeat_store.record_heartbeat(
+                            &host_id,
+                            Some(heartbeat_ip.clone()),
+                            Some(heartbeat_port),
+                            env!("CARGO_PKG_VERSION"),
+                        ).await {
+                            tracing::warn!("Heartbeat failed for {}: {}", host_id, e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to get active host IDs for heartbeat: {}", e);
+                }
             }
         }
     });

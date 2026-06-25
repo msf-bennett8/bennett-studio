@@ -6,6 +6,7 @@ import {
   Table2, Columns, TreePine, History, FileText, Share2
 } from 'lucide-react';
 import { useRemoteConnectionStore } from '../stores/remoteConnectionStore';
+import { useDatabaseStore } from '../stores/databaseStore';
 import type { AutocompleteSuggestion, TableSchema } from '@bennett/shared';
 
 export function RemoteQueryPage() {

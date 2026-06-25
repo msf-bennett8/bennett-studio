@@ -2,49 +2,101 @@
 
 PIDFILE="/tmp/bennett-engine.pid"
 LOGFILE="/tmp/bennett-engine.log"
+BUILD_LOG="/tmp/bennett-engine-build.log"
 ENGINE_DIR="/home/msf_bennett/studio.dev/bennett studio"
+BINARY="$ENGINE_DIR/target/debug/bennett-engine"
 
 start_engine() {
-    if [ -f "$PIDFILE" ] && kill -0 $(cat "$PIDFILE") 2>/dev/null; then
-        echo "🔧 Engine already running (PID: $(cat $PIDFILE))"
-        exit 0
+    # Check if already running
+    if [ -f "$PIDFILE" ]; then
+        local old_pid=$(cat "$PIDFILE")
+        if kill -0 "$old_pid" 2>/dev/null; then
+            echo "🔧 Engine already running (PID: $old_pid)"
+            exit 0
+        fi
     fi
-    # Dynamic port: try 3001-3010
-    PORT=3001
+
+    # Find free port
+    local PORT=3001
     for p in 3001 3002 3003 3004 3005 3006 3007 3008 3009 3010; do
         if ! nc -z localhost $p 2>/dev/null; then
             PORT=$p
             break
         fi
     done
-    
-    echo "🔧 Starting Bennett Engine on http://0.0.0.0:${PORT}..."
-    cd "$ENGINE_DIR" || exit 1
+
     export BENNETT_ENGINE_PORT=$PORT
-    echo $PORT > /tmp/bennett-engine.port
-    nohup cargo run -p bennett-engine > "$LOGFILE" 2>&1 &
-    echo $! > "$PIDFILE"
-    sleep 5
-    echo "🔧 Engine started (PID: $(cat $PIDFILE))"
+    echo "$PORT" > /tmp/bennett-engine.port
+    cd "$ENGINE_DIR" || exit 1
+
+    # Build first if binary doesn't exist
+    if [ ! -x "$BINARY" ]; then
+        echo "🔨 Building engine first (this takes ~10 min)..."
+        echo "   Build log: $BUILD_LOG"
+        
+        # Kill any stale cargo processes holding the lock
+        pkill -f "cargo.*bennett" 2>/dev/null || true
+        pkill -f "rustc.*bennett" 2>/dev/null || true
+        pkill -f "rust-lld" 2>/dev/null || true
+        sleep 2
+        
+        if ! cargo build --bin bennett-engine 2>&1 | tee "$BUILD_LOG"; then
+            echo "❌ BUILD FAILED — check $BUILD_LOG"
+            exit 1
+        fi
+        echo "✅ Build complete"
+    fi
+
+    # Start the pre-built binary directly (NOT via cargo run)
+    echo "🔧 Starting Bennett Engine on http://0.0.0.0:${PORT}..."
+    nohup "$BINARY" > "$LOGFILE" 2>&1 &
+    local ENGINE_PID=$!
+    echo "$ENGINE_PID" > "$PIDFILE"
+
+    # Wait for health check with progress
+    echo "⏳ Waiting for engine to be ready..."
+    for i in {1..30}; do
+        if curl -s "http://localhost:$PORT/api/health" > /dev/null 2>&1; then
+            echo "✅ Engine ready (PID: $ENGINE_PID, Port: $PORT)"
+            return 0
+        fi
+        
+        if ! kill -0 "$ENGINE_PID" 2>/dev/null; then
+            echo "❌ Engine crashed! Check: tail -30 $LOGFILE"
+            rm -f "$PIDFILE"
+            exit 1
+        fi
+        
+        if [ $((i % 5)) -eq 0 ]; then
+            echo "   ... waiting ($i seconds)"
+        fi
+        sleep 1
+    done
+    
+    echo "⚠️  Engine started but health check not responding yet"
+    echo "   Check: tail -f $LOGFILE"
 }
 
 stop_engine() {
-    if [ -f "$PIDFILE" ] && kill -0 $(cat "$PIDFILE") 2>/dev/null; then
-        echo "🔧 Stopping Engine (PID: $(cat $PIDFILE))..."
-        kill $(cat "$PIDFILE") 2>/dev/null
-        sleep 1
-        kill -0 $(cat "$PIDFILE") 2>/dev/null && kill -9 $(cat "$PIDFILE") 2>/dev/null
-        rm -f "$PIDFILE"
-        echo "🔧 Engine stopped"
-    else
-        echo "🔧 Engine not running"
+    if [ -f "$PIDFILE" ]; then
+        local pid=$(cat "$PIDFILE")
+        if kill -0 "$pid" 2>/dev/null; then
+            echo "🔧 Stopping Engine (PID: $pid)..."
+            kill "$pid" 2>/dev/null
+            sleep 1
+            kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null
+        fi
         rm -f "$PIDFILE"
     fi
+    # Also kill any orphaned processes
+    pkill -f "bennett-engine" 2>/dev/null || true
+    pkill -f "cargo.*bennett" 2>/dev/null || true
+    echo "🔧 Engine stopped"
 }
 
 status_engine() {
     if [ -f "$PIDFILE" ] && kill -0 $(cat "$PIDFILE") 2>/dev/null; then
-        echo "🔧 Engine: RUNNING (PID: $(cat $PIDFILE), Port: ${BENNETT_ENGINE_PORT:-3001})"
+        echo "🔧 Engine: RUNNING (PID: $(cat $PIDFILE), Port: $(cat /tmp/bennett-engine.port 2>/dev/null || echo 3001))"
     else
         echo "🔧 Engine: STOPPED"
         rm -f "$PIDFILE" 2>/dev/null
@@ -52,15 +104,15 @@ status_engine() {
 }
 
 clear_engine() {
-    rm -f "$LOGFILE"
-    echo "🔧 Engine logs cleared"
+    rm -f "$LOGFILE" "$BUILD_LOG"
+    echo "🔧 Logs cleared"
 }
 
 logs_engine() {
     if [ -f "$LOGFILE" ]; then
         tail -f "$LOGFILE"
     else
-        echo "🔧 No log file. Start engine first."
+        echo "🔧 No log file"
     fi
 }
 
