@@ -6,6 +6,7 @@ import {
   Table2, Columns, TreePine, History, FileText, Share2
 } from 'lucide-react';
 import { useRemoteConnectionStore } from '../stores/remoteConnectionStore';
+import { useDatabaseStore } from '../stores/databaseStore';
 import type { AutocompleteSuggestion, TableSchema } from '@bennett/shared';
 
 export function RemoteQueryPage() {
@@ -43,6 +44,29 @@ export function RemoteQueryPage() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const activeConnection = connections.find(c => c.id === activeConnectionId);
+
+  // Sync activeConnection with databaseStore so other pages see the same DB
+  useEffect(() => {
+    if (activeConnection) {
+      const { selectDatabase } = useDatabaseStore.getState();
+      const remoteDb = {
+        id: activeConnection.id,
+        name: `${activeConnection.dbName || 'Remote Database'} ${activeConnection.code}`,
+        type: (activeConnection.dbType || 'postgres') as 'postgres' | 'mysql' | 'mariadb' | 'sqlite' | 'redis',
+        version: '',
+        status: 'running' as const,
+        port: 0,
+        size: '',
+        created_at: activeConnection.connectedAt,
+        source: 'bennett' as any,
+        isRemote: true,
+        shareCode: activeConnection.code,
+        remotePermission: activeConnection.permission,
+        remoteHost: activeConnection.baseUrl,
+      };
+      selectDatabase(remoteDb);
+    }
+  }, [activeConnection]);
 
   // Auto-refresh schema periodically
   useEffect(() => {

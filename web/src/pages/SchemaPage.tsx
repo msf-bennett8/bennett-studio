@@ -16,20 +16,26 @@ interface TableInfo {
 }
 
 export function SchemaPage() {
-  const { databases, getRemoteDatabases } = useDatabaseStore();
+  const { databases, selectedDatabase, selectDatabase, getRemoteDatabases } = useDatabaseStore();
   const { connections: remoteConnections } = useRemoteConnectionStore();
   const runningDbs = [...databases.filter(d => d.status === 'running'), ...getRemoteDatabases()];
-  const [selectedDb, setSelectedDb] = useState<string>('');
+
+  // Sync with shared store — no local state for DB selection
+  const selectedDb = selectedDatabase?.id || '';
+  const setSelectedDb = (id: string) => {
+    const db = runningDbs.find(d => d.id === id);
+    selectDatabase(db || null);
+  };
   const [tables, setTables] = useState<TableInfo[]>([]);
   const [selectedTable, setSelectedTable] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (runningDbs.length > 0 && !selectedDb) {
-      setSelectedDb(runningDbs[0].id);
+    if (runningDbs.length > 0 && !selectedDatabase) {
+      selectDatabase(runningDbs[0]);
     }
-  }, [runningDbs]);
+  }, [runningDbs, selectedDatabase]);
 
   useEffect(() => {
     if (!selectedDb) return;

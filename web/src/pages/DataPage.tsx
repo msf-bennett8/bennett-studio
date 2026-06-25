@@ -97,7 +97,7 @@ export function DataPage() {
   useEffect(() => {
     if (!selectedDatabase && runningDbs.length > 0) {
       selectDatabase(runningDbs[0]);
-      selectTable(null); // Clear table when auto-selecting DB
+      selectTable(null);
     }
   }, [runningDbs, selectedDatabase]);
 

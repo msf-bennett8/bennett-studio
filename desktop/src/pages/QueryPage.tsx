@@ -10,10 +10,16 @@ interface QueryResult {
 }
 
 export function QueryPage() {
-  const { databases, getRemoteDatabases } = useDatabaseStore();
+  const { databases, selectedDatabase, selectDatabase, getRemoteDatabases } = useDatabaseStore();
   const { connections: remoteConnections } = useRemoteConnectionStore();
   const runningDbs = [...databases.filter(d => d.status === 'running'), ...getRemoteDatabases()];
-  const [selectedDb, setSelectedDb] = useState<string>('');
+
+  // Sync with shared store — no local state for DB selection
+  const selectedDb = selectedDatabase?.id || '';
+  const setSelectedDb = (id: string) => {
+    const db = runningDbs.find(d => d.id === id);
+    selectDatabase(db || null);
+  };
   const [query, setQuery] = useState('SELECT * FROM users LIMIT 10;');
   const [results, setResults] = useState<QueryResult | null>(null);
   const [isExecuting, setIsExecuting] = useState(false);
@@ -23,10 +29,10 @@ export function QueryPage() {
   const [queryHistory, setQueryHistory] = useState<string[]>([]);
 
   useEffect(() => {
-    if (runningDbs.length > 0 && !selectedDb) {
-      setSelectedDb(runningDbs[0].id);
+    if (runningDbs.length > 0 && !selectedDatabase) {
+      selectDatabase(runningDbs[0]);
     }
-  }, [runningDbs]);
+  }, [runningDbs, selectedDatabase]);
 
   const handleExecute = async () => {
     if (!selectedDb || !query.trim()) return;

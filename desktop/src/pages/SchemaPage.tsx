@@ -7,10 +7,16 @@ import { remoteApi } from '../services/remoteApi';
 import type { ColumnSchema } from '../services/dataService';
 
 export function SchemaPage() {
-  const { databases, getRemoteDatabases } = useDatabaseStore();
+  const { databases, selectedDatabase, selectDatabase, getRemoteDatabases } = useDatabaseStore();
   const { connections: remoteConnections } = useRemoteConnectionStore();
   const runningDbs = [...databases.filter(d => d.status === 'running'), ...getRemoteDatabases()];
-  const [selectedDb, setSelectedDb] = useState<string>('');
+
+  // Sync with shared store — no local state for DB selection
+  const selectedDb = selectedDatabase?.id || '';
+  const setSelectedDb = (id: string) => {
+    const db = runningDbs.find(d => d.id === id);
+    selectDatabase(db || null);
+  };
   const [selectedTable, setSelectedTable] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState<'columns' | 'indexes' | 'constraints' | 'triggers' | 'relations'>('columns');
@@ -24,10 +30,10 @@ export function SchemaPage() {
   const [columnStats, setColumnStats] = useState(null);
 
   useEffect(() => {
-    if (runningDbs.length > 0 && !selectedDb) {
-      setSelectedDb(runningDbs[0].id);
+    if (runningDbs.length > 0 && !selectedDatabase) {
+      selectDatabase(runningDbs[0]);
     }
-  }, [runningDbs]);
+  }, [runningDbs, selectedDatabase]);
 
   useEffect(() => {
     if (!selectedDb) return;
