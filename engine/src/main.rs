@@ -32,6 +32,30 @@ async fn main() {
         std::process::exit(1);
     }
 
+        // Start host heartbeat background task
+    let heartbeat_store = state.share_store.clone();
+    let heartbeat_host_id = format!("host-{}", uuid::Uuid::new_v4().to_string().split('-').next().unwrap_or("unknown"));
+    let heartbeat_ip = bennett_engine::utils::net::detect_lan_ip().unwrap_or_else(|| "127.0.0.1".to_string());
+    let heartbeat_port = std::env::var("BENNETT_ENGINE_PORT")
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(3001u16);
+    
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(30));
+        loop {
+            interval.tick().await;
+            if let Err(e) = heartbeat_store.record_heartbeat(
+                &heartbeat_host_id,
+                Some(heartbeat_ip.clone()),
+                Some(heartbeat_port),
+                env!("CARGO_PKG_VERSION"),
+            ).await {
+                tracing::warn!("Heartbeat failed: {}", e);
+            }
+        }
+    });
+
     // Discover existing Bennett containers on startup
     info!("Scanning for existing Bennett database containers...");
     match state.docker.list_bennett_containers().await {
@@ -195,5 +219,34 @@ async fn main() {
     
     if let Err(e) = server.await {
         tracing::error!("Server error: {}", e);
+    }
+
+    // Resurrect connection pools for databases with active shares
+    info!("Resurrecting connection pools for active shares...");
+    {
+        let db_list = {
+            let db = state.databases.lock().unwrap();
+            db.clone()
+        };
+        
+        for instance in &db_list {
+            match state.share_store.list_shares_by_db(&instance.id).await {
+                Ok(shares) if !shares.is_empty() => {
+                    info!("Database {} has {} active share(s), pre-connecting...", instance.name, shares.len());
+                    let mut conn = state.connections.lock().await;
+                    if let Err(e) = conn.connect(instance).await {
+                        tracing::warn!("Failed to resurrect connection for {}: {}", instance.name, e);
+                    } else {
+                        info!("Connection pool resurrected for {}", instance.name);
+                    }
+                }
+                Ok(_) => {
+                    // No active shares, skip
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to list shares for {}: {}", instance.id, e);
+                }
+            }
+        }
     }
 }

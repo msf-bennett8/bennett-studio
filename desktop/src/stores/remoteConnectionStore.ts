@@ -89,12 +89,17 @@ export const useRemoteConnectionStore = create<RemoteConnectionState>()(
           const connection = await remoteApi.connect(url);
           // Store the original share URL for reconnection
           connection.shareUrl = url;
-          set(state => ({
-            connections: [...state.connections, connection],
-            activeConnectionId: connection.id,
-            isConnecting: false,
-            isJoinModalOpen: false,
-          }));
+
+          // Deduplicate: replace existing connection with same share code
+          set(state => {
+            const filtered = state.connections.filter(c => c.code !== connection.code);
+            return {
+              connections: [...filtered, connection],
+              activeConnectionId: connection.id,
+              isConnecting: false,
+              isJoinModalOpen: false,
+            };
+          });
 
           // Fetch schema immediately
           get().refreshSchema();
@@ -107,26 +112,42 @@ export const useRemoteConnectionStore = create<RemoteConnectionState>()(
       },
 
       reconnectAll: async () => {
-        const { connections } = get();
+        const { connections, activeConnectionId } = get();
         const disconnected = connections.filter(c => c.status === 'disconnected' && c.shareUrl);
-        if (disconnected.length === 0) return;
+
+        if (disconnected.length === 0) {
+          return;
+        }
+
+        let reconnectedActiveId: string | null = activeConnectionId;
 
         for (const conn of disconnected) {
           try {
             const fresh = await remoteApi.connect(conn.shareUrl);
             fresh.shareUrl = conn.shareUrl;
             fresh.id = conn.id; // Preserve original ID
-            set(state => ({
-              connections: state.connections.map(c => c.id === conn.id ? fresh : c),
-            }));
-          } catch {
+
+            // Track if this was the active connection
+            if (conn.id === activeConnectionId) {
+              reconnectedActiveId = fresh.id;
+            }
+
+            // Deduplicate by code during reconnect
+            set(state => {
+              const filtered = state.connections.filter(c => c.code !== fresh.code || c.id === conn.id);
+              return {
+                connections: filtered.map(c => c.id === conn.id ? fresh : c),
+              };
+            });
+          } catch (err) {
             // Keep disconnected, will retry next time
+            console.warn(`[reconnectAll] Failed to reconnect ${conn.code}:`, err);
           }
         }
 
-        // Restore active connection if we have one
-        const { activeConnectionId } = get();
-        if (activeConnectionId) {
+        // Restore active connection ID if it was reconnected
+        if (reconnectedActiveId) {
+          set({ activeConnectionId: reconnectedActiveId });
           get().refreshSchema();
         }
       },
@@ -251,10 +272,40 @@ export const useRemoteConnectionStore = create<RemoteConnectionState>()(
       name: 'bennett-remote-connections',
       partialize: (state) => ({
         connections: state.connections.map(c => ({
-          ...c,
+          id: c.id,
+          code: c.code,
+          token: c.token,
+          baseUrl: c.baseUrl,
+          dbId: c.dbId,
+          dbName: c.dbName,
+          dbType: c.dbType,
+          permission: c.permission,
+          tables: c.tables,
+          connectedAt: c.connectedAt,
+          lastActivity: c.lastActivity,
+          shareUrl: c.shareUrl,
           status: 'disconnected' as const, // Reset status on reload
         })),
+        activeConnectionId: state.activeConnectionId,
       }),
+      
+      // Auto-migrate: deduplicate connections by share code on load
+      version: 1,
+      migrate: (persistedState: any, version) => {
+        if (version === 0 && persistedState?.connections) {
+          // Deduplicate by code, keep the most recent (last in array)
+          const seen = new Set<string>();
+          const deduped: any[] = [];
+          for (const conn of persistedState.connections) {
+            if (!seen.has(conn.code)) {
+              seen.add(conn.code);
+              deduped.push(conn);
+            }
+          }
+          return { ...persistedState, connections: deduped };
+        }
+        return persistedState as any;
+      },
     }
   )
 );

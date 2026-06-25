@@ -289,6 +289,14 @@ pub async fn get_share_schema(
         )));
     }
 
+    // Check host heartbeat
+    let host_alive = state.share_store.is_host_alive(&record.host_id).await.unwrap_or(false);
+    if !host_alive {
+        return Ok(Json(crate::models::database::ApiResponse::error(
+            "Host is currently offline. Please try again later.".to_string()
+        )));
+    }
+
     // Get database instance
     let instance = {
         let db = state.databases.lock().unwrap();
@@ -471,9 +479,26 @@ pub async fn validate_share(
     let tables: Vec<String> = serde_json::from_str(&record.tables)
         .unwrap_or_else(|_| vec!["*".to_string()]);
     
-    info!("Validated share {} for guest", code);
+    // Check host heartbeat
+    let host_alive = state.share_store.is_host_alive(&record.host_id).await.unwrap_or(false);
     
-    Ok(Json(crate::models::database::ApiResponse::success(ValidateShareResponse {
+    if !host_alive {
+        return Ok(Json(crate::models::database::ApiResponse::error(
+            "Host is currently offline. Please try again later.".to_string()
+        )));
+    }
+
+        info!("Validated share {} for guest (host alive)", code);
+
+        Ok(Json(crate::models::database::ApiResponse::success(ValidateShareResponse {
+            valid: true,
+            code: code.clone(),
+            db_id: record.db_id,
+            permission: record.permission,
+            tables,
+            expires_at: record.expires_at,
+            host_online: true,
+        })))
         valid: true,
         code: code.clone(),
         db_id: record.db_id,

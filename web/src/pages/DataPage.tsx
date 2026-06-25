@@ -43,7 +43,7 @@ export function DataPage() {
       .filter(c => c.status === 'connected')
       .map(c => ({
         id: c.id,
-        name: `${c.dbName || c.code} (Remote)`,
+        name: `${c.dbName || 'Remote Database'} ${c.code}`,
         type: (c.dbType && c.dbType !== 'unknown' ? c.dbType : 'mysql') as 'postgres' | 'mysql' | 'mariadb' | 'sqlite' | 'redis',
         version: '',
         status: 'running' as const,
@@ -93,11 +93,22 @@ export function DataPage() {
     return `${q}${name}${q}`;
   }, [selectedDatabase]);
 
-  // Load tables when DB changes
+  // Load tables when DB changes — auto-select first available if none selected
   useEffect(() => {
     if (!selectedDatabase && runningDbs.length > 0) {
       selectDatabase(runningDbs[0]);
       selectTable(null); // Clear table when auto-selecting DB
+    }
+  }, [runningDbs, selectedDatabase]);
+
+  // Restore selectedDatabase from persist if it's a remote that was reconnected
+  useEffect(() => {
+    if (selectedDatabase?.isRemote && runningDbs.length > 0) {
+      const restored = runningDbs.find(d => d.id === selectedDatabase.id);
+      if (!restored) {
+        // The persisted remote DB is no longer connected, clear it
+        selectDatabase(null);
+      }
     }
   }, [runningDbs, selectedDatabase]);
 

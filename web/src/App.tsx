@@ -16,7 +16,6 @@ import './index.css';
 
 function App() {
   const { theme, colors } = useThemeStore();
-  const { reconnectAll } = useRemoteConnectionStore();
 
   useEffect(() => {
     const root = document.documentElement;
@@ -28,8 +27,10 @@ function App() {
 
   // Reconnect to persisted remote shares on app load
   useEffect(() => {
+    // Use getState() to avoid dependency issues with zustand actions
+    const { reconnectAll } = useRemoteConnectionStore.getState();
     reconnectAll();
-  }, [reconnectAll]);
+  }, []);
 
   return (
     <BrowserRouter>

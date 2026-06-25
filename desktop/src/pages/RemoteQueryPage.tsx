@@ -285,7 +285,7 @@ export function RemoteQueryPage() {
             >
               {connections.map(c => (
                 <option key={c.id} value={c.id}>
-                  {c.dbName} ({c.code.substring(0, 6)}...) — {c.permission === 'ro' ? 'RO' : 'RW'}
+                  {c.dbName || 'Remote Database'} {c.code} — {c.permission === 'ro' ? 'Read-only' : 'Read-write'}
                 </option>
               ))}
             </select>

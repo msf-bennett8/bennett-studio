@@ -136,6 +136,14 @@ impl ShareStore {
             );
             
             CREATE INDEX IF NOT EXISTS idx_revoked_jti ON revoked_tokens(jti);
+
+            CREATE TABLE IF NOT EXISTS host_heartbeats (
+                host_id TEXT PRIMARY KEY,
+                last_beat TEXT NOT NULL,
+                ip_address TEXT,
+                port INTEGER,
+                version TEXT
+            );
             "#
         )
         .execute(pool)
@@ -361,6 +369,71 @@ impl ShareStore {
             Ok(false)
         }
     }
+
+        /// Record host heartbeat
+    pub async fn record_heartbeat(&self, host_id: &str, ip: Option<String>, port: Option<u16>, version: &str) -> anyhow::Result<()> {
+        sqlx::query(
+            "INSERT INTO host_heartbeats (host_id, last_beat, ip_address, port, version)
+             VALUES (?, ?, ?, ?, ?)
+             ON CONFLICT(host_id) DO UPDATE SET
+             last_beat = excluded.last_beat,
+             ip_address = excluded.ip_address,
+             port = excluded.port,
+             version = excluded.version"
+        )
+        .bind(host_id)
+        .bind(Utc::now().to_rfc3339())
+        .bind(ip)
+        .bind(port.map(|p| p as i32))
+        .bind(version)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    /// Check if host is alive (heartbeat within last 90 seconds)
+    pub async fn is_host_alive(&self, host_id: &str) -> anyhow::Result<bool> {
+        let cutoff = (Utc::now() - Duration::seconds(90)).to_rfc3339();
+        
+        let row = sqlx::query(
+            "SELECT 1 FROM host_heartbeats WHERE host_id = ? AND last_beat > ?"
+        )
+        .bind(host_id)
+        .bind(&cutoff)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.is_some())
+    }
+
+    /// Get host info
+    pub async fn get_host_info(&self, host_id: &str) -> anyhow::Result<Option<(String, Option<u16>)>> {
+        let row = sqlx::query(
+            "SELECT ip_address, port FROM host_heartbeats WHERE host_id = ?"
+        )
+        .bind(host_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.map(|r| {
+            let ip: String = r.get("ip_address");
+            let port: Option<i32> = r.get("port");
+            (ip, port.map(|p| p as u16))
+        }))
+    }
+
+    /// Cleanup stale heartbeats (> 7 days)
+    pub async fn cleanup_stale_heartbeats(&self) -> anyhow::Result<u64> {
+        let cutoff = (Utc::now() - Duration::days(7)).to_rfc3339();
+        
+        let result = sqlx::query("DELETE FROM host_heartbeats WHERE last_beat < ?")
+            .bind(&cutoff)
+            .execute(&self.pool)
+            .await?;
+
+        Ok(result.rows_affected())
+    }
     
     /// Hard delete a share from the database (permanent removal)
     pub async fn hard_delete_share(&self, code: &str) -> anyhow::Result<bool> {
@@ -415,6 +488,9 @@ impl ShareStore {
             .execute(&self.pool)
             .await?;
         
+        // Cleanup stale heartbeats
+        let _ = self.cleanup_stale_heartbeats().await;
+
         if expired.rows_affected() > 0 || stale.rows_affected() > 0 || old.rows_affected() > 0 {
             info!("Cleaned up {} expired shares, {} stale sessions, {} old tokens", 
                 expired.rows_affected(), stale.rows_affected(), old.rows_affected());

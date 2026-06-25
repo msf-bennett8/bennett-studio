@@ -87,7 +87,12 @@ class RemoteApiService {
 
     const result = await response.json();
     if (!result.success) {
-      throw new Error(result.error || 'Share validation failed');
+      const errorMsg = result.error || 'Share validation failed';
+      // Check for host offline — suggest retry
+      if (errorMsg.includes('Host is currently offline')) {
+        throw new Error('Host is offline. The owner may have restarted their computer. Please ask them to reopen Bennett Studio, or retry in a moment.');
+      }
+      throw new Error(errorMsg);
     }
 
     return {

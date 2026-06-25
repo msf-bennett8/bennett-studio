@@ -52,7 +52,11 @@ interface DatabaseState {
 
 }
 
-export const useDatabaseStore = create<DatabaseState>((set, get) => ({
+import { persist } from 'zustand/middleware';
+
+export const useDatabaseStore = create<DatabaseState>()(
+  persist(
+    (set, get) => ({
   databases: [],
   localDatabases: [],
   loading: false,
@@ -82,7 +86,7 @@ export const useDatabaseStore = create<DatabaseState>((set, get) => ({
       .filter(c => c.status === 'connected')
       .map(c => ({
         id: c.id,
-        name: `${c.dbName || c.code} (Remote)`,
+        name: `${c.dbName || 'Remote Database'} ${c.code}`,
         type: (c.dbType || 'postgres') as 'postgres' | 'mysql' | 'mariadb' | 'sqlite' | 'redis',
         version: '',
         status: 'running' as const,
@@ -289,6 +293,15 @@ export const useDatabaseStore = create<DatabaseState>((set, get) => ({
     }
   },
 
-  clearError: () => set({ error: null }),
-  setError: (msg) => set({ error: msg }),
-}));
+      clearError: () => set({ error: null }),
+      setError: (msg) => set({ error: msg }),
+    }),
+    {
+      name: 'bennett-database-store',
+      partialize: (state) => ({
+        selectedDatabase: state.selectedDatabase,
+        selectedTable: state.selectedTable,
+      }),
+    }
+  )
+);
