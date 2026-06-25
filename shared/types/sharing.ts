@@ -91,6 +91,8 @@ export interface RemoteConnection {
   lastActivity: string;
   status: 'connecting' | 'connected' | 'error' | 'disconnected';
   error?: string;
+  /** Original share URL for reconnection on refresh */
+  shareUrl: string;
 }
 
 export interface RemoteSchemaCache {

@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { useThemeStore } from './stores/themeStore';
+import { useRemoteConnectionStore } from './stores/remoteConnectionStore';
 import { Layout } from './components/layout/Layout';
 import { HomePage } from './pages/HomePage';
 import { DatabasePage } from './pages/DatabasePage';
@@ -15,6 +16,7 @@ import './index.css';
 
 function App() {
   const { theme, colors } = useThemeStore();
+  const { reconnectAll } = useRemoteConnectionStore();
 
   useEffect(() => {
     const root = document.documentElement;
@@ -23,6 +25,11 @@ function App() {
     });
     root.setAttribute('data-theme', theme);
   }, [theme, colors]);
+
+  // Reconnect to persisted remote shares on app load
+  useEffect(() => {
+    reconnectAll();
+  }, [reconnectAll]);
 
   return (
     <BrowserRouter>

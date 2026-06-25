@@ -56,6 +56,7 @@ interface RemoteConnectionState {
   // Export
   exportResults: (format: 'csv' | 'json') => Promise<string>;
   
+  reconnectAll: () => Promise<void>;
   clearError: () => void;
 }
 
@@ -86,13 +87,15 @@ export const useRemoteConnectionStore = create<RemoteConnectionState>()(
         set({ isConnecting: true, connectionError: null });
         try {
           const connection = await remoteApi.connect(url);
+          // Store the original share URL for reconnection
+          connection.shareUrl = url;
           set(state => ({
             connections: [...state.connections, connection],
             activeConnectionId: connection.id,
             isConnecting: false,
             isJoinModalOpen: false,
           }));
-          
+
           // Fetch schema immediately
           get().refreshSchema();
         } catch (err) {
@@ -100,6 +103,31 @@ export const useRemoteConnectionStore = create<RemoteConnectionState>()(
             isConnecting: false,
             connectionError: err instanceof Error ? err.message : 'Connection failed',
           });
+        }
+      },
+
+      reconnectAll: async () => {
+        const { connections } = get();
+        const disconnected = connections.filter(c => c.status === 'disconnected' && c.shareUrl);
+        if (disconnected.length === 0) return;
+
+        for (const conn of disconnected) {
+          try {
+            const fresh = await remoteApi.connect(conn.shareUrl);
+            fresh.shareUrl = conn.shareUrl;
+            fresh.id = conn.id; // Preserve original ID
+            set(state => ({
+              connections: state.connections.map(c => c.id === conn.id ? fresh : c),
+            }));
+          } catch {
+            // Keep disconnected, will retry next time
+          }
+        }
+
+        // Restore active connection if we have one
+        const { activeConnectionId } = get();
+        if (activeConnectionId) {
+          get().refreshSchema();
         }
       },
 
@@ -221,7 +249,7 @@ export const useRemoteConnectionStore = create<RemoteConnectionState>()(
     }),
     {
       name: 'bennett-remote-connections',
-      partialize: (state) => ({ 
+      partialize: (state) => ({
         connections: state.connections.map(c => ({
           ...c,
           status: 'disconnected' as const, // Reset status on reload
