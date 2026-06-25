@@ -221,7 +221,7 @@ pub async fn get_share_schema(
     Path(code): Path<String>,
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
-) -> Result<Json<crate::models::database::ApiResponse<Vec<crate::control_plane::connection::manager::TableInfo>>>, StatusCode> {
+) -> Result<Json<crate::models::database::ApiResponse<serde_json::Value>>, StatusCode> {
     // Extract token from header
     let token = headers
         .get("x-share-token")
@@ -481,24 +481,16 @@ pub async fn validate_share(
     
     // Check host heartbeat
     let host_alive = state.share_store.is_host_alive(&record.host_id).await.unwrap_or(false);
-    
+
     if !host_alive {
         return Ok(Json(crate::models::database::ApiResponse::error(
             "Host is currently offline. Please try again later.".to_string()
         )));
     }
 
-        info!("Validated share {} for guest (host alive)", code);
+    info!("Validated share {} for guest (host alive)", code);
 
-        Ok(Json(crate::models::database::ApiResponse::success(ValidateShareResponse {
-            valid: true,
-            code: code.clone(),
-            db_id: record.db_id,
-            permission: record.permission,
-            tables,
-            expires_at: record.expires_at,
-            host_online: true,
-        })))
+    Ok(Json(crate::models::database::ApiResponse::success(ValidateShareResponse {
         valid: true,
         code: code.clone(),
         db_id: record.db_id,
