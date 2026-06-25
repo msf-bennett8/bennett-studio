@@ -144,11 +144,12 @@ class RemoteApiService {
         throw new Error(schemaData.error || 'Failed to fetch schema');
       }
 
-      const schema = schemaData.data;
+      const data = schemaData.data;
+      const schema = Array.isArray(data) ? data : (data.tables || []);
 
       connection.dbId = parsed.code;
-      connection.dbName = 'Remote Database';
-      connection.dbType = 'unknown';
+      connection.dbName = data.databaseName || 'Remote Database';
+      connection.dbType = data.databaseType || 'unknown';
       connection.tables = schema.map((t: any) => t.name);
       connection.status = 'connected';
       connection.lastActivity = new Date().toISOString();
@@ -217,10 +218,10 @@ class RemoteApiService {
    */
   async executeQuery(connection: RemoteConnection, sql: string): Promise<RemoteQueryResult> {
     const start = performance.now();
-    
+
     const client = this.getClient(connection);
     const response = await client.query(sql);
-    
+
     const executionTimeMs = Math.round(performance.now() - start);
     
     // Record in history
@@ -372,26 +373,39 @@ class RemoteApiService {
     const limit = options.limit || 50;
     const offset = options.offset || 0;
 
-    let sql = `SELECT * FROM "${table}"`;
+    // Only quote identifiers that need it (reserved words, special chars, spaces)
+    // MySQL/MariaDB use backticks, PostgreSQL uses double quotes
+    const needsQuote = (name: string) => 
+      /[^a-zA-Z0-9_]/.test(name) || 
+      /^\d/.test(name) ||
+      ['select','from','where','order','group','table','database','index','key','primary','foreign','references','constraint','default','auto_increment','null','not','and','or','insert','update','delete','create','drop','alter','limit','offset'].includes(name.toLowerCase());
+    
+    const quoteChar = connection.dbType === 'mysql' || connection.dbType === 'mariadb' ? '`' : '"';
+    const q = (name: string) => needsQuote(name) ? `${quoteChar}${name}${quoteChar}` : name;
+    
+    let sql = `SELECT * FROM ${q(table)}`;
     if (options.filter) {
       sql += ` WHERE ${options.filter}`;
     }
     if (options.order_by) {
-      sql += ` ORDER BY "${options.order_by}" ${options.order_dir || 'ASC'}`;
+      sql += ` ORDER BY ${q(options.order_by)} ${options.order_dir || 'ASC'}`;
     }
     sql += ` LIMIT ${limit} OFFSET ${offset}`;
 
     const result = await this.executeQuery(connection, sql);
+    if (result.error) {
+      throw new Error(result.error);
+    }
 
     // Also get total count
-    const countSql = `SELECT COUNT(*) FROM "${table}"${options.filter ? ` WHERE ${options.filter}` : ''}`;
+    const countSql = `SELECT COUNT(*) FROM ${q(table)}${options.filter ? ` WHERE ${options.filter}` : ''}`;
     const countResult = await this.executeQuery(connection, countSql);
-    const totalCount = countResult.rows[0]?.[0] || 0;
+    const totalCount = countResult.error ? 0 : (countResult.rows[0]?.[0] || 0);
 
     return {
       columns: result.columns,
       rows: result.rows,
-      row_count: result.rowCount,
+      row_count: result.rows.length,
       total_count: Number(totalCount),
     };
   }

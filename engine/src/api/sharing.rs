@@ -317,8 +317,22 @@ pub async fn get_share_schema(
     // Fetch schema
     let result = {
         let conn = state.connections.lock().await;
+        let db_type = {
+            let dbs = state.databases.lock().unwrap();
+            dbs.iter().find(|d| d.id == record.db_id)
+                .map(|d| d.db_type.clone())
+                .unwrap_or_else(|| "unknown".to_string())
+        };
         match conn.get_schema(&record.db_id).await {
-            Ok(schema) => Json(crate::models::database::ApiResponse::success(schema)),
+            Ok(tables) => {
+                let response = serde_json::json!({
+                    "tables": tables,
+                    "databaseName": instance.name,
+                    "databaseType": db_type,
+                    "databaseVersion": instance.version,
+                });
+                Json(crate::models::database::ApiResponse::success(response))
+            },
             Err(e) => Json(crate::models::database::ApiResponse::error(
                 format!("Schema query failed: {}", e)
             )),

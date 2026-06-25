@@ -103,10 +103,18 @@ pub async fn execute_query(
     
     // Apply RLS
     let sql = apply_rls(&req.sql, validated.rls.as_deref());
+    tracing::info!(
+        "Share {} SQL pipeline: original={:?}, rls={:?}, after_rls={:?}",
+        req.share_code, req.sql, validated.rls, sql
+    );
     
     // Limit check
     let limit = req.limit.clamp(1, 10000);
-    
+    tracing::info!(
+        "Share {} validated: db_id={}, permission={:?}, tables={:?}, cols={:?}",
+        req.share_code, validated.db_id, validated.permission, validated.tables, validated.cols
+    );
+
     // Find database
     let db_instance = {
         let dbs = state.databases.lock().unwrap();
@@ -131,13 +139,14 @@ pub async fn execute_query(
             }
         }
         
-        // Build final SQL with LIMIT
+        // Execute with LIMIT
         let final_sql = if !sql.to_uppercase().contains("LIMIT") {
             format!("{} LIMIT {}", sql, limit)
         } else {
             sql.clone()
         };
-        
+        tracing::info!("Share {} final SQL: {:?}", req.share_code, final_sql);
+
         // Check query cache for SELECT queries
         let is_select = sql.trim().to_uppercase().starts_with("SELECT") || sql.trim().to_uppercase().starts_with("WITH");
         
@@ -156,7 +165,13 @@ pub async fn execute_query(
         }
         
         let result = match conn.execute(&db_instance.id, &final_sql).await {
-            Ok(r) => r,
+            Ok(r) => {
+                tracing::info!(
+                    "Share {} query executed: columns={:?}, rows={}, row_count={}",
+                    req.share_code, r.columns, r.rows.len(), r.row_count
+                );
+                r
+            }
             Err(e) => {
                 warn!("Query failed: {}", e);
                 return connect_response(ExecuteQueryResponse {
@@ -178,11 +193,19 @@ pub async fn execute_query(
     let primary_table = tables.first().map(|s| s.as_str());
 
     // Apply column projection based on share permissions
+    tracing::info!(
+        "Share {} before projection: columns={:?}, rows={}, primary_table={:?}",
+        req.share_code, result.columns, result.rows.len(), primary_table
+    );
     let (filtered_columns, filtered_rows) = crate::connect_rpc::project_columns(
         &result.columns,
         &result.rows,
         &validated.cols,
         primary_table,
+    );
+    tracing::info!(
+        "Share {} after projection: columns={:?}, rows={}",
+        req.share_code, filtered_columns, filtered_rows.len()
     );
     
     let elapsed = start.elapsed().as_millis() as i64;

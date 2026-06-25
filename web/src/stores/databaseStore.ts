@@ -43,10 +43,13 @@ interface DatabaseState {
     order_dir?: 'ASC' | 'DESC';
     filter?: string;
   }) => Promise<void>;
+  setTableData: (data: { columns: string[]; rows: any[][]; row_count: number; total_count: number } | null) => void;
   updateRow: (dbId: string, table: string, primaryKey: any, primaryKeyColumn: string, data: Record<string, any>) => Promise<void>;
   deleteRow: (dbId: string, table: string, primaryKey: any, primaryKeyColumn: string) => Promise<void>;
   insertRow: (dbId: string, table: string, data: Record<string, any>) => Promise<void>;
   clearError: () => void;
+  setError: (msg: string | null) => void;
+
 }
 
 export const useDatabaseStore = create<DatabaseState>((set, get) => ({
@@ -151,6 +154,7 @@ export const useDatabaseStore = create<DatabaseState>((set, get) => ({
   selectTable: (table) => set({ selectedTable: table, tableData: null, editingRow: null }),
   setEditingRow: (row) => set({ editingRow: row }),
   clearEditingRow: () => set({ editingRow: null }),
+  setTableData: (data) => set({ tableData: data }),
 
   fetchTableData: async (dbId: string, table: string, options?: {
     limit?: number;
@@ -286,4 +290,5 @@ export const useDatabaseStore = create<DatabaseState>((set, get) => ({
   },
 
   clearError: () => set({ error: null }),
+  setError: (msg) => set({ error: msg }),
 }));

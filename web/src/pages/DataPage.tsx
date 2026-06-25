@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Search, Filter, ArrowUpDown, Plus, Pencil, Trash2, X, ChevronLeft, ChevronRight,
   Database, Table2, RefreshCw, Save, AlertCircle, Globe
@@ -31,14 +31,38 @@ export function DataPage() {
     insertRow,
     error,
     clearError,
+    setError,
     getRemoteDatabases,
   } = useDatabaseStore();
 
   const { connections: remoteConnections } = useRemoteConnectionStore();
-  
-  // Ensure remoteApi is available
-  const remoteApiRef = remoteApi;
-  const runningDbs = [...databases.filter(d => d.status === 'running'), ...getRemoteDatabases()];
+
+  // Reactive remote databases — fixes auto-select not triggering on shared link join
+  const remoteDbs = useMemo(() => 
+    remoteConnections
+      .filter(c => c.status === 'connected')
+      .map(c => ({
+        id: c.id,
+        name: `${c.dbName || c.code} (Remote)`,
+        type: (c.dbType && c.dbType !== 'unknown' ? c.dbType : 'mysql') as 'postgres' | 'mysql' | 'mariadb' | 'sqlite' | 'redis',
+        version: '',
+        status: 'running' as const,
+        port: 0,
+        size: '',
+        created_at: c.connectedAt,
+        source: 'bennett' as any,
+        isRemote: true,
+        shareCode: c.code,
+        remotePermission: c.permission,
+        remoteHost: c.baseUrl,
+      })),
+    [remoteConnections]
+  );
+
+  const runningDbs = useMemo(() => [
+    ...databases.filter(d => d.status === 'running'),
+    ...remoteDbs
+  ], [databases, remoteDbs]);
   const [tables, setTables] = useState<{ name: string; columns: { name: string; data_type: string; nullable: boolean }[] }[]>([]);
   const [tablesLoading, setTablesLoading] = useState(false);
 
@@ -57,21 +81,30 @@ export function DataPage() {
     if (!selectedTable || !tables.length) return 'id';
     const table = tables.find(t => t.name === selectedTable);
     if (!table) return 'id';
-    // Try to find a column named 'id' or ending in '_id'
     const pk = table.columns.find(c => c.name === 'id' || c.name.endsWith('_id'));
     return pk?.name || table.columns[0]?.name || 'id';
   }, [selectedTable, tables]);
+
+  // Helper: quote identifiers only when necessary (reserved words, special chars)
+  const quoteId = useCallback((name: string) => {
+    // Simple identifiers never need quotes
+    if (/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(name)) return name;
+    const q = selectedDatabase?.type === 'mysql' || selectedDatabase?.type === 'mariadb' ? '`' : '"';
+    return `${q}${name}${q}`;
+  }, [selectedDatabase]);
 
   // Load tables when DB changes
   useEffect(() => {
     if (!selectedDatabase && runningDbs.length > 0) {
       selectDatabase(runningDbs[0]);
+      selectTable(null); // Clear table when auto-selecting DB
     }
   }, [runningDbs, selectedDatabase]);
 
   useEffect(() => {
     if (!selectedDatabase) {
       setTables([]);
+      selectTable(null); // Clear selected table when DB changes
       return;
     }
     setTablesLoading(true);
@@ -80,6 +113,7 @@ export function DataPage() {
       const conn = remoteConnections.find(c => c.id === selectedDatabase.id);
       if (!conn) {
         setTables([]);
+        selectTable(null);
         setTablesLoading(false);
         return;
       }
@@ -94,6 +128,9 @@ export function DataPage() {
             })),
           }));
           setTables(mapped);
+          if (mapped.length > 0 && !selectedTable) {
+            selectTable(mapped[0].name);
+          }
         })
         .catch(() => setTables([]))
         .finally(() => setTablesLoading(false));
@@ -101,34 +138,42 @@ export function DataPage() {
     }
 
     api.getSchema(selectedDatabase.id)
-      .then(schema => setTables(schema))
+      .then(schema => {
+        setTables(schema);
+        if (schema.length > 0 && !selectedTable) {
+          selectTable(schema[0].name);
+        }
+      })
       .catch(() => setTables([]))
       .finally(() => setTablesLoading(false));
   }, [selectedDatabase]);
 
-  // Load table data
+  // Reset page when DB or table changes
   useEffect(() => {
     if (!selectedDatabase || !selectedTable) return;
     setPage(1);
-    loadData();
   }, [selectedDatabase, selectedTable]);
 
-  const loadData = () => {
+  const loadData = useCallback(async () => {
     if (!selectedDatabase || !selectedTable) return;
-    fetchTableData(selectedDatabase.id, selectedTable, {
-      limit: pageSize,
-      offset: (page - 1) * pageSize,
-      order_by: sortColumn || undefined,
-      order_dir: sortDir,
-      filter: searchFilter || undefined,
-    });
-  };
+    try {
+      await fetchTableData(selectedDatabase.id, selectedTable, {
+        limit: pageSize,
+        offset: (page - 1) * pageSize,
+        order_by: sortColumn || undefined,
+        order_dir: sortDir,
+        filter: searchFilter || undefined,
+      });
+    } catch (err) {
+      console.error('DataPage loadData error:', err);
+    }
+  }, [selectedDatabase, selectedTable, page, pageSize, sortColumn, sortDir, searchFilter, fetchTableData]);
 
   useEffect(() => {
     if (selectedDatabase && selectedTable) {
       loadData();
     }
-  }, [page, pageSize, sortColumn, sortDir]);
+  }, [loadData]);
 
   const handleSort = (col: string) => {
     if (sortColumn === col) {
@@ -167,9 +212,9 @@ export function DataPage() {
       }
       // Build UPDATE SQL for remote
       const setClause = Object.entries(data)
-        .map(([k, v]) => `"${k}" = ${typeof v === 'string' ? `'${v}'` : v}`)
+        .map(([k, v]) => `${quoteId(k)} = ${typeof v === 'string' ? `'${v}'` : v}`)
         .join(', ');
-      const sql = `UPDATE "${selectedTable}" SET ${setClause} WHERE "${primaryKeyColumn}" = ${typeof pk === 'string' ? `'${pk}'` : pk}`;
+      const sql = `UPDATE ${quoteId(selectedTable)} SET ${setClause} WHERE ${quoteId(primaryKeyColumn)} = ${typeof pk === 'string' ? `'${pk}'` : pk}`;
       await remoteApi.executeWrite(conn, sql);
     } else {
       await updateRow(selectedDatabase.id, selectedTable, pk, primaryKeyColumn, data);
@@ -206,9 +251,9 @@ export function DataPage() {
         setError('Remote connection not found');
         return;
       }
-      const columns = Object.keys(payload).map(k => `"${k}"`).join(', ');
+      const columns = Object.keys(payload).map(k => quoteId(k)).join(', ');
       const values = Object.values(payload).map(v => typeof v === 'string' ? `'${v}'` : v === null ? 'NULL' : String(v)).join(', ');
-      const sql = `INSERT INTO "${selectedTable}" (${columns}) VALUES (${values})`;
+      const sql = `INSERT INTO ${quoteId(selectedTable)} (${columns}) VALUES (${values})`;
       await remoteApi.executeWrite(conn, sql);
     } else {
       await insertRow(selectedDatabase.id, selectedTable, payload);
@@ -281,30 +326,7 @@ export function DataPage() {
     }
   };
 
-  const handleSaveAddRow = async () => {
-    if (!selectedDatabase || !selectedTable) return;
-    
-    const payload = { ...addRowForm };
-    const pkCol = tableColumns.find((c: any) => c.is_primary_key);
-    
-    if (pkCol) {
-      if (idMode === 'default') {
-        // Omit PK from payload — let DB auto-generate or backend inject UUID
-        delete payload[pkCol.name];
-      } else if (idMode === 'null') {
-        // Explicitly set to null
-        payload[pkCol.name] = null;
-      }
-    }
-    
-    await insertRow(selectedDatabase.id, selectedTable, payload);
-    setShowAddRow(false);
-    setAddRowForm({});
-    setIdMode('default');
-    loadData();
-  };
-
-    const handleDeleteRow = async () => {
+  const handleDeleteRow = async () => {
     if (!selectedDatabase || !selectedTable || !editingRow) return;
     if (!confirm('Are you sure you want to delete this row?')) return;
     const pk = editingRow[primaryKeyColumn];
@@ -319,6 +341,16 @@ export function DataPage() {
         setError('Remote connection not found');
         return;
       }
+      const sql = `DELETE FROM ${quoteId(selectedTable)} WHERE ${quoteId(primaryKeyColumn)} = ${typeof pk === 'string' ? `'${pk}'` : pk}`;
+      await remoteApi.executeWrite(conn, sql);
+    } else {
+      await deleteRow(selectedDatabase.id, selectedTable, pk, primaryKeyColumn);
+    }
+
+    clearEditingRow();
+    setEditForm({});
+    loadData();
+  };
 
   return (
     <div className="flex h-full">

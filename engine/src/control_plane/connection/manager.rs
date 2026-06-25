@@ -163,6 +163,7 @@ impl ConnectionManager {
         id: &str,
         sql: &str,
     ) -> Result<QueryResult, sqlx::Error> {
+        tracing::info!("ConnectionManager.execute: id={}, sql={:?}", id, sql);
         let pool = self.pools.get(id).ok_or_else(|| {
             sqlx::Error::Configuration("Database not connected".into())
         })?;
@@ -170,6 +171,7 @@ impl ConnectionManager {
         match pool {
             DatabasePool::Postgres(pool) => {
                 let rows = sqlx::query(sql).fetch_all(pool).await?;
+                tracing::info!("Postgres execute: fetched {} rows", rows.len());
                 let columns = if let Some(row) = rows.first() {
                     row.columns().iter().map(|c| c.name().to_string()).collect()
                 } else {
