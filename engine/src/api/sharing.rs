@@ -103,6 +103,7 @@ pub async fn create_share(
         host: Some(host_ip.clone()),
         port: Some(host_port),
         token_jti: token.jti.clone(),
+        token: Some(token.token.clone()),
         permission: perm.as_str().to_string(),
         tables: serde_json::to_string(&tables).unwrap_or_else(|_| r#"["*"]"#.to_string()),
         cols: req.cols.map(|c| c.to_string()),

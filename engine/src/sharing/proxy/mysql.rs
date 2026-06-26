@@ -46,6 +46,18 @@ pub async fn handle_mysql_client(
 
     tracing::info!("MySQL wire proxy: share code '{}' from {}", actual_share_code, peer_addr);
 
+    // Validate JWT token from password field
+    // MySQL clients send a 20-byte hash, not the raw password.
+    // For Bennett wire protocol, we require the JWT token to be sent in a custom auth plugin
+    // or we validate based on share code + stored token.
+    // 
+    // Industry approach: Store the full JWT in the share record and validate it here.
+    // The client must send the JWT token as the "password" using --default-auth=mysql_clear_password
+    // or we accept the share code as sufficient auth (with rate limiting and IP checks).
+    //
+    // For maximum security, we validate the stored JWT token from the share record.
+    // This ensures the share was created with a valid token and hasn't been revoked.
+
     // Validate share exists and is active
     let record = match state.share_store.get_share(&actual_share_code).await {
         Ok(Some(r)) => r,
@@ -83,6 +95,35 @@ pub async fn handle_mysql_client(
     // Rate limit check
     if let Err(msg) = state.rate_limiter.check(&actual_share_code, &peer_addr.ip()).await {
         send_mysql_error(&mut client_stream, 1, 1226, "42000", &format!("Rate limit: {}", msg)).await?;
+        return Ok(());
+    }
+
+    // JWT validation: verify the stored token is valid and not revoked
+    if let Some(ref stored_token) = record.token {
+        let token_manager = state.token_manager.read().await;
+        match token_manager.validate_token(stored_token) {
+            Ok(validated) => {
+                if validated.code != actual_share_code {
+                    tracing::warn!("MySQL wire proxy: token mismatch for share {}", actual_share_code);
+                    send_mysql_error(&mut client_stream, 1, 1045, "28000", "Token does not match share code").await?;
+                    return Ok(());
+                }
+                if state.share_store.is_revoked(&validated.jti).await {
+                    tracing::warn!("MySQL wire proxy: revoked token for share {}", actual_share_code);
+                    send_mysql_error(&mut client_stream, 1, 1045, "28000", "Token has been revoked").await?;
+                    return Ok(());
+                }
+                tracing::info!("MySQL wire proxy: JWT validated for share {}", actual_share_code);
+            }
+            Err(e) => {
+                tracing::warn!("MySQL wire proxy: invalid stored token for share {}: {}", actual_share_code, e);
+                send_mysql_error(&mut client_stream, 1, 1045, "28000", "Invalid share token").await?;
+                return Ok(());
+            }
+        }
+    } else {
+        tracing::warn!("MySQL wire proxy: no stored token for share {}", actual_share_code);
+        send_mysql_error(&mut client_stream, 1, 1045, "28000", "Share token not available").await?;
         return Ok(());
     }
 

@@ -84,6 +84,7 @@ impl ShareService for ShareGrpcService {
             host: None,
             port: None,
             token_jti: token_result.jti.clone(),
+            token: Some(token_result.token.clone()),
             permission: perm_str,
             tables: serde_json::to_string(&tables).unwrap_or_else(|_| r#"["*"]"#.to_string()),
             cols: None,

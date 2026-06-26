@@ -20,6 +20,8 @@ pub struct ShareRecord {
     /// Host port for guest direct connection
     pub port: Option<u16>,
     pub token_jti: String,
+    /// Full JWT token for wire protocol validation
+    pub token: Option<String>,
     pub permission: String,
     pub tables: String, // JSON array
     pub cols: Option<String>, // JSON object
@@ -91,7 +93,8 @@ impl ShareStore {
     }
     
     async fn init_schema(pool: &Pool<Sqlite>) -> anyhow::Result<()> {
-        sqlx::query(
+        // Use raw_sql for multiple statements (sqlx 0.8+)
+        sqlx::raw_sql(
             r#"
             CREATE TABLE IF NOT EXISTS shares (
                 code TEXT PRIMARY KEY,
@@ -100,6 +103,7 @@ impl ShareStore {
                 host TEXT,
                 port INTEGER,
                 token_jti TEXT NOT NULL UNIQUE,
+                token TEXT,
                 permission TEXT NOT NULL DEFAULT 'ro',
                 tables TEXT NOT NULL DEFAULT '["*"]',
                 cols TEXT,
@@ -110,11 +114,11 @@ impl ShareStore {
                 guest_count INTEGER NOT NULL DEFAULT 0,
                 pinned INTEGER NOT NULL DEFAULT 0
             );
-            
+
             CREATE INDEX IF NOT EXISTS idx_shares_db_id ON shares(db_id);
             CREATE INDEX IF NOT EXISTS idx_shares_expires ON shares(expires_at);
             CREATE INDEX IF NOT EXISTS idx_shares_revoked ON shares(revoked);
-            
+
             CREATE TABLE IF NOT EXISTS guest_sessions (
                 id TEXT PRIMARY KEY,
                 share_code TEXT NOT NULL,
@@ -125,16 +129,16 @@ impl ShareStore {
                 query_count INTEGER NOT NULL DEFAULT 0,
                 FOREIGN KEY (share_code) REFERENCES shares(code) ON DELETE CASCADE
             );
-            
+
             CREATE INDEX IF NOT EXISTS idx_guests_share ON guest_sessions(share_code);
             CREATE INDEX IF NOT EXISTS idx_guests_last_active ON guest_sessions(last_active);
-            
+
             CREATE TABLE IF NOT EXISTS revoked_tokens (
                 jti TEXT PRIMARY KEY,
                 revoked_at TEXT NOT NULL,
                 reason TEXT NOT NULL DEFAULT 'host_revoked'
             );
-            
+
             CREATE INDEX IF NOT EXISTS idx_revoked_jti ON revoked_tokens(jti);
 
             CREATE TABLE IF NOT EXISTS host_heartbeats (
@@ -148,7 +152,12 @@ impl ShareStore {
         )
         .execute(pool)
         .await?;
-        
+
+        // Migration: Add token column to existing shares table (for upgrades)
+        let _ = sqlx::query("ALTER TABLE shares ADD COLUMN token TEXT")
+            .execute(pool)
+            .await;
+
         Ok(())
     }
     
@@ -156,8 +165,8 @@ impl ShareStore {
     pub async fn create_share(&self, record: &ShareRecord) -> anyhow::Result<()> {
         sqlx::query(
             r#"
-            INSERT INTO shares (code, db_id, host_id, host, port, token_jti, permission, tables, cols, rls, created_at, expires_at, revoked, guest_count, pinned)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO shares (code, db_id, host_id, host, port, token_jti, token, permission, tables, cols, rls, created_at, expires_at, revoked, guest_count, pinned)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#
         )
         .bind(&record.code)
@@ -166,6 +175,7 @@ impl ShareStore {
         .bind(record.host.as_ref())
         .bind(record.port.map(|p| p as i32))
         .bind(&record.token_jti)
+        .bind(record.token.as_ref())
         .bind(&record.permission)
         .bind(&record.tables)
         .bind(record.cols.as_ref())
@@ -526,6 +536,7 @@ impl ShareStore {
             host: row.get("host"),
             port: row.get::<Option<i32>, _>("port").map(|p| p as u16),
             token_jti: row.get("token_jti"),
+            token: row.get("token"),
             permission: row.get("permission"),
             tables: row.get("tables"),
             cols: row.get("cols"),
@@ -558,6 +569,7 @@ mod tests {
             host: Some("192.168.1.100".to_string()),
             port: Some(3001),
             token_jti: "jti-123".to_string(),
+            token: None,
             permission: "ro".to_string(),
             tables: r#"["*"]"#.to_string(),
             cols: None,
