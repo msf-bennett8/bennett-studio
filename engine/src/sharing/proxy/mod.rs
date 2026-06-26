@@ -49,6 +49,45 @@ impl WireProxyServer {
         let listener = TcpListener::bind(self.bind_addr).await?;
         info!("Wire protocol proxy listening on {}", self.bind_addr);
         
+        // Auto-register all active shares from share store into router
+        // Query all non-revoked, non-expired shares and register them for wire protocol access
+        let proxy_port = self.bind_addr.port();
+        let all_dbs = {
+            let dbs = self.state.databases.lock().unwrap();
+            dbs.iter().map(|d| d.id.clone()).collect::<Vec<_>>()
+        };
+        
+        for db_id in all_dbs {
+            match self.state.share_store.list_shares_by_db(&db_id).await {
+                Ok(shares) => {
+                    for share in shares {
+                        let db_type = if share.db_id.starts_with("postgres") {
+                            "postgres"
+                        } else {
+                            "mysql"
+                        };
+                        let local_port = share.port.unwrap_or(3306);
+                        let external_port = local_port + 1000;
+                        
+                        if let Err(e) = self.router.register_share(&share.code, db_type, local_port).await {
+                            warn!("Failed to register share {} in wire proxy router: {}", share.code, e);
+                        } else {
+                            info!("Auto-registered wire proxy: share {} -> port {} (type: {}, db: {})", 
+                                share.code, external_port, db_type, db_id);
+                        }
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to list shares for db {}: {}", db_id, e);
+                }
+            }
+        }
+        
+        // Also register the proxy port itself as a fallback
+        if let Err(e) = self.router.register_share("wire-proxy-fallback", "mysql", proxy_port.saturating_sub(1000)).await {
+            warn!("Failed to register fallback wire proxy port: {}", e);
+        }
+        
         loop {
             let (stream, peer_addr) = listener.accept().await?;
             let state = self.state.clone();
@@ -75,34 +114,34 @@ async fn handle_connection(
     router: Arc<ProxyRouter>,
     port: u16,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // Read first byte to detect protocol
-    let mut first_byte = [0u8; 1];
-    let n = client_stream.peek(&mut first_byte).await?;
-    if n == 0 {
-        return Ok(()); // Connection closed
-    }
-    
-    // MySQL: first byte is protocol version (0x0a for v10)
-    // PostgreSQL: first byte is message length (usually 0x00, 0x00, 0x00, 0x08 for SSLRequest)
-    
+    // Protocol detection by port:
+    // MySQL clients wait for server handshake first — they send NOTHING on connect.
+    // PostgreSQL clients send SSLRequest/StartupMessage immediately.
+    // We use port-based detection instead of peek() to avoid blocking on MySQL.
+
     // Check connection limit
     if let Err(e) = router.try_connect(port).await {
         tracing::warn!("Connection limit exceeded for port {}: {}", port, e);
         let _ = client_stream.write_all(format!("Connection limit exceeded: {}\n", e).as_bytes()).await;
         return Ok(());
     }
-    
-    let protocol = if first_byte[0] == 0x0a {
+
+    // Port-based protocol detection (avoids blocking peek on MySQL)
+    let protocol = if port >= 13307 && port < 54300 {
         WireProtocol::MySQL
+    } else if port >= 54300 {
+        WireProtocol::PostgreSQL
     } else {
-        // Check for PostgreSQL SSL request pattern
-        let mut header = [0u8; 8];
-        let n = client_stream.peek(&mut header).await?;
-        if n >= 8 && header[4..8] == [0x04, 0xd2, 0x22, 0x2f] {
-            // SSLRequest: 1234, 5679 in network byte order
-            WireProtocol::PostgreSQL
-        } else {
-            WireProtocol::Unknown
+        // Fallback: try non-blocking peek for PostgreSQL pattern
+        match tokio::time::timeout(tokio::time::Duration::from_millis(100), client_stream.peek(&mut [0u8; 1])).await {
+            Ok(Ok(1)) => {
+                // Client sent data — likely PostgreSQL
+                WireProtocol::PostgreSQL
+            }
+            _ => {
+                // No data from client — assume MySQL (server speaks first)
+                WireProtocol::MySQL
+            }
         }
     };
     

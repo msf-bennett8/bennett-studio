@@ -128,7 +128,7 @@ pub async fn handle_mysql_client(
 
     // Connect to real MySQL server
     let db_port = db_instance.port;
-    let db_stream = match TcpStream::connect(format!("127.0.0.1:{}", db_port)).await {
+    let mut db_stream = match TcpStream::connect(format!("127.0.0.1:{}", db_port)).await {
         Ok(s) => s,
         Err(e) => {
             send_mysql_error(&mut client_stream, 2, 2003, "HY000", &format!("Cannot connect to database: {}", e)).await?;
@@ -136,7 +136,108 @@ pub async fn handle_mysql_client(
         }
     };
 
-    // Bidirectional proxy with audit logging
+    // Complete MySQL handshake with real server (proxy acts as client)
+    // Read real server's handshake
+    let (_db_seq, db_handshake) = read_mysql_packet(&mut db_stream).await.map_err(|e| {
+        format!("Failed to read database handshake: {}", e)
+    })?;
+
+    // Extract server scramble from handshake for password hashing
+    let server_scramble = if db_handshake.len() >= 44 {
+        let version_len = db_handshake[1..].iter().position(|&b| b == 0).unwrap_or(0);
+        let base = 1 + version_len + 1 + 4; // 1 (version) + version_len + 1 (null) + 4 (thread_id)
+        
+        let mut scramble = Vec::with_capacity(20);
+        // Auth plugin data part 1: 8 bytes immediately after thread_id
+        if db_handshake.len() >= base + 8 {
+            scramble.extend_from_slice(&db_handshake[base..base + 8]);
+        }
+        // Auth plugin data part 2: 12 bytes after filler(1) + cap_lower(2) + charset(1) + status(2) + cap_upper(2) + auth_len(1) + reserved(10)
+        let auth2_start = base + 8 + 1 + 2 + 1 + 2 + 2 + 1 + 10;
+        if db_handshake.len() >= auth2_start + 12 {
+            scramble.extend_from_slice(&db_handshake[auth2_start..auth2_start + 12]);
+        }
+        scramble.truncate(20);
+        scramble
+    } else {
+        vec![0u8; 20]
+    };
+
+    // Get credentials from database instance (works globally for any shared DB)
+    let (db_username, db_password, db_database) = if let Some(ref creds) = db_instance.credentials {
+        (creds.username.clone(), creds.password.clone(), creds.database.clone())
+    } else {
+        // Fallback: try env vars, then defaults
+        let username = db_instance.env_vars.iter()
+            .find(|(k, _)| k == "username" || k == "MYSQL_USER")
+            .map(|(_, v)| v.clone())
+            .unwrap_or_else(|| "root".to_string());
+        let password = db_instance.env_vars.iter()
+            .find(|(k, _)| k == "password" || k == "MYSQL_PASSWORD")
+            .map(|(_, v)| v.clone())
+            .unwrap_or_default();
+        let database = db_instance.env_vars.iter()
+            .find(|(k, _)| k == "database" || k == "MYSQL_DATABASE")
+            .map(|(_, v)| v.clone())
+            .unwrap_or_default();
+        (username, password, database)
+    };
+
+    tracing::info!("MySQL wire proxy: authenticating to real DB '{}' as user '{}', database '{}'", 
+        db_instance.name, db_username, db_database);
+
+    // Compute mysql_native_password auth response: SHA1(password) XOR SHA1(scramble + SHA1(SHA1(password)))
+    let auth_hash = compute_mysql_auth_hash(&db_password, &server_scramble);
+
+    // Build HandshakeResponse41 for real server
+    let mut db_auth = Vec::new();
+    let db_cap: u32 = 0x0001 | 0x0200 | 0x8000 | 0x00080000 | 0x00000008; // + CONNECT_WITH_DB
+    db_auth.extend_from_slice(&db_cap.to_le_bytes());
+    db_auth.extend_from_slice(&MYSQL_MAX_PACKET_SIZE.to_le_bytes());
+    db_auth.push(33); // utf8mb4
+    db_auth.extend_from_slice(&[0u8; 23]); // reserved
+    db_auth.extend_from_slice(db_username.as_bytes());
+    db_auth.push(0); // null terminator
+    
+    // Auth response: 20-byte SHA1 hash
+    db_auth.push(20); // length
+    db_auth.extend_from_slice(&auth_hash);
+    
+    // Database name
+    if !db_database.is_empty() {
+        db_auth.extend_from_slice(db_database.as_bytes());
+        db_auth.push(0);
+    }
+    
+    db_auth.extend_from_slice(b"mysql_native_password");
+    db_auth.push(0);
+
+    write_mysql_packet(&mut db_stream, 1, &db_auth).await.map_err(|e| {
+        format!("Failed to send database auth: {}", e)
+    })?;
+
+    // Read OK/Error from real server
+    let (_ok_seq, db_ok) = read_mysql_packet(&mut db_stream).await.map_err(|e| {
+        format!("Failed to read database auth response: {}", e)
+    })?;
+
+    if db_ok[0] == 0xff {
+        let err_code = u16::from_le_bytes([db_ok[1], db_ok[2]]);
+        let err_msg = String::from_utf8_lossy(&db_ok[4..]);
+        tracing::warn!("MySQL wire proxy: real DB auth failed for user '{}': {} - {}", 
+            db_username, err_code, err_msg);
+        send_mysql_error(&mut client_stream, 2, err_code, "HY000", 
+            &format!("Database authentication failed for user '{}': {}", db_username, err_msg)).await?;
+        return Ok(());
+    }
+
+    tracing::info!("MySQL wire proxy: authenticated to real DB '{}' as user '{}'", 
+        db_instance.name, db_username);
+
+    info!("MySQL wire proxy: connected to real database on port {}", db_port);
+
+    // Now both client and database are in command phase — do raw proxy
+    // Note: Sequence numbers are independent on each side
     proxy_bidirectional(client_stream, db_stream, auth_result, state.audit_service.clone()).await?;
 
     Ok(())
@@ -497,5 +598,38 @@ async fn send_mysql_error_packet(
     Ok(())
 }
 
+/// Compute mysql_native_password authentication hash
+/// hash = SHA1(password) XOR SHA1(scramble + SHA1(SHA1(password)))
+fn compute_mysql_auth_hash(password: &str, scramble: &[u8]) -> [u8; 20] {
+    use sha1::{Sha1, Digest};
+    
+    if password.is_empty() {
+        return [0u8; 20];
+    }
+    
+    // stage1_hash = SHA1(password)
+    let mut hasher = Sha1::new();
+    hasher.update(password.as_bytes());
+    let stage1 = hasher.finalize();
+    
+    // stage2_hash = SHA1(stage1_hash)
+    let mut hasher = Sha1::new();
+    hasher.update(&stage1);
+    let stage2 = hasher.finalize();
+    
+    // SHA1(scramble + stage2_hash)
+    let mut hasher = Sha1::new();
+    hasher.update(scramble);
+    hasher.update(&stage2);
+    let mut result = hasher.finalize();
+    
+    // XOR with stage1_hash
+    for i in 0..20 {
+        result[i] ^= stage1[i];
+    }
+    
+    result.into()
+}
+
 // MySQL wire protocol proxy implementation complete
-// Features: caching_sha2_password auth, query interception, RLS injection, audit logging
+// Features: mysql_native_password auth, query interception, RLS injection, audit logging

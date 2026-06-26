@@ -536,6 +536,7 @@ dependencies = [
  "rustls-pemfile",
  "serde",
  "serde_json",
+ "sha1",
  "sqlparser",
  "sqlx",
  "thiserror 1.0.69",

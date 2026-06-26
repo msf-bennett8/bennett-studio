@@ -59,6 +59,7 @@ rcgen = "0.13"
 ring = "0.17"
 governor = "0.6"
 nonzero_ext = "0.3"
+sha1 = "0.10"
 
 # gRPC protobuf types
 prost-types = "0.13"
