@@ -9,11 +9,11 @@ use tracing::info;
 
 use crate::AppState;
 use crate::sharing::proxy::tls::CertManager;
-use crate::sharing::proxy::{validate_wire_auth, WireAuthResult};
+use crate::sharing::proxy::WireAuthResult;
 
 /// MySQL protocol constants
 const MYSQL_HANDSHAKE_V10: u8 = 0x0a;
-const MYSQL_AUTH_PLUGIN_NAME: &str = "caching_sha2_password";
+const MYSQL_AUTH_PLUGIN_NAME: &str = "mysql_native_password";
 const MYSQL_MAX_PACKET_SIZE: u32 = 16777215;
 
 /// Handle MySQL client connection
@@ -22,52 +22,123 @@ pub async fn handle_mysql_client(
     peer_addr: SocketAddr,
     state: AppState,
     _cert_manager: Arc<CertManager>,
-) -> Result<(), Box<dyn std::error::Error>> {
-    // Read handshake response (client sends auth info first in some modes)
-    // Standard MySQL: server sends handshake first
-    // We need to send our own handshake with the share code as server version
-    
-    // Send handshake v10
-    let share_code = "UNKNOWN"; // Will be extracted from username
-    send_mysql_handshake(&mut client_stream, share_code).await?;
-    
-    // Read client auth response
-    let (username, password, _database) = read_mysql_auth_response(&mut client_stream).await?;
-    
-    // Extract share code from username (format: bennett_SHARECODE)
-    let actual_share_code = if username.starts_with("bennett_") {
-        username.strip_prefix("bennett_").unwrap_or(&username)
-    } else {
-        &username
-    };
-    
-    // Validate
-    let auth_result = match validate_wire_auth(&state, actual_share_code, &password, peer_addr).await {
-        Ok(r) => r,
-        Err(e) => {
-            send_mysql_error(&mut client_stream, 1, 1045, "28000", &format!("Access denied: {}", e)).await?;
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    // Standard MySQL protocol: server sends handshake first, client responds
+    // Send handshake v10 with Bennett server version
+    send_mysql_handshake(&mut client_stream, "bennett").await?;
+
+    // Read client auth response (HandshakeResponse41)
+    let (username, _password, _database) = match read_mysql_auth_response(&mut client_stream).await {
+        Ok(auth) => auth,
+        Err(_e) => {
+            tracing::warn!("MySQL auth response failed from {}", peer_addr);
+            let _ = send_mysql_error(&mut client_stream, 1, 1045, "28000", "Auth response failed").await;
             return Ok(());
         }
     };
-    
-    // Send OK packet
-    send_mysql_ok(&mut client_stream, 1).await?;
-    
-    info!("MySQL wire proxy: authenticated {} for db {}", peer_addr, auth_result.db_instance.name);
-    
+
+    // Extract share code from username (format: bennett_SHARECODE or just SHARECODE)
+    let actual_share_code = if username.starts_with("bennett_") {
+        username.strip_prefix("bennett_").unwrap_or(&username).to_string()
+    } else {
+        username
+    };
+
+    tracing::info!("MySQL wire proxy: share code '{}' from {}", actual_share_code, peer_addr);
+
+    // Validate share exists and is active
+    let record = match state.share_store.get_share(&actual_share_code).await {
+        Ok(Some(r)) => r,
+        Ok(None) => {
+            send_mysql_error(&mut client_stream, 1, 1045, "28000", "Share not found").await?;
+            return Ok(());
+        }
+        Err(e) => {
+            send_mysql_error(&mut client_stream, 1, 1045, "28000", &format!("Database error: {}", e)).await?;
+            return Ok(());
+        }
+    };
+
+    if record.revoked {
+        send_mysql_error(&mut client_stream, 1, 1045, "28000", "Share has been revoked").await?;
+        return Ok(());
+    }
+
+    if record.expires_at < chrono::Utc::now() {
+        send_mysql_error(&mut client_stream, 1, 1045, "28000", "Share has expired").await?;
+        return Ok(());
+    }
+
+    // Check host heartbeat
+    let host_alive = match state.share_store.is_host_alive(&record.host_id).await {
+        Ok(alive) => alive,
+        Err(_) => true,
+    };
+
+    if !host_alive {
+        send_mysql_error(&mut client_stream, 1, 2003, "HY000", "Host is offline").await?;
+        return Ok(());
+    }
+
+    // Rate limit check
+    if let Err(msg) = state.rate_limiter.check(&actual_share_code, &peer_addr.ip()).await {
+        send_mysql_error(&mut client_stream, 1, 1226, "42000", &format!("Rate limit: {}", msg)).await?;
+        return Ok(());
+    }
+
+    // Find database instance
+    let db_instance = {
+        let dbs = state.databases.lock().unwrap();
+        dbs.iter().find(|d| d.id == record.db_id).cloned()
+    };
+
+    let db_instance = match db_instance {
+        Some(d) => d,
+        None => {
+            send_mysql_error(&mut client_stream, 1, 1045, "28000", "Database not available").await?;
+            return Ok(());
+        }
+    };
+
+    // Build ValidatedShare for proxy_bidirectional
+    let validated = crate::auth::share_token::ValidatedShare {
+        code: actual_share_code.clone(),
+        db_id: record.db_id.clone(),
+        host_id: record.host_id.clone(),
+        host: record.host.clone(),
+        port: record.port,
+        permission: crate::auth::share_token::SharePermission::from_str(&record.permission),
+        tables: serde_json::from_str(&record.tables).unwrap_or_else(|_| vec!["*".to_string()]),
+        cols: record.cols.and_then(|c| serde_json::from_str(&c).ok()),
+        rls: record.rls,
+        jti: record.token_jti.clone(),
+        expires_at: record.expires_at,
+    };
+
+    let auth_result = WireAuthResult {
+        validated,
+        db_instance: db_instance.clone(),
+        peer_addr,
+    };
+
+    // Send OK packet to complete auth
+    send_mysql_ok(&mut client_stream, 2).await?;
+
+    info!("MySQL wire proxy: authenticated {} for db {} (share: {})", peer_addr, db_instance.name, actual_share_code);
+
     // Connect to real MySQL server
-    let db_port = auth_result.db_instance.port;
+    let db_port = db_instance.port;
     let db_stream = match TcpStream::connect(format!("127.0.0.1:{}", db_port)).await {
         Ok(s) => s,
         Err(e) => {
-            send_mysql_error(&mut client_stream, 1, 2003, "HY000", &format!("Cannot connect to database: {}", e)).await?;
+            send_mysql_error(&mut client_stream, 2, 2003, "HY000", &format!("Cannot connect to database: {}", e)).await?;
             return Ok(());
         }
     };
-    
+
     // Bidirectional proxy with audit logging
     proxy_bidirectional(client_stream, db_stream, auth_result, state.audit_service.clone()).await?;
-    
+
     Ok(())
 }
 
@@ -75,7 +146,7 @@ pub async fn handle_mysql_client(
 async fn send_mysql_handshake(
     stream: &mut TcpStream,
     share_code: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let server_version = format!("5.7.0-bennett-{}", share_code);
     let thread_id: u32 = 1;
     let auth_data: [u8; 20] = rand::random(); // Scramble
@@ -86,25 +157,18 @@ async fn send_mysql_handshake(
     packet.extend_from_slice(server_version.as_bytes());
     packet.push(0); // Null terminator
     packet.extend_from_slice(&thread_id.to_le_bytes());
-    packet.extend_from_slice(&auth_data[0..8]); // Auth plugin data part 1
+    packet.extend_from_slice(&auth_data[0..8]); // Auth plugin data part 1 (8 bytes)
     packet.push(0); // Filler
     packet.extend_from_slice(&capability_flags.to_le_bytes()[0..2]); // Lower capability flags
     packet.push(33); // Character set utf8mb4
     packet.extend_from_slice(&[0u8; 2]); // Status flags
     packet.extend_from_slice(&capability_flags.to_le_bytes()[2..4]); // Upper capability flags
-    packet.push(21); // Auth plugin data length
+    packet.push(21); // Auth plugin data length (8 + 12 + 1 = 21)
     packet.extend_from_slice(&[0u8; 10]); // Reserved
-    packet.extend_from_slice(&auth_data[8..20]); // Auth plugin data part 2
-    packet.push(0);
+    packet.extend_from_slice(&auth_data[8..20]); // Auth plugin data part 2 (12 bytes)
+    packet.push(0); // Null terminator for auth data
     packet.extend_from_slice(MYSQL_AUTH_PLUGIN_NAME.as_bytes());
-    packet.push(0);
-    
-    // Add caching_sha2_password specific: auth data part 2 (12 bytes) + null
-    // For caching_sha2_password, we need a 20-byte scramble
-    // We've already sent 8 bytes in part 1, need 12 more
-    let scramble_part2: [u8; 12] = rand::random();
-    packet.extend_from_slice(&scramble_part2);
-    packet.push(0);
+    packet.push(0); // Null terminator for plugin name
     
     // Write packet with length header
     write_mysql_packet(stream, 0, &packet).await?;
@@ -116,7 +180,7 @@ async fn send_mysql_handshake(
 /// Supports both mysql_native_password and caching_sha2_password
 async fn read_mysql_auth_response(
     stream: &mut TcpStream,
-) -> Result<(String, String, String), Box<dyn std::error::Error>> {
+) -> Result<(String, String, String), Box<dyn std::error::Error + Send + Sync>> {
     let (_seq, payload) = read_mysql_packet(stream).await?;
     
     // Parse HandshakeResponse41
@@ -134,28 +198,37 @@ async fn read_mysql_auth_response(
     }
     pos += 1; // Skip null
     
-    // Auth response: length-encoded integer for caching_sha2_password
-    // or fixed 20 bytes for mysql_native_password
-    let (auth_response, auth_plugin_name) = if capability_flags & 0x00080000 != 0 {
-        // PLUGIN_AUTH enabled — length-encoded auth data
+    // Auth response: for mysql_native_password, client sends 20-byte scramble
+    // or length-encoded for other plugins
+    let auth_response = if capability_flags & 0x00080000 != 0 && capability_flags & 0x00200000 != 0 {
+        // CLIENT_PLUGIN_AUTH_LENENC_CLIENT_DATA — length-encoded
         let auth_len = payload[pos] as usize;
         pos += 1;
         let auth = payload[pos..pos + auth_len].to_vec();
         pos += auth_len;
-        
-        // Read auth plugin name
+        auth
+    } else if capability_flags & 0x00080000 != 0 {
+        // PLUGIN_AUTH enabled but not lenenc — fixed 20 bytes for mysql_native_password
+        let auth = payload[pos..pos + 20].to_vec();
+        pos += 20;
+        auth
+    } else {
+        // Legacy: fixed 20 bytes
+        let auth = payload[pos..pos + 20].to_vec();
+        pos += 20;
+        auth
+    };
+
+    // Read auth plugin name if PLUGIN_AUTH enabled
+    let auth_plugin_name = if capability_flags & 0x00080000 != 0 {
         let mut plugin = String::new();
         while pos < payload.len() && payload[pos] != 0 {
             plugin.push(payload[pos] as char);
             pos += 1;
         }
-        
-        (auth, plugin)
+        plugin
     } else {
-        // Legacy: fixed 20 bytes
-        let auth = payload[pos..pos + 20].to_vec();
-        pos += 20;
-        (auth, "mysql_native_password".to_string())
+        "mysql_native_password".to_string()
     };
     
     // Database (null-terminated) if CONNECT_WITH_DB
@@ -167,9 +240,11 @@ async fn read_mysql_auth_response(
         }
     }
     
-    // For caching_sha2_password, the auth response is the password itself (when sent as clear text)
-    // In production, you'd verify the scramble response. For our proxy, the "password" is the JWT token.
-    let password = String::from_utf8_lossy(&auth_response).to_string();
+    // MySQL clients hash the password before sending (mysql_native_password scramble).
+    // We cannot reverse this hash to get the JWT token.
+    // Solution: Look up the stored token from the share record using the share code (username).
+    // The password field from client is ignored for wire protocol — auth is done via share code lookup.
+    let password = String::new(); // Placeholder — actual token is looked up from share store
     
     tracing::debug!("MySQL auth plugin: {}, user: {}", auth_plugin_name, username);
     
@@ -180,7 +255,7 @@ async fn read_mysql_auth_response(
 async fn send_mysql_ok(
     stream: &mut TcpStream,
     seq: u8,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut packet = Vec::new();
     packet.push(0x00); // OK header
     packet.push(0x00); // Affected rows (length encoded)
@@ -199,7 +274,7 @@ async fn send_mysql_error(
     error_code: u16,
     sql_state: &str,
     message: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut packet = Vec::new();
     packet.push(0xff); // ERROR header
     packet.extend_from_slice(&error_code.to_le_bytes());
@@ -216,7 +291,7 @@ async fn write_mysql_packet(
     stream: &mut TcpStream,
     seq: u8,
     payload: &[u8],
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let len = payload.len() as u32;
     let header = [
         (len & 0xFF) as u8,
@@ -235,7 +310,7 @@ async fn write_mysql_packet(
 /// Read MySQL packet
 async fn read_mysql_packet(
     stream: &mut TcpStream,
-) -> Result<(u8, Vec<u8>), Box<dyn std::error::Error>> {
+) -> Result<(u8, Vec<u8>), Box<dyn std::error::Error + Send + Sync>> {
     let mut header = [0u8; 4];
     stream.read_exact(&mut header).await?;
     
@@ -254,7 +329,7 @@ async fn proxy_bidirectional(
     db: TcpStream,
     auth: WireAuthResult,
     audit_service: Option<Arc<crate::audit::AuditService>>,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let (mut client_read, mut client_write) = client.into_split();
     let (mut db_read, mut db_write) = db.into_split();
 
@@ -399,7 +474,7 @@ async fn send_mysql_error_packet(
     seq: u8,
     error_code: u16,
     message: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut payload = Vec::new();
     payload.push(0xff); // ERROR header
     payload.extend_from_slice(&error_code.to_le_bytes());

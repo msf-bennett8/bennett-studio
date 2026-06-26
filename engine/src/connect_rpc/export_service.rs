@@ -254,51 +254,19 @@ async fn execute_export(
         req.share_code, result.row_count, format, elapsed
     );
     
-    // Stream in chunks to avoid memory issues
-    let (tx, rx) = tokio::sync::mpsc::channel(4);
-    let data_bytes = data.into_bytes();
-    let chunk_size = 64 * 1024; // 64KB chunks
-    let total_rows = result.row_count as i64;
-    
-    tokio::spawn(async move {
-        let mut offset = 0;
-        let mut chunk_index = 0;
-        let total_len = data_bytes.len();
-        
-        loop {
-            let end = (offset + chunk_size).min(total_len);
-            let is_last = end == total_len;
-            let chunk_data = data_bytes[offset..end].to_vec();
-            
-            let chunk = ExportChunk {
-                data: chunk_data,
-                is_last,
-                total_rows,
-                chunk_index,
-            };
-            
-            if tx.send(Ok(chunk)).await.is_err() {
-                break; // Receiver dropped
-            }
-            
-            if is_last {
-                break;
-            }
-            
-            offset = end;
-            chunk_index += 1;
-        }
-    });
-    
-    let body = Body::from_stream(ReceiverStream::new(rx).map(|chunk: Result<ExportChunk, std::convert::Infallible>| {
-        chunk.map(|c| axum::body::Bytes::from(c.data))
-    }));
-    
-    Response::builder()
-        .status(axum::http::StatusCode::OK)
-        .header(axum::http::header::CONTENT_TYPE, "application/json")
-        .body(body)
-        .unwrap()
+    // Return single JSON response with base64-encoded data
+    // For large exports, client should use StreamQuery instead
+    use base64::Engine;
+    let base64_data = base64::engine::general_purpose::STANDARD.encode(data.as_bytes());
+
+    connect_response(ExportResponse {
+        success: true,
+        data: base64_data,
+        is_last: true,
+        total_rows: result.row_count as i64,
+        chunk_index: 0,
+        error: None,
+    })
 }
 
 fn format_csv(
