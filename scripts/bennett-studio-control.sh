@@ -136,6 +136,40 @@ build_engine() {
 }
 
 # ============================================================================
+# CRITICAL: Kill all engine processes to prevent SQLite lock conflicts
+# ============================================================================
+kill_all_engines() {
+    echo "🔧 Ensuring no engine processes are running..."
+    
+    # Kill by PID file
+    if [ -f /tmp/bennett-engine.pid ]; then
+        local pid=$(cat /tmp/bennett-engine.pid)
+        if kill -0 "$pid" 2>/dev/null; then
+            kill -9 "$pid" 2>/dev/null
+            sleep 1
+        fi
+        rm -f /tmp/bennett-engine.pid
+    fi
+    
+    # Kill ALL bennett-engine processes (catches orphans)
+    local pids=$(pgrep -f "bennett-engine" 2>/dev/null || true)
+    if [ -n "$pids" ]; then
+        echo "   Killing orphaned processes: $pids"
+        pkill -9 -f "bennett-engine" 2>/dev/null || true
+        sleep 2
+    fi
+    
+    # Verify they're dead
+    if pgrep -f "bennett-engine" > /dev/null 2>&1; then
+        echo "⚠️  Some engine processes still running!"
+        pkill -9 -f "bennett-engine" 2>/dev/null || true
+        sleep 1
+    fi
+    
+    echo "✅ All engine processes stopped"
+}
+
+# ============================================================================
 # Main Actions
 # ============================================================================
 
@@ -214,13 +248,15 @@ case "$PROJECT" in
             echo "=========================================="
             echo ""
 
-            # Stop everything
+            # Kill tmux session
             if tmux has-session -t bennett-studio-dev 2>/dev/null; then
               echo "📦 Stopping tmux session..."
               tmux kill-session -t bennett-studio-dev
             fi
-            echo "🔧 Stopping Engine..."
-            "$PROJECT_DIR/scripts/engine-control" stop 2>/dev/null || true
+            
+            # CRITICAL: Kill ALL engine processes to release SQLite lock
+            kill_all_engines
+            
             echo "🌐 Stopping Web..."
             "$PROJECT_DIR/scripts/web-dev-control" stop 2>/dev/null || true
             echo "🖥️  Stopping Desktop..."
@@ -248,12 +284,15 @@ case "$PROJECT" in
             echo "=========================================="
             echo ""
 
-            # Stop everything
+            # Kill tmux session
             if tmux has-session -t bennett-studio-dev 2>/dev/null; then
               echo "📦 Stopping tmux session..."
               tmux kill-session -t bennett-studio-dev
             fi
-            "$PROJECT_DIR/scripts/engine-control" stop 2>/dev/null || true
+            
+            # CRITICAL: Kill ALL engine processes
+            kill_all_engines
+            
             "$PROJECT_DIR/scripts/web-dev-control" stop 2>/dev/null || true
             "$PROJECT_DIR/scripts/desktop-dev-control" stop 2>/dev/null || true
             echo ""
@@ -312,9 +351,8 @@ case "$PROJECT" in
               tmux kill-session -t bennett-studio-dev
             fi
 
-            echo "🔧 Stopping Engine..."
-            "$PROJECT_DIR/scripts/engine-control" stop 2>/dev/null || true
-            echo ""
+            # CRITICAL: Kill ALL engine processes
+            kill_all_engines
 
             echo "🌐 Stopping Web..."
             "$PROJECT_DIR/scripts/web-dev-control" stop 2>/dev/null || true
@@ -333,7 +371,7 @@ case "$PROJECT" in
             ;;
 
           # ------------------------------------------------------------------
-          # CLEAR: Clear logs and caches (does NOT cargo clean anymore)
+          # CLEAR: Clear logs and caches
           # ------------------------------------------------------------------
           clear)
             echo "=========================================="

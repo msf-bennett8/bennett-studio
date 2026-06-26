@@ -33,13 +33,13 @@ start_engine() {
     if [ ! -x "$BINARY" ]; then
         echo "🔨 Building engine first (this takes ~10 min)..."
         echo "   Build log: $BUILD_LOG"
-        
+
         # Kill any stale cargo processes holding the lock
         pkill -f "cargo.*bennett" 2>/dev/null || true
         pkill -f "rustc.*bennett" 2>/dev/null || true
         pkill -f "rust-lld" 2>/dev/null || true
         sleep 2
-        
+
         if ! cargo build --bin bennett-engine 2>&1 | tee "$BUILD_LOG"; then
             echo "❌ BUILD FAILED — check $BUILD_LOG"
             exit 1
@@ -60,38 +60,61 @@ start_engine() {
             echo "✅ Engine ready (PID: $ENGINE_PID, Port: $PORT)"
             return 0
         fi
-        
+
         if ! kill -0 "$ENGINE_PID" 2>/dev/null; then
             echo "❌ Engine crashed! Check: tail -30 $LOGFILE"
             rm -f "$PIDFILE"
             exit 1
         fi
-        
+
         if [ $((i % 5)) -eq 0 ]; then
             echo "   ... waiting ($i seconds)"
         fi
         sleep 1
     done
-    
+
     echo "⚠️  Engine started but health check not responding yet"
     echo "   Check: tail -f $LOGFILE"
 }
 
 stop_engine() {
+    echo "🔧 Stopping Engine..."
+    
+    # Kill by PID file first
     if [ -f "$PIDFILE" ]; then
         local pid=$(cat "$PIDFILE")
         if kill -0 "$pid" 2>/dev/null; then
-            echo "🔧 Stopping Engine (PID: $pid)..."
+            echo "   Killing PID $pid..."
             kill "$pid" 2>/dev/null
             sleep 1
             kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null
         fi
         rm -f "$PIDFILE"
     fi
-    # Also kill any orphaned processes
-    pkill -f "bennett-engine" 2>/dev/null || true
+
+    # CRITICAL: Also kill ALL bennett-engine processes (handles orphaned processes)
+    local pids=$(pgrep -f "bennett-engine" 2>/dev/null || true)
+    if [ -n "$pids" ]; then
+        echo "   Killing orphaned bennett-engine processes: $pids"
+        pkill -9 -f "bennett-engine" 2>/dev/null || true
+        sleep 1
+    fi
+
+    # Kill any cargo processes too
     pkill -f "cargo.*bennett" 2>/dev/null || true
-    echo "🔧 Engine stopped"
+    pkill -f "rustc.*bennett" 2>/dev/null || true
+    pkill -f "rust-lld" 2>/dev/null || true
+    
+    # Wait for processes to actually die
+    for i in {1..5}; do
+        if ! pgrep -f "bennett-engine" > /dev/null 2>&1; then
+            echo "✅ Engine stopped"
+            return 0
+        fi
+        sleep 1
+    done
+    
+    echo "⚠️  Some engine processes may still be running"
 }
 
 status_engine() {
