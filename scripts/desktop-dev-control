@@ -4,14 +4,21 @@ PIDFILE="/tmp/bennett-desktop.pid"
 LOGFILE="/tmp/bennett-desktop.log"
 DESKTOP_DIR="/home/msf_bennett/studio.dev/bennett studio/desktop"
 
+C_RESET='\033[0m'
+C_RED='\033[0;31m'
+C_GREEN='\033[0;32m'
+C_MAGENTA='\033[0;35m'
+C_CYAN='\033[0;36m'
+C_DIM='\033[2m'
+
 start_desktop() {
     if [ -f "$PIDFILE" ] && kill -0 $(cat "$PIDFILE") 2>/dev/null; then
-        echo "🖥️  Desktop already running (PID: $(cat $PIDFILE))"
+        echo -e "[${C_MAGENTA}DESKTOP${C_RESET}] ${C_GREEN}Already running (PID: $(cat $PIDFILE))${C_RESET}"
         exit 0
     fi
-    echo "🖥️  Starting Desktop (Tauri dev) on http://localhost:5174..."
+    echo -e "[${C_MAGENTA}DESKTOP${C_RESET}] Starting Desktop (Tauri dev) on ${C_CYAN}http://localhost:5174${C_RESET}..."
     cd "$DESKTOP_DIR" || exit 1
-    
+
     # If running in tmux, run in foreground so Tauri manages Vite properly
     if [ -n "$TMUX" ]; then
         npm run tauri dev
@@ -19,30 +26,30 @@ start_desktop() {
         nohup npm run tauri dev > "$LOGFILE" 2>&1 &
         echo $! > "$PIDFILE"
         sleep 5
-        echo "🖥️  Desktop started (PID: $(cat $PIDFILE))"
+        echo -e "[${C_GREEN}OK${C_RESET}] ${C_GREEN}Desktop started (PID: $(cat $PIDFILE))${C_RESET}"
     fi
 }
 
 stop_desktop() {
     if [ -f "$PIDFILE" ] && kill -0 $(cat "$PIDFILE") 2>/dev/null; then
-        echo "🖥️  Stopping Desktop (PID: $(cat $PIDFILE))..."
+        echo -e "[${C_MAGENTA}DESKTOP${C_RESET}] Stopping (PID: $(cat $PIDFILE))..."
         kill $(cat "$PIDFILE") 2>/dev/null
         sleep 1
         pkill -f "tauri.*dev" 2>/dev/null
         pkill -f "vite.*bennett studio/desktop" 2>/dev/null
         rm -f "$PIDFILE"
-        echo "🖥️  Desktop stopped"
+        echo -e "[${C_GREEN}OK${C_RESET}] ${C_GREEN}Desktop stopped${C_RESET}"
     else
-        echo "🖥️  Desktop not running"
+        echo -e "[${C_MAGENTA}DESKTOP${C_RESET}] ${C_RED}Not running${C_RESET}"
         rm -f "$PIDFILE"
     fi
 }
 
 status_desktop() {
     if [ -f "$PIDFILE" ] && kill -0 $(cat "$PIDFILE") 2>/dev/null; then
-        echo "🖥️  Desktop: RUNNING (PID: $(cat $PIDFILE), Port: 5174)"
+        echo -e "[${C_MAGENTA}DESKTOP${C_RESET}]  ${C_GREEN}RUNNING${C_RESET} (PID: $(cat $PIDFILE), Port: ${C_CYAN}5174${C_RESET})"
     else
-        echo "🖥️  Desktop: STOPPED"
+        echo -e "[${C_MAGENTA}DESKTOP${C_RESET}]  ${C_RED}STOPPED${C_RESET}"
         rm -f "$PIDFILE" 2>/dev/null
     fi
 }
@@ -52,14 +59,14 @@ clear_desktop() {
     rm -rf "$DESKTOP_DIR/node_modules/.vite"
     rm -rf "$DESKTOP_DIR/node_modules/.cache"
     rm -rf "$DESKTOP_DIR/src-tauri/target/debug"
-    echo "🖥️  Desktop cache cleared"
+    echo -e "[${C_MAGENTA}DESKTOP${C_RESET}] ${C_GREEN}Desktop cache cleared${C_RESET}"
 }
 
 logs_desktop() {
     if [ -f "$LOGFILE" ]; then
         tail -f "$LOGFILE"
     else
-        echo "🖥️  No log file. Start desktop first."
+        echo -e "[${C_MAGENTA}DESKTOP${C_RESET}] ${C_RED}No log file. Start desktop first.${C_RESET}"
     fi
 }
 
@@ -70,5 +77,5 @@ case "$1" in
     status)  status_desktop ;;
     clear)   clear_desktop ;;
     logs)    logs_desktop ;;
-    *)       echo "Usage: $0 {start|stop|restart|status|clear|logs}"; exit 1 ;;
+    *)       echo -e "${C_RED}Usage: $0 {start|stop|restart|status|clear|logs}${C_RESET}"; exit 1 ;;
 esac

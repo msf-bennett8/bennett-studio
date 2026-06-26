@@ -4,38 +4,46 @@ PIDFILE="/tmp/bennett-web.pid"
 LOGFILE="/tmp/bennett-web.log"
 WEB_DIR="/home/msf_bennett/studio.dev/bennett studio/web"
 
+C_RESET='\033[0m'
+C_RED='\033[0;31m'
+C_GREEN='\033[0;32m'
+C_BLUE='\033[0;34m'
+C_CYAN='\033[0;36m'
+C_DIM='\033[2m'
+
 start_web() {
     if [ -f "$PIDFILE" ] && kill -0 $(cat "$PIDFILE") 2>/dev/null; then
-        echo "🌐 Web already running (PID: $(cat $PIDFILE))"
+        echo -e "[${C_GREEN}WEB${C_RESET}] ${C_GREEN}Already running (PID: $(cat $PIDFILE))${C_RESET}"
         exit 0
     fi
-    echo "🌐 Starting Web dev server on http://localhost:5173..."
+    echo -e "[${C_GREEN}WEB${C_RESET}] Starting Web dev server on ${C_CYAN}http://localhost:5173${C_RESET}..."
     cd "$WEB_DIR" || exit 1
-    nohup npm run dev > "$LOGFILE" 2>&1 &
+    # Use --no-open to prevent Vite from opening a new tab automatically
+    nohup npm run dev -- --no-open > "$LOGFILE" 2>&1 &
     echo $! > "$PIDFILE"
     sleep 3
-    echo "🌐 Web started (PID: $(cat $PIDFILE))"
+    echo -e "[${C_GREEN}OK${C_RESET}] ${C_GREEN}Web started (PID: $(cat $PIDFILE))${C_RESET}"
 }
 
 stop_web() {
     if [ -f "$PIDFILE" ] && kill -0 $(cat "$PIDFILE") 2>/dev/null; then
-        echo "🌐 Stopping Web (PID: $(cat $PIDFILE))..."
+        echo -e "[${C_GREEN}WEB${C_RESET}] Stopping (PID: $(cat $PIDFILE))..."
         kill $(cat "$PIDFILE") 2>/dev/null
         sleep 1
         pkill -f "vite.*bennett studio/web" 2>/dev/null
         rm -f "$PIDFILE"
-        echo "🌐 Web stopped"
+        echo -e "[${C_GREEN}OK${C_RESET}] ${C_GREEN}Web stopped${C_RESET}"
     else
-        echo "🌐 Web not running"
+        echo -e "[${C_GREEN}WEB${C_RESET}] ${C_RED}Not running${C_RESET}"
         rm -f "$PIDFILE"
     fi
 }
 
 status_web() {
     if [ -f "$PIDFILE" ] && kill -0 $(cat "$PIDFILE") 2>/dev/null; then
-        echo "🌐 Web: RUNNING (PID: $(cat $PIDFILE), Port: 5173)"
+        echo -e "[${C_GREEN}WEB${C_RESET}]  ${C_GREEN}RUNNING${C_RESET} (PID: $(cat $PIDFILE), Port: ${C_CYAN}5173${C_RESET})"
     else
-        echo "🌐 Web: STOPPED"
+        echo -e "[${C_GREEN}WEB${C_RESET}]  ${C_RED}STOPPED${C_RESET}"
         rm -f "$PIDFILE" 2>/dev/null
     fi
 }
@@ -44,14 +52,14 @@ clear_web() {
     rm -f "$LOGFILE"
     rm -rf "$WEB_DIR/node_modules/.vite"
     rm -rf "$WEB_DIR/node_modules/.cache"
-    echo "🌐 Web cache cleared"
+    echo -e "[${C_GREEN}WEB${C_RESET}] ${C_GREEN}Web cache cleared${C_RESET}"
 }
 
 logs_web() {
     if [ -f "$LOGFILE" ]; then
         tail -f "$LOGFILE"
     else
-        echo "🌐 No log file. Start web first."
+        echo -e "[${C_GREEN}WEB${C_RESET}] ${C_RED}No log file. Start web first.${C_RESET}"
     fi
 }
 
@@ -62,5 +70,5 @@ case "$1" in
     status)  status_web ;;
     clear)   clear_web ;;
     logs)    logs_web ;;
-    *)       echo "Usage: $0 {start|stop|restart|status|clear|logs}"; exit 1 ;;
+    *)       echo -e "${C_RED}Usage: $0 {start|stop|restart|status|clear|logs}${C_RESET}"; exit 1 ;;
 esac

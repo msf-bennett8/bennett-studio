@@ -6,12 +6,83 @@ BUILD_LOG="/tmp/bennett-engine-build.log"
 ENGINE_DIR="/home/msf_bennett/studio.dev/bennett studio"
 BINARY="$ENGINE_DIR/target/debug/bennett-engine"
 
+# Color definitions
+C_RESET='\033[0m'
+C_RED='\033[0;31m'
+C_GREEN='\033[0;32m'
+C_YELLOW='\033[0;33m'
+C_BLUE='\033[0;34m'
+C_MAGENTA='\033[0;35m'
+C_CYAN='\033[0;36m'
+C_WHITE='\033[1;37m'
+C_BOLD='\033[1m'
+C_DIM='\033[2m'
+
+# Startup milestones we look for in the log
+declare -A MILESTONES=(
+    ["Share store initialized"]="[ENGINE] Share store ready"
+    ["Signing key loaded"]="[ENGINE] Signing key loaded"
+    ["Audit initialized"]="[ENGINE] Audit service ready"
+    ["Docker daemon verified"]="[ENGINE] Docker daemon connected"
+    ["Cleaned up"]="[ENGINE] Share store cleanup done"
+    ["Scanning for existing"]="[ENGINE] Scanning Docker containers..."
+    ["Discovered"]="[ENGINE] Container discovery complete"
+    ["gRPC server starting"]="[ENGINE] gRPC server starting..."
+    ["Wire proxy starting"]="[ENGINE] Wire proxy starting..."
+    ["Bennett Engine starting"]="[ENGINE] HTTP server binding..."
+    ["Listening on"]="[ENGINE] Engine listening!"
+)
+
+# Progress bar state
+PROGRESS_BAR_WIDTH=40
+LAST_PROGRESS=0
+BLINK_STATE=0
+
+# Draw a progress bar on the current line, overwriting it
+draw_progress_bar() {
+    local percent=$1
+    local elapsed=$2
+    local label=$3
+    local filled=$(( percent * PROGRESS_BAR_WIDTH / 100 ))
+    local empty=$(( PROGRESS_BAR_WIDTH - filled ))
+
+    # Build bar string
+    local bar=""
+    for ((i=0; i<filled; i++)); do bar+="#"; done
+    for ((i=0; i<empty; i++)); do bar+="-"; done
+
+    # ANSI: move to start of line, clear to end, print bar with elapsed time
+    printf "\r\033[K[%s] %3d%% %s (%ss)" "$bar" "$percent" "$label" "$elapsed"
+}
+
+# Blink the last character of the bar when idle
+blink_progress_bar() {
+    local percent=$1
+    local elapsed=$2
+    local filled=$(( percent * PROGRESS_BAR_WIDTH / 100 ))
+    local empty=$(( PROGRESS_BAR_WIDTH - filled ))
+
+    BLINK_STATE=$(( (BLINK_STATE + 1) % 2 ))
+
+    local bar=""
+    for ((i=0; i<filled; i++)); do
+        if [ $i -eq $((filled - 1)) ] && [ $BLINK_STATE -eq 0 ] && [ $percent -lt 100 ]; then
+            bar+="-"  # Blink the last filled char
+        else
+            bar+="#"
+        fi
+    done
+    for ((i=0; i<empty; i++)); do bar+="-"; done
+
+    printf "\r\033[K[%s] %3d%% waiting... (%ss)" "$bar" "$percent" "$elapsed"
+}
+
 start_engine() {
     # Check if already running
     if [ -f "$PIDFILE" ]; then
         local old_pid=$(cat "$PIDFILE")
         if kill -0 "$old_pid" 2>/dev/null; then
-            echo "🔧 Engine already running (PID: $old_pid)"
+            echo -e "[${C_YELLOW}ENGINE${C_RESET}] ${C_GREEN}Already running (PID: $old_pid)${C_RESET}"
             exit 0
         fi
     fi
@@ -31,8 +102,8 @@ start_engine() {
 
     # Build first if binary doesn't exist
     if [ ! -x "$BINARY" ]; then
-        echo "🔨 Building engine first (this takes ~10 min)..."
-        echo "   Build log: $BUILD_LOG"
+        echo -e "[${C_YELLOW}BUILD${C_RESET}] Building engine first (this takes ~10 min)..."
+        echo -e "   ${C_DIM}Build log: $BUILD_LOG${C_RESET}"
 
         # Kill any stale cargo processes holding the lock
         pkill -f "cargo.*bennett" 2>/dev/null || true
@@ -41,64 +112,144 @@ start_engine() {
         sleep 2
 
         if ! cargo build --bin bennett-engine 2>&1 | tee "$BUILD_LOG"; then
-            echo "❌ BUILD FAILED — check $BUILD_LOG"
+            echo -e "[${C_RED}ERROR${C_RESET}] ${C_RED}BUILD FAILED -- check $BUILD_LOG${C_RESET}"
             exit 1
         fi
-        echo "✅ Build complete"
+        echo -e "[${C_GREEN}OK${C_RESET}] ${C_GREEN}Build complete${C_RESET}"
     fi
 
+    # Clear old log so we don't see stale milestones
+    rm -f "$LOGFILE"
+
     # Start the pre-built binary directly (NOT via cargo run)
-    echo "🔧 Starting Bennett Engine on http://0.0.0.0:${PORT}..."
+    echo -e "[${C_YELLOW}ENGINE${C_RESET}] Starting Bennett Engine on ${C_CYAN}http://0.0.0.0:${PORT}${C_RESET}..."
+    echo -e "[${C_CYAN}WAIT${C_RESET}] Waiting for engine to be ready (up to 24 minutes)..."
+    echo ""
+
+    # Print initial progress bar
+    draw_progress_bar 0 0 "initializing"
+
     nohup "$BINARY" > "$LOGFILE" 2>&1 &
     local ENGINE_PID=$!
     echo "$ENGINE_PID" > "$PIDFILE"
 
-    # Wait for health check with progress — INCREASED to 24 minutes
-    # because list_bennett_containers() can take 2+ minutes on first start
-    echo "⏳ Waiting for engine to be ready (up to 24 minutes)..."
+    local last_milestone=""
+    local milestone_count=0
+    local progress=0
+    local last_progress_time=0
+
     for i in {1..1440}; do
+        # Check health first (fast path)
         if curl -s "http://localhost:$PORT/api/health" > /dev/null 2>&1; then
-            echo "✅ Engine ready (PID: $ENGINE_PID, Port: $PORT)"
+            # Final bar at 100%
+            printf "\r\033[K"
+            draw_progress_bar 100 $i "READY"
+            printf "\n\n[${C_GREEN}OK${C_RESET}] ${C_GREEN}Engine ready (PID: $ENGINE_PID, Port: $PORT)${C_RESET}\n"
             return 0
         fi
 
+        # Check if engine crashed
         if ! kill -0 "$ENGINE_PID" 2>/dev/null; then
-            echo "❌ Engine crashed! Check: tail -30 $LOGFILE"
+            printf "\r\033[K\n[${C_RED}ERROR${C_RESET}] ${C_RED}Engine crashed! Check: tail -30 $LOGFILE${C_RESET}\n"
             rm -f "$PIDFILE"
             exit 1
         fi
 
-        # Show progress every 10 seconds, plus milestones
-        if [ $((i % 10)) -eq 0 ]; then
-            echo "   ... waiting ($i seconds)"
+        # Scan log for new milestones
+        local new_milestone_found=0
+        if [ -f "$LOGFILE" ]; then
+            for pattern in "${!MILESTONES[@]}"; do
+                if [[ "$last_milestone" != *"$pattern"* ]]; then
+                    if grep -q "$pattern" "$LOGFILE" 2>/dev/null; then
+                        last_milestone="$last_milestone $pattern"
+                        milestone_count=$((milestone_count + 1))
+                        new_milestone_found=1
+
+                        # Map milestone to progress percentage
+                        local new_progress=0
+                        case "$pattern" in
+                            "Share store initialized") new_progress=5 ;;
+                            "Signing key loaded") new_progress=10 ;;
+                            "Audit initialized") new_progress=15 ;;
+                            "Docker daemon verified") new_progress=20 ;;
+                            "Cleaned up") new_progress=25 ;;
+                            "Scanning for existing") new_progress=30 ;;
+                            "Discovered") new_progress=50 ;;
+                            "gRPC server starting") new_progress=60 ;;
+                            "Wire proxy starting") new_progress=70 ;;
+                            "Bennett Engine starting") new_progress=80 ;;
+                            "Listening on") new_progress=90 ;;
+                            *) new_progress=$((progress + 5)) ;;
+                        esac
+
+                        # Only move forward, never backward
+                        if [ $new_progress -gt $progress ]; then
+                            progress=$new_progress
+                            LAST_PROGRESS=$progress
+                        fi
+
+                        # Log above the bar, then redraw bar at new position
+                        printf "\r\033[K\n%s\n" "   ${MILESTONES[$pattern]}"
+                        draw_progress_bar "$progress" "$i" "waiting..."
+                    fi
+                fi
+            done
         fi
-        if [ $i -eq 300 ]; then
-            echo "   ... 5 minutes elapsed, still waiting..."
+
+        # Time-based progress (slow creep forward if no milestones)
+        if [ $new_milestone_found -eq 0 ]; then
+            # Every 30 seconds, bump progress by 1% (up to 95%)
+            if [ $((i % 30)) -eq 0 ] && [ $progress -lt 95 ]; then
+                progress=$((progress + 1))
+                LAST_PROGRESS=$progress
+            fi
+
+            # Blink the bar every second when idle
+            blink_progress_bar "$progress" "$i"
         fi
-        if [ $i -eq 600 ]; then
-            echo "   ... 10 minutes elapsed, still waiting..."
+
+        # Time markers at key intervals (log above bar)
+        if [ $i -eq 60 ] && [[ "$last_milestone" != *"[TIME_60]"* ]]; then
+            last_milestone="$last_milestone [TIME_60]"
+            printf "\r\033[K\n   [${C_YELLOW}TIME${C_RESET}] 1 minute... (container scanning may take 2+ min)\n"
+            draw_progress_bar "$progress" "$i" "waiting..."
+        elif [ $i -eq 120 ] && [[ "$last_milestone" != *"[TIME_120]"* ]]; then
+            last_milestone="$last_milestone [TIME_120]"
+            printf "\r\033[K\n   [${C_YELLOW}TIME${C_RESET}] 2 minutes... (still scanning Docker containers)\n"
+            draw_progress_bar "$progress" "$i" "waiting..."
+        elif [ $i -eq 300 ] && [[ "$last_milestone" != *"[TIME_300]"* ]]; then
+            last_milestone="$last_milestone [TIME_300]"
+            printf "\r\033[K\n   [${C_YELLOW}TIME${C_RESET}] 5 minutes... (this is taking longer than usual)\n"
+            draw_progress_bar "$progress" "$i" "waiting..."
+        elif [ $i -eq 600 ] && [[ "$last_milestone" != *"[TIME_600]"* ]]; then
+            last_milestone="$last_milestone [TIME_600]"
+            printf "\r\033[K\n   [${C_YELLOW}TIME${C_RESET}] 10 minutes... (check: tail -f $LOGFILE)\n"
+            draw_progress_bar "$progress" "$i" "waiting..."
+        elif [ $i -eq 900 ] && [[ "$last_milestone" != *"[TIME_900]"* ]]; then
+            last_milestone="$last_milestone [TIME_900]"
+            printf "\r\033[K\n   [${C_YELLOW}TIME${C_RESET}] 15 minutes... (possible hang -- check logs)\n"
+            draw_progress_bar "$progress" "$i" "waiting..."
+        elif [ $i -eq 1200 ] && [[ "$last_milestone" != *"[TIME_1200]"* ]]; then
+            last_milestone="$last_milestone [TIME_1200]"
+            printf "\r\033[K\n   [${C_YELLOW}TIME${C_RESET}] 20 minutes... (consider: msf bennett stop + check Docker)\n"
+            draw_progress_bar "$progress" "$i" "waiting..."
         fi
-        if [ $i -eq 900 ]; then
-            echo "   ... 15 minutes elapsed, still waiting..."
-        fi
-        if [ $i -eq 1200 ]; then
-            echo "   ... 20 minutes elapsed, still waiting..."
-        fi
+
         sleep 1
     done
 
-    echo "⚠️  Engine started but health check not responding yet"
-    echo "   Check: tail -f $LOGFILE"
+    printf "\r\033[K\n[${C_YELLOW}WARN${C_RESET}] Engine started but health check not responding after 24 minutes\n"
+    echo -e "   ${C_DIM}Check: tail -f $LOGFILE${C_RESET}"
 }
 
 stop_engine() {
-    echo "🔧 Stopping Engine..."
-    
+    echo -e "[${C_YELLOW}ENGINE${C_RESET}] Stopping Engine..."
+
     # Kill by PID file first
     if [ -f "$PIDFILE" ]; then
         local pid=$(cat "$PIDFILE")
         if kill -0 "$pid" 2>/dev/null; then
-            echo "   Killing PID $pid..."
+            echo -e "   ${C_DIM}Killing PID $pid...${C_RESET}"
             kill "$pid" 2>/dev/null
             sleep 1
             kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null
@@ -109,7 +260,7 @@ stop_engine() {
     # CRITICAL: Also kill ALL bennett-engine processes (handles orphaned processes)
     local pids=$(pgrep -f "bennett-engine" 2>/dev/null || true)
     if [ -n "$pids" ]; then
-        echo "   Killing orphaned bennett-engine processes: $pids"
+        echo -e "   ${C_YELLOW}Killing orphaned bennett-engine processes: $pids${C_RESET}"
         pkill -9 -f "bennett-engine" 2>/dev/null || true
         sleep 1
     fi
@@ -118,38 +269,38 @@ stop_engine() {
     pkill -f "cargo.*bennett" 2>/dev/null || true
     pkill -f "rustc.*bennett" 2>/dev/null || true
     pkill -f "rust-lld" 2>/dev/null || true
-    
+
     # Wait for processes to actually die
     for i in {1..5}; do
         if ! pgrep -f "bennett-engine" > /dev/null 2>&1; then
-            echo "✅ Engine stopped"
+            echo -e "[${C_GREEN}OK${C_RESET}] ${C_GREEN}Engine stopped${C_RESET}"
             return 0
         fi
         sleep 1
     done
-    
-    echo "⚠️  Some engine processes may still be running"
+
+    echo -e "[${C_YELLOW}WARN${C_RESET}] ${C_YELLOW}Some engine processes may still be running${C_RESET}"
 }
 
 status_engine() {
     if [ -f "$PIDFILE" ] && kill -0 $(cat "$PIDFILE") 2>/dev/null; then
-        echo "🔧 Engine: RUNNING (PID: $(cat $PIDFILE), Port: $(cat /tmp/bennett-engine.port 2>/dev/null || echo 3001))"
+        echo -e "[${C_YELLOW}ENGINE${C_RESET}]  ${C_GREEN}RUNNING${C_RESET} (PID: $(cat $PIDFILE), Port: ${C_CYAN}$(cat /tmp/bennett-engine.port 2>/dev/null || echo 3001)${C_RESET})"
     else
-        echo "🔧 Engine: STOPPED"
+        echo -e "[${C_YELLOW}ENGINE${C_RESET}]  ${C_RED}STOPPED${C_RESET}"
         rm -f "$PIDFILE" 2>/dev/null
     fi
 }
 
 clear_engine() {
     rm -f "$LOGFILE" "$BUILD_LOG"
-    echo "🔧 Logs cleared"
+    echo -e "[${C_YELLOW}ENGINE${C_RESET}] ${C_GREEN}Logs cleared${C_RESET}"
 }
 
 logs_engine() {
     if [ -f "$LOGFILE" ]; then
         tail -f "$LOGFILE"
     else
-        echo "🔧 No log file"
+        echo -e "[${C_YELLOW}ENGINE${C_RESET}] ${C_RED}No log file${C_RESET}"
     fi
 }
 
@@ -160,5 +311,5 @@ case "$1" in
     status)  status_engine ;;
     clear)   clear_engine ;;
     logs)    logs_engine ;;
-    *)       echo "Usage: $0 {start|stop|restart|status|clear|logs}"; exit 1 ;;
+    *)       echo -e "${C_RED}Usage: $0 {start|stop|restart|status|clear|logs}${C_RESET}"; exit 1 ;;
 esac

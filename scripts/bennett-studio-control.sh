@@ -8,91 +8,103 @@ ACTION="$2"
 PROJECT="$3"
 ENV="$4"
 
+# Color definitions
+C_RESET='\033[0m'
+C_RED='\033[0;31m'
+C_GREEN='\033[0;32m'
+C_YELLOW='\033[0;33m'
+C_BLUE='\033[0;34m'
+C_MAGENTA='\033[0;35m'
+C_CYAN='\033[0;36m'
+C_WHITE='\033[1;37m'
+C_BOLD='\033[1m'
+C_DIM='\033[2m'
+
 # ============================================================================
 # Help message function
 # ============================================================================
 show_help() {
     echo ""
-    echo "╔══════════════════════════════════════════════════════════════════════╗"
-    echo "║           MSF Bennett Studio Development Commands                    ║"
-    echo "╚══════════════════════════════════════════════════════════════════════╝"
+    echo -e "${C_BOLD}+----------------------------------------------------------------------+${C_RESET}"
+    echo -e "${C_BOLD}|  ${C_CYAN}MSF Bennett Studio Development Commands${C_RESET}${C_BOLD}                            |${C_RESET}"
+    echo -e "${C_BOLD}+----------------------------------------------------------------------+${C_RESET}"
     echo ""
-    echo "Usage: msf bennett <action> <project> <env> [options]"
-    echo "       bennett <action> <project> <env> [options]"
+    echo -e "${C_DIM}Usage:${C_RESET} ${C_WHITE}msf bennett <action> <project> <env> [options]${C_RESET}"
+    echo -e "${C_DIM}       ${C_WHITE}bennett <action> <project> <env> [options]${C_RESET}"
     echo ""
     echo "Projects:"
-    echo "  bennett-studio    Bennett Studio (desktop + web + engine)"
-    echo "  oshocks           Oshocks project"
+    echo -e "  ${C_CYAN}bennett-studio${C_RESET}    Bennett Studio (desktop + web + engine)"
+    echo -e "  ${C_GREEN}oshocks${C_RESET}           Oshocks project"
     echo ""
     echo "Environments:"
-    echo "  dev               Development mode"
-    echo "  prod              Production mode (not yet implemented)"
+    echo -e "  ${C_YELLOW}dev${C_RESET}               Development mode"
+    echo -e "  ${C_DIM}prod${C_RESET}              Production mode (not yet implemented)"
     echo ""
-    echo "Actions:"
+    echo -e "${C_BOLD}Actions:${C_RESET}"
     echo ""
-    echo "  ┌────────────────────────────────────────────────────────────────┐"
-    echo "  │ START / STOP                                                   │"
-    echo "  ├────────────────────────────────────────────────────────────────┤"
-    echo "  │ start                    Fast start (~2-130s)                  │"
-    echo "  │                          Builds engine only if binary missing  │"
-    echo "  │                                                                │"
-    echo "  │ restart                  Stop + start (~2-130s)                │"
-    echo "  │                          Preserves binary, prompts for Docker  │"
-    echo "  │                                                                │"
-    echo "  │ restart --with-docker    Restart + restart Docker containers   │"
-    echo "  │                                                                │"
-    echo "  │ rebuild                  Full clean rebuild (~6-10min)         │"
-    echo "  │                          cargo clean + build + start           │"
-    echo "  │                                                                │"
-    echo "  │ build                    Compile engine only (~2-5min)         │"
-    echo "  │                          Does not start servers                │"
-    echo "  │                                                                │"
-    echo "  │ stop                     Stop all servers + Docker (optional)  │"
-    echo "  └────────────────────────────────────────────────────────────────┘"
+    echo -e "${C_BOLD}  +--------------------------------------------------------------+${C_RESET}"
+    echo -e "${C_BOLD}  | ${C_CYAN}START / STOP${C_RESET}${C_BOLD}                                                 |${C_RESET}"
+    echo -e "${C_BOLD}  +--------------------------------------------------------------+${C_RESET}"
+    echo -e "  | ${C_GREEN}start${C_RESET}                    Fast start (~2-130s)                |"
+    echo -e "  |                          Builds engine only if binary missing|"
+    echo -e "  |                                                              |"
+    echo -e "  | ${C_GREEN}restart${C_RESET}                  Stop + start (~2-130s)              |"
+    echo -e "  |                          Preserves binary, prompts for Docker|"
+    echo -e "  |                                                              |"
+    echo -e "  | ${C_GREEN}restart --with-docker${C_RESET}    Restart + restart Docker containers |"
+    echo -e "  |                                                              |"
+    echo -e "  | ${C_YELLOW}rebuild${C_RESET}                  Full clean rebuild (~6-10min)       |"
+    echo -e "  |                          cargo clean + build + start         |"
+    echo -e "  |                                                              |"
+    echo -e "  | ${C_YELLOW}build${C_RESET}                    Compile engine only (~2-5min)      |"
+    echo -e "  |                          Does not start servers              |"
+    echo -e "  |                                                              |"
+    echo -e "  | ${C_RED}stop${C_RESET}                     Stop all servers + Docker (optional) |"
+    echo -e "${C_BOLD}  +--------------------------------------------------------------+${C_RESET}"
     echo ""
-    echo "  ┌────────────────────────────────────────────────────────────────┐"
-    echo "  │ CLEAR / CLEAN                                                  │"
-    echo "  ├────────────────────────────────────────────────────────────────┤"
-    echo "  │ clear                    Clear logs only (preserves binary)    │"
-    echo "  │                          Next start is fast                    │"
-    echo "  │                                                                │"
-    echo "  │ clear-all                Clear logs + cargo clean              │"
-    echo "  │                          DESTRUCTIVE — forces full rebuild     │"
-    echo "  └────────────────────────────────────────────────────────────────┘"
+    echo -e "${C_BOLD}  +--------------------------------------------------------------+${C_RESET}"
+    echo -e "${C_BOLD}  | ${C_CYAN}CLEAR / CLEAN${C_RESET}${C_BOLD}                                                |${C_RESET}"
+    echo -e "${C_BOLD}  +--------------------------------------------------------------+${C_RESET}"
+    echo -e "  | ${C_GREEN}clear${C_RESET}                    Clear logs only (preserves binary)  |"
+    echo -e "  |                          Next start is fast                  |"
+    echo -e "  |                                                              |"
+    echo -e "  | ${C_RED}clear-all${C_RESET}                Clear logs + cargo clean            |"
+    echo -e "  |                          ${C_RED}DESTRUCTIVE -- forces full rebuild${C_RESET}  |"
+    echo -e "${C_BOLD}  +--------------------------------------------------------------+${C_RESET}"
     echo ""
-    echo "  ┌────────────────────────────────────────────────────────────────┐"
-    echo "  │ MONITOR / DEBUG                                                │"
-    echo "  ├────────────────────────────────────────────────────────────────┤"
-    echo "  │ status                   Show running status of all services   │"
-    echo "  │                                                                │"
-    echo "  │ logs [service]           Tail logs (default: all)              │"
-    echo "  │                          Services: engine, web, desktop, docker│"
-    echo "  │                                                                │"
-    echo "  │ attach                   Attach to tmux session                │"
-    echo "  │                          Ctrl+B then D to detach               │"
-    echo "  │                                                                │"
-    echo "  │ tree                     Show project file tree                │"
-    echo "  └────────────────────────────────────────────────────────────────┘"
+    echo -e "${C_BOLD}  +--------------------------------------------------------------+${C_RESET}"
+    echo -e "${C_BOLD}  | ${C_CYAN}MONITOR / DEBUG${C_RESET}${C_BOLD}                                              |${C_RESET}"
+    echo -e "${C_BOLD}  +--------------------------------------------------------------+${C_RESET}"
+    echo -e "  | ${C_BLUE}status${C_RESET}                   Show running status of all services   |"
+    echo -e "  |                                                              |"
+    echo -e "  | ${C_BLUE}logs [service]${C_RESET}           Tail logs (default: all)            |"
+    echo -e "  |                          Services: ${C_CYAN}engine${C_RESET}, ${C_CYAN}web${C_RESET}, ${C_CYAN}desktop${C_RESET}, ${C_CYAN}docker${C_RESET}|"
+    echo -e "  |                                                              |"
+    echo -e "  | ${C_MAGENTA}attach${C_RESET}                   Attach to tmux session              |"
+    echo -e "  |                          Ctrl+B then D to detach             |"
+    echo -e "  |                                                              |"
+    echo -e "  | ${C_MAGENTA}tree${C_RESET}                     Show project file tree              |"
+    echo -e "${C_BOLD}  +--------------------------------------------------------------+${C_RESET}"
     echo ""
-    echo "Examples:"
-    echo "  msf bennett start bennett-studio dev"
-    echo "  msf bennett restart bennett-studio dev"
-    echo "  msf bennett restart --with-docker bennett-studio dev"
-    echo "  msf bennett stop bennett-studio dev"
-    echo "  msf bennett clear bennett-studio dev"
-    echo "  msf bennett status bennett-studio dev"
-    echo "  msf bennett logs bennett-studio dev engine"
-    echo "  msf bennett attach bennett-studio dev"
+    echo -e "${C_BOLD}Examples:${C_RESET}"
+    echo -e "  ${C_WHITE}msf bennett start bennett-studio dev${C_RESET}"
+    echo -e "  ${C_WHITE}msf bennett restart bennett-studio dev${C_RESET}"
+    echo -e "  ${C_WHITE}msf bennett restart --with-docker bennett-studio dev${C_RESET}"
+    echo -e "  ${C_WHITE}msf bennett stop bennett-studio dev${C_RESET}"
+    echo -e "  ${C_WHITE}msf bennett clear bennett-studio dev${C_RESET}"
+    echo -e "  ${C_WHITE}msf bennett status bennett-studio dev${C_RESET}"
+    echo -e "  ${C_WHITE}msf bennett logs bennett-studio dev engine${C_RESET}"
+    echo -e "  ${C_WHITE}msf bennett attach bennett-studio dev${C_RESET}"
     echo ""
-    echo "  bennett start bennett-studio dev"
-    echo "  bennett restart bennett-studio dev"
-    echo "  bennett stop bennett-studio dev"
+    echo -e "  ${C_WHITE}bennett start bennett-studio dev${C_RESET}"
+    echo -e "  ${C_WHITE}bennett restart bennett-studio dev${C_RESET}"
+    echo -e "  ${C_WHITE}bennett stop bennett-studio dev${C_RESET}"
     echo ""
-    echo "Tips:"
-    echo "  • First start after clear-all or rebuild: ~6-10 minutes"
-    echo "  • Daily start with existing binary: ~2-130 seconds"
-    echo "  • Engine startup time depends on Docker container scanning"
-    echo "  • Use Ctrl+C to exit logs, Ctrl+B then D to detach from tmux"
+    echo -e "${C_BOLD}Tips:${C_RESET}"
+    echo -e "  ${C_DIM}* First start after clear-all or rebuild: ~6-10 minutes${C_RESET}"
+    echo -e "  ${C_DIM}* Daily start with existing binary: ~2-130 seconds${C_RESET}"
+    echo -e "  ${C_DIM}* Engine startup time depends on Docker container scanning${C_RESET}"
+    echo -e "  ${C_DIM}* Use Ctrl+C to exit logs, Ctrl+B then D to detach from tmux${C_RESET}"
     echo ""
 }
 
@@ -120,11 +132,12 @@ BINARY="$PROJECT_DIR/target/debug/bennett-engine"
 ask_docker() {
     local prompt="$1"
     while true; do
-        read -rp "$prompt [Y/n/Yes/No]: " answer
+        echo -ne "${C_CYAN}$prompt [Y/n/Yes/No]: ${C_RESET}"
+        read answer
         case "$answer" in
             [Yy]|[Yy][Ee][Ss]) return 0 ;;
             [Nn]|[Nn][Oo]) return 1 ;;
-            *) echo "Please enter Y, Yes, N, or No." ;;
+            *) echo -e "${C_YELLOW}Please enter Y, Yes, N, or No.${C_RESET}" ;;
         esac
     done
 }
@@ -135,9 +148,9 @@ docker_is_running() {
 
 docker_status() {
     if docker_is_running; then
-        echo "🐳 Docker: RUNNING"
+        echo -e "[${C_BLUE}DOCKER${C_RESET}]  ${C_GREEN}RUNNING${C_RESET}"
     else
-        echo "🐳 Docker: STOPPED"
+        echo -e "[${C_BLUE}DOCKER${C_RESET}]  ${C_RED}STOPPED${C_RESET}"
     fi
 }
 
@@ -147,29 +160,29 @@ check_docker_required() {
     fi
 
     echo ""
-    echo "❌ Docker is NOT running."
+    echo -e "[${C_RED}ERROR${C_RESET}] ${C_RED}Docker is NOT running.${C_RESET}"
     echo ""
     echo "   The engine needs Docker to manage database containers."
     echo ""
     echo "   Quick start:"
-    echo "   sudo dockerd"
+    echo -e "   ${C_CYAN}sudo dockerd${C_RESET}"
     echo ""
     echo "   Or in background:"
-    echo "   tmux new-session -s docker 'sudo dockerd'"
+    echo -e "   ${C_CYAN}tmux new-session -s docker 'sudo dockerd'${C_RESET}"
     echo ""
 
-    echo "⏳ Waiting 15 seconds for Docker to start (Ctrl+C to cancel)..."
+    echo -e "${C_YELLOW}Waiting 15 seconds for Docker to start (Ctrl+C to cancel)...${C_RESET}"
     for i in 15 14 13 12 11 10 9 8 7 6 5 4 3 2 1; do
         if docker_is_running; then
             echo ""
-            echo "✅ Docker detected! Proceeding..."
+            echo -e "[${C_GREEN}OK${C_RESET}] ${C_GREEN}Docker detected! Proceeding...${C_RESET}"
             return 0
         fi
-        echo -ne "\r  $i seconds remaining... "
+        echo -ne "\r  ${C_DIM}$i seconds remaining... ${C_RESET}"
         sleep 1
     done
     echo ""
-    echo "❌ Docker still not running. Start it manually, then retry."
+    echo -e "[${C_RED}ERROR${C_RESET}] ${C_RED}Docker still not running. Start it manually, then retry.${C_RESET}"
     echo ""
     return 1
 }
@@ -177,27 +190,27 @@ check_docker_required() {
 stop_docker() {
     if docker_is_running; then
         if ask_docker "Stop Docker?"; then
-            echo "🐳 Stopping Docker daemon..."
+            echo -e "[${C_BLUE}DOCKER${C_RESET}] Stopping Docker daemon..."
             if tmux has-session -t docker 2>/dev/null; then
                 tmux kill-session -t docker 2>/dev/null
             fi
             sudo pkill -x dockerd 2>/dev/null
             sleep 1
-            echo "✅ Docker daemon stopped"
+            echo -e "[${C_GREEN}OK${C_RESET}] ${C_GREEN}Docker daemon stopped${C_RESET}"
         else
-            echo "🐳 Docker left running."
+            echo -e "[${C_BLUE}DOCKER${C_RESET}] Docker left running."
         fi
     else
-        echo "🐳 Docker is not running."
+        echo -e "[${C_BLUE}DOCKER${C_RESET}] Docker is not running."
     fi
 }
 
 clear_docker() {
     if ask_docker "Clear Docker logs?"; then
         rm -f /tmp/dockerd.log 2>/dev/null
-        echo "🐳 Docker logs cleared"
+        echo -e "[${C_GREEN}OK${C_RESET}] ${C_GREEN}Docker logs cleared${C_RESET}"
     else
-        echo "🐳 Docker logs left intact."
+        echo -e "[${C_BLUE}DOCKER${C_RESET}] Logs left intact."
     fi
 }
 
@@ -206,8 +219,8 @@ clear_docker() {
 # ============================================================================
 
 build_engine() {
-    echo "🔨 Building Bennett Engine..."
-    echo "   Binary: $BINARY"
+    echo -e "[${C_YELLOW}BUILD${C_RESET}] Building Bennett Engine..."
+    echo -e "   ${C_DIM}Binary: $BINARY${C_RESET}"
     echo ""
 
     # Kill any stale cargo processes that might hold the build lock
@@ -219,12 +232,12 @@ build_engine() {
     cd "$ENGINE_DIR" || exit 1
     if cargo build --bin bennett-engine 2>&1 | tee /tmp/bennett-engine-build.log; then
         echo ""
-        echo "✅ Engine built successfully"
+        echo -e "[${C_GREEN}OK${C_RESET}] ${C_GREEN}Engine built successfully${C_RESET}"
         return 0
     else
         echo ""
-        echo "❌ Engine build failed!"
-        echo "   Check: cat /tmp/bennett-engine-build.log"
+        echo -e "[${C_RED}ERROR${C_RESET}] ${C_RED}Engine build failed!${C_RESET}"
+        echo -e "   ${C_DIM}Check: cat /tmp/bennett-engine-build.log${C_RESET}"
         return 1
     fi
 }
@@ -233,7 +246,7 @@ build_engine() {
 # CRITICAL: Kill all engine processes to prevent SQLite lock conflicts
 # ============================================================================
 kill_all_engines() {
-    echo "🔧 Ensuring no engine processes are running..."
+    echo -e "[${C_YELLOW}ENGINE${C_RESET}] Ensuring no engine processes are running..."
 
     # Kill by PID file
     if [ -f /tmp/bennett-engine.pid ]; then
@@ -248,19 +261,19 @@ kill_all_engines() {
     # Kill ALL bennett-engine processes (catches orphans)
     local pids=$(pgrep -f "bennett-engine" 2>/dev/null || true)
     if [ -n "$pids" ]; then
-        echo "   Killing orphaned processes: $pids"
+        echo -e "   ${C_YELLOW}Killing orphaned processes: $pids${C_RESET}"
         pkill -9 -f "bennett-engine" 2>/dev/null || true
         sleep 2
     fi
 
     # Verify they're dead
     if pgrep -f "bennett-engine" > /dev/null 2>&1; then
-        echo "⚠️  Some engine processes still running!"
+        echo -e "[${C_YELLOW}WARN${C_RESET}] ${C_YELLOW}Some engine processes still running!${C_RESET}"
         pkill -9 -f "bennett-engine" 2>/dev/null || true
         sleep 1
     fi
 
-    echo "✅ All engine processes stopped"
+    echo -e "[${C_GREEN}OK${C_RESET}] ${C_GREEN}All engine processes stopped${C_RESET}"
 }
 
 # ============================================================================
@@ -277,12 +290,12 @@ case "$PROJECT" in
       dev)
         case "$ACTION" in
           # ------------------------------------------------------------------
-          # START: Fast start — build only if binary missing
+          # START: Fast start -- build only if binary missing
           # ------------------------------------------------------------------
           start)
-            echo "=========================================="
-            echo "  🚀 Starting Bennett Studio Dev Servers"
-            echo "=========================================="
+            echo -e "${C_BOLD}+--------------------------------------------------------------+${C_RESET}"
+            echo -e "${C_BOLD}|  ${C_CYAN}STARTING Bennett Studio Dev Servers${C_RESET}${C_BOLD}                          |${C_RESET}"
+            echo -e "${C_BOLD}+--------------------------------------------------------------+${C_RESET}"
             echo ""
 
             if ! check_docker_required; then
@@ -290,9 +303,9 @@ case "$PROJECT" in
             fi
             echo ""
 
-            # Check if binary exists — build if missing
+            # Check if binary exists -- build if missing
             if [ ! -x "$BINARY" ]; then
-                echo "⚠️  Engine binary not found."
+                echo -e "[${C_YELLOW}WARN${C_RESET}] ${C_YELLOW}Engine binary not found.${C_RESET}"
                 echo "   Running initial build (this takes ~10 min)..."
                 echo ""
                 if ! build_engine; then
@@ -300,47 +313,69 @@ case "$PROJECT" in
                 fi
                 echo ""
             else
-                echo "✅ Using pre-built engine: $BINARY"
+                echo -e "[${C_GREEN}OK${C_RESET}] ${C_GREEN}Using pre-built engine:${C_RESET} ${C_WHITE}$BINARY${C_RESET}"
                 echo ""
             fi
 
             if tmux has-session -t bennett-studio-dev 2>/dev/null; then
-              echo "⚠️  tmux session 'bennett-studio-dev' already exists!"
+              echo -e "[${C_YELLOW}WARN${C_RESET}] ${C_YELLOW}tmux session 'bennett-studio-dev' already exists!${C_RESET}"
               echo "   Reattach: tmux attach -t bennett-studio-dev"
               echo "   Kill:     tmux kill-session -t bennett-studio-dev"
               exit 1
             fi
 
-            echo "📦 Creating tmux session 'bennett-studio-dev'..."
+            echo -e "[${C_MAGENTA}TMUX${C_RESET}] Creating session 'bennett-studio-dev'..."
             tmux new-session -d -s bennett-studio-dev -n servers
             tmux send-keys -t bennett-studio-dev:0 'bash "/home/msf_bennett/studio.dev/bennett studio/scripts/tmux-bennett-start.sh"' C-m
 
             echo ""
-            echo "=========================================="
-            echo "  ✅ All servers started in tmux!"
-            echo "=========================================="
+            echo -e "${C_BOLD}+--------------------------------------------------------------+${C_RESET}"
+            echo -e "${C_BOLD}|  ${C_GREEN}ALL SERVERS STARTED IN TMUX${C_RESET}${C_BOLD}                                 |${C_RESET}"
+            echo -e "${C_BOLD}+--------------------------------------------------------------+${C_RESET}"
             echo ""
-            echo "  📎 Attach: tmux attach -t bennett-studio-dev"
-            echo "  📎 Detach: Ctrl+B, then D"
-            echo "  📎 Kill:   tmux kill-session -t bennett-studio-dev"
+            echo -e "  ${C_CYAN}Attach:${C_RESET} tmux attach -t bennett-studio-dev"
+            echo -e "  ${C_CYAN}Detach:${C_RESET} Ctrl+B, then D"
+            echo -e "  ${C_CYAN}Kill:${C_RESET}   tmux kill-session -t bennett-studio-dev"
             echo ""
             echo "  Services:"
-            echo "    🐳 Docker:   $(docker_status | cut -d' ' -f2-)"
-            echo "    🔧 Engine:   http://localhost:3000"
-            echo "    🌐 Web:      http://localhost:5173"
-            echo "    🖥️  Desktop:  http://localhost:5174"
+            echo -e "    [${C_BLUE}DOCKER${C_RESET}]  $(docker_status | cut -d' ' -f2-)"
+            echo -e "    [${C_YELLOW}ENGINE${C_RESET}]  ${C_CYAN}http://localhost:3000${C_RESET}"
+            echo -e "    [${C_GREEN}WEB${C_RESET}]     ${C_CYAN}http://localhost:5173${C_RESET}"
+            echo -e "    [${C_MAGENTA}DESKTOP${C_RESET}] ${C_CYAN}http://localhost:5174${C_RESET}"
             echo ""
             echo "  Servers survive terminal closes!"
-            echo "=========================================="
+            echo -e "${C_BOLD}+--------------------------------------------------------------+${C_RESET}"
+            echo ""
+
+            # Ask if user wants to attach now
+            while true; do
+                echo -ne "${C_CYAN}Attach to tmux session now? [Y/n]: ${C_RESET}"
+                read attach_answer
+                case "$attach_answer" in
+                    [Yy]*|"")
+                        echo -e "[${C_MAGENTA}TMUX${C_RESET}] Attaching to bennett-studio-dev..."
+                        tmux attach -t bennett-studio-dev
+                        break
+                        ;;
+                    [Nn]*)
+                        echo -e "[${C_MAGENTA}TMUX${C_RESET}] Session running in background."
+                        echo "   Attach later: tmux attach -t bennett-studio-dev"
+                        break
+                        ;;
+                    *)
+                        echo -e "${C_YELLOW}Please answer y or n${C_RESET}"
+                        ;;
+                esac
+            done
             ;;
 
           # ------------------------------------------------------------------
-          # RESTART: Fast restart — stop + start (NO rebuild unless binary missing)
+          # RESTART: Fast restart -- stop + start (NO rebuild unless binary missing)
           # ------------------------------------------------------------------
           restart)
-            echo "=========================================="
-            echo "  🔄 Restarting Bennett Studio Dev Servers"
-            echo "=========================================="
+            echo -e "${C_BOLD}+--------------------------------------------------------------+${C_RESET}"
+            echo -e "${C_BOLD}|  ${C_CYAN}RESTARTING Bennett Studio Dev Servers${C_RESET}${C_BOLD}                        |${C_RESET}"
+            echo -e "${C_BOLD}+--------------------------------------------------------------+${C_RESET}"
             echo ""
 
             # Check for --with-docker flag (non-interactive mode)
@@ -353,7 +388,7 @@ case "$PROJECT" in
 
             # Kill tmux session
             if tmux has-session -t bennett-studio-dev 2>/dev/null; then
-              echo "📦 Stopping tmux session..."
+              echo -e "[${C_MAGENTA}TMUX${C_RESET}] Stopping session..."
               tmux kill-session -t bennett-studio-dev
             fi
 
@@ -363,61 +398,62 @@ case "$PROJECT" in
             # Ask if user wants to restart Docker containers too
             echo ""
             while true; do
-                read -rp "🐳 Restart Docker database containers too? [y/N]: " restart_docker
+                echo -ne "[${C_BLUE}DOCKER${C_RESET}] ${C_CYAN}Restart database containers too? [y/N]: ${C_RESET}"
+                read restart_docker
                 case "$restart_docker" in
                     [Yy]*)
-                        echo "🐳 Restarting Bennett containers..."
+                        echo -e "[${C_BLUE}DOCKER${C_RESET}] Restarting Bennett containers..."
                         docker restart $(docker ps -q --filter "label=bennett-managed=true") 2>/dev/null || echo "   No containers to restart"
-                        echo "✅ Containers restarted"
+                        echo -e "[${C_GREEN}OK${C_RESET}] ${C_GREEN}Containers restarted${C_RESET}"
                         break
                         ;;
                     [Nn]*|"")
-                        echo "🐳 Leaving containers running"
+                        echo -e "[${C_BLUE}DOCKER${C_RESET}] Leaving containers running"
                         break
                         ;;
                     *)
-                        echo "Please answer y or n"
+                        echo -e "${C_YELLOW}Please answer y or n${C_RESET}"
                         ;;
                 esac
             done
             echo ""
 
-            echo "🌐 Stopping Web..."
+            echo -e "[${C_GREEN}WEB${C_RESET}] Stopping Web..."
             "$PROJECT_DIR/scripts/web-dev-control" stop 2>/dev/null || true
-            echo "🖥️  Stopping Desktop..."
+            echo -e "[${C_MAGENTA}DESKTOP${C_RESET}] Stopping Desktop..."
             "$PROJECT_DIR/scripts/desktop-dev-control" stop 2>/dev/null || true
             echo ""
 
             # Only rebuild if binary is missing (e.g., after cargo clean)
             if [ ! -x "$BINARY" ]; then
-                echo "⚠️  Engine binary missing. Rebuilding..."
+                echo -e "[${C_YELLOW}WARN${C_RESET}] ${C_YELLOW}Engine binary missing. Rebuilding...${C_RESET}"
                 if ! build_engine; then
                     exit 1
                 fi
                 echo ""
             else
-                echo "✅ Using existing binary: $BINARY"
-                echo "   (Run 'msf bennett rebuild bennett-studio dev' for full clean rebuild)"
+                echo -e "[${C_GREEN}OK${C_RESET}] ${C_GREEN}Using existing binary:${C_RESET} ${C_WHITE}$BINARY${C_RESET}"
+                echo -e "   ${C_DIM}(Run 'msf bennett rebuild bennett-studio dev' for full clean rebuild)${C_RESET}"
                 echo ""
             fi
 
             # Start fresh
-            echo "🚀 Starting servers..."
+            echo -e "[${C_GREEN}START${C_RESET}] Starting servers..."
             "$0" bennett start bennett-studio dev
             ;;
 
           # ------------------------------------------------------------------
-          # REBUILD: Full clean rebuild — use when dependencies change
+          # REBUILD: Full clean rebuild -- use when dependencies change
           # ------------------------------------------------------------------
           rebuild)
-            echo "=========================================="
-            echo "  🧱 Full Rebuild Bennett Studio Dev"
-            echo "=========================================="
+            echo -e "${C_BOLD}+--------------------------------------------------------------+${C_RESET}"
+            echo -e "${C_BOLD}|  ${C_RED}FULL REBUILD Bennett Studio Dev${C_RESET}${C_BOLD}                              |${C_RESET}"
+            echo -e "${C_BOLD}+--------------------------------------------------------------+${C_RESET}"
             echo ""
 
             # Kill tmux session
             if tmux has-session -t bennett-studio-dev 2>/dev/null; then
-              echo "📦 Stopping tmux session..."
+              echo -e "[${C_MAGENTA}TMUX${C_RESET}] Stopping session..."
               tmux kill-session -t bennett-studio-dev
             fi
 
@@ -429,19 +465,19 @@ case "$PROJECT" in
             echo ""
 
             # Clean and rebuild
-            echo "🧹 Running cargo clean..."
+            echo -e "[${C_YELLOW}CLEAN${C_RESET}] Running cargo clean..."
             cd "$PROJECT_DIR" || exit 1
             cargo clean
             echo ""
 
-            echo "🔨 Building engine from scratch..."
+            echo -e "[${C_YELLOW}BUILD${C_RESET}] Building engine from scratch..."
             if ! build_engine; then
                 exit 1
             fi
             echo ""
 
             # Start fresh
-            echo "🚀 Starting servers..."
+            echo -e "[${C_GREEN}START${C_RESET}] Starting servers..."
             "$0" bennett start bennett-studio dev
             ;;
 
@@ -449,9 +485,9 @@ case "$PROJECT" in
           # BUILD: Compile engine only, don't start servers
           # ------------------------------------------------------------------
           build)
-            echo "=========================================="
-            echo "  🔨 Building Bennett Studio Engine"
-            echo "=========================================="
+            echo -e "${C_BOLD}+--------------------------------------------------------------+${C_RESET}"
+            echo -e "${C_BOLD}|  ${C_YELLOW}BUILDING Bennett Studio Engine${C_RESET}${C_BOLD}                                 |${C_RESET}"
+            echo -e "${C_BOLD}+--------------------------------------------------------------+${C_RESET}"
             echo ""
 
             if ! check_docker_required; then
@@ -463,130 +499,130 @@ case "$PROJECT" in
                 exit 1
             fi
             echo ""
-            echo "✅ Build complete. Start servers with:"
-            echo "   msf bennett start bennett-studio dev"
-            echo "=========================================="
+            echo -e "[${C_GREEN}OK${C_RESET}] ${C_GREEN}Build complete.${C_RESET} Start servers with:"
+            echo -e "   ${C_WHITE}msf bennett start bennett-studio dev${C_RESET}"
+            echo -e "${C_BOLD}+--------------------------------------------------------------+${C_RESET}"
             ;;
 
           # ------------------------------------------------------------------
           # STOP
           # ------------------------------------------------------------------
           stop)
-            echo "=========================================="
-            echo "  🛑 Stopping Bennett Studio Dev Servers"
-            echo "=========================================="
+            echo -e "${C_BOLD}+--------------------------------------------------------------+${C_RESET}"
+            echo -e "${C_BOLD}|  ${C_RED}STOPPING Bennett Studio Dev Servers${C_RESET}${C_BOLD}                          |${C_RESET}"
+            echo -e "${C_BOLD}+--------------------------------------------------------------+${C_RESET}"
             echo ""
 
             if tmux has-session -t bennett-studio-dev 2>/dev/null; then
-              echo "📦 Killing tmux session..."
+              echo -e "[${C_MAGENTA}TMUX${C_RESET}] Killing session..."
               tmux kill-session -t bennett-studio-dev
             fi
 
             # CRITICAL: Kill ALL engine processes
             kill_all_engines
 
-            echo "🌐 Stopping Web..."
+            echo -e "[${C_GREEN}WEB${C_RESET}] Stopping Web..."
             "$PROJECT_DIR/scripts/web-dev-control" stop 2>/dev/null || true
             echo ""
 
-            echo "🖥️  Stopping Desktop..."
+            echo -e "[${C_MAGENTA}DESKTOP${C_RESET}] Stopping Desktop..."
             "$PROJECT_DIR/scripts/desktop-dev-control" stop 2>/dev/null || true
             echo ""
 
             stop_docker
             echo ""
 
-            echo "=========================================="
-            echo "  ✅ All servers stopped!"
-            echo "=========================================="
+            echo -e "${C_BOLD}+--------------------------------------------------------------+${C_RESET}"
+            echo -e "${C_BOLD}|  ${C_GREEN}ALL SERVERS STOPPED${C_RESET}${C_BOLD}                                          |${C_RESET}"
+            echo -e "${C_BOLD}+--------------------------------------------------------------+${C_RESET}"
             ;;
 
           # ------------------------------------------------------------------
           # CLEAR: Clear logs only (does NOT destroy binary)
           # ------------------------------------------------------------------
           clear)
-            echo "=========================================="
-            echo "  🧹 Clearing Bennett Studio Dev Logs"
-            echo "=========================================="
+            echo -e "${C_BOLD}+--------------------------------------------------------------+${C_RESET}"
+            echo -e "${C_BOLD}|  ${C_CYAN}CLEARING Bennett Studio Dev Logs${C_RESET}${C_BOLD}                             |${C_RESET}"
+            echo -e "${C_BOLD}+--------------------------------------------------------------+${C_RESET}"
             echo ""
 
             clear_docker
             echo ""
 
-            echo "🧹 Clearing Engine logs..."
+            echo -e "[${C_CYAN}CLEAR${C_RESET}] Clearing Engine logs..."
             "$PROJECT_DIR/scripts/engine-control" clear 2>/dev/null || echo "Engine clear not available"
             echo ""
 
-            echo "🧹 Clearing Web logs..."
+            echo -e "[${C_CYAN}CLEAR${C_RESET}] Clearing Web logs..."
             "$PROJECT_DIR/scripts/web-dev-control" clear
             echo ""
 
-            echo "🧹 Clearing Desktop logs..."
+            echo -e "[${C_CYAN}CLEAR${C_RESET}] Clearing Desktop logs..."
             "$PROJECT_DIR/scripts/desktop-dev-control" clear
             echo ""
 
-            echo "=========================================="
-            echo "  ✅ All logs cleared!"
-            echo "   Binary preserved: $BINARY"
-            echo "   Next start will be fast (~2 seconds)"
-            echo "=========================================="
+            echo -e "${C_BOLD}+--------------------------------------------------------------+${C_RESET}"
+            echo -e "${C_BOLD}|  ${C_GREEN}ALL LOGS CLEARED${C_RESET}${C_BOLD}                                             |${C_RESET}"
+            echo -e "   ${C_DIM}Binary preserved: $BINARY${C_RESET}"
+            echo -e "   ${C_DIM}Next start will be fast (~2 seconds)${C_RESET}"
+            echo -e "${C_BOLD}+--------------------------------------------------------------+${C_RESET}"
             echo ""
-            echo "   To also clear build cache (forces full rebuild):"
-            echo "   msf bennett clear-all bennett-studio dev"
-            echo "=========================================="
+            echo -e "   To also clear build cache (forces full rebuild):"
+            echo -e "   ${C_WHITE}msf bennett clear-all bennett-studio dev${C_RESET}"
+            echo -e "${C_BOLD}+--------------------------------------------------------------+${C_RESET}"
             ;;
 
           # ------------------------------------------------------------------
-          # CLEAR-ALL: Clear logs + cargo clean (DESTRUCTIVE — forces rebuild)
+          # CLEAR-ALL: Clear logs + cargo clean (DESTRUCTIVE -- forces rebuild)
           # ------------------------------------------------------------------
           clear-all)
-            echo "=========================================="
-            echo "  🧹🧹 CLEARING ALL — Logs + Build Cache"
-            echo "=========================================="
+            echo -e "${C_BOLD}+--------------------------------------------------------------+${C_RESET}"
+            echo -e "${C_BOLD}|  ${C_RED}CLEARING ALL -- Logs + Build Cache${C_RESET}${C_BOLD}                           |${C_RESET}"
+            echo -e "${C_BOLD}+--------------------------------------------------------------+${C_RESET}"
             echo ""
-            echo "⚠️  WARNING: This will delete the compiled binary!"
-            echo "   Next start will require a full rebuild (~6-10 minutes)."
+            echo -e "[${C_YELLOW}WARN${C_RESET}] ${C_RED}This will delete the compiled binary!${C_RESET}"
+            echo -e "   ${C_DIM}Next start will require a full rebuild (~6-10 minutes).${C_RESET}"
             echo ""
 
             # Run regular clear first
             clear_docker
             echo ""
 
-            echo "🧹 Clearing Engine logs..."
+            echo -e "[${C_CYAN}CLEAR${C_RESET}] Clearing Engine logs..."
             "$PROJECT_DIR/scripts/engine-control" clear 2>/dev/null || true
             echo ""
 
-            echo "🧹 Clearing Web logs..."
+            echo -e "[${C_CYAN}CLEAR${C_RESET}] Clearing Web logs..."
             "$PROJECT_DIR/scripts/web-dev-control" clear
             echo ""
 
-            echo "🧹 Clearing Desktop logs..."
+            echo -e "[${C_CYAN}CLEAR${C_RESET}] Clearing Desktop logs..."
             "$PROJECT_DIR/scripts/desktop-dev-control" clear
             echo ""
 
-            echo "🧹 Clearing cargo build cache..."
+            echo -e "[${C_YELLOW}CLEAN${C_RESET}] Clearing cargo build cache..."
             cd "$PROJECT_DIR" || exit 1
             cargo clean 2>/dev/null || echo "Cargo clean not available"
             echo ""
 
-            echo "=========================================="
-            echo "  ✅ All logs AND build cache cleared!"
-            echo "   Binary deleted: $BINARY"
-            echo "   Next start will require full rebuild (~6-10 minutes)"
-            echo "=========================================="
+            echo -e "${C_BOLD}+--------------------------------------------------------------+${C_RESET}"
+            echo -e "${C_BOLD}|  ${C_GREEN}ALL LOGS AND BUILD CACHE CLEARED${C_RESET}${C_BOLD}                             |${C_RESET}"
+            echo -e "   ${C_DIM}Binary deleted: $BINARY${C_RESET}"
+            echo -e "   ${C_DIM}Next start will require full rebuild (~6-10 minutes)${C_RESET}"
+            echo -e "${C_BOLD}+--------------------------------------------------------------+${C_RESET}"
             echo ""
-            echo "   To rebuild and start:"
-            echo "   msf bennett rebuild bennett-studio dev"
-            echo "=========================================="
+            echo -e "   To rebuild and start:"
+            echo -e "   ${C_WHITE}msf bennett rebuild bennett-studio dev${C_RESET}"
+            echo -e "${C_BOLD}+--------------------------------------------------------------+${C_RESET}"
             ;;
 
           # ------------------------------------------------------------------
           # STATUS
           # ------------------------------------------------------------------
           status)
-            echo "=========================================="
-            echo "  📊 Bennett Studio Dev Status"
-            echo "=========================================="
+            echo -e "${C_BOLD}+--------------------------------------------------------------+${C_RESET}"
+            echo -e "${C_BOLD}|  ${C_BLUE}Bennett Studio Dev Status${C_RESET}${C_BOLD}                                    |${C_RESET}"
+            echo -e "${C_BOLD}+--------------------------------------------------------------+${C_RESET}"
             echo ""
             docker_status
             "$PROJECT_DIR/scripts/engine-control" status
@@ -594,12 +630,12 @@ case "$PROJECT" in
             "$PROJECT_DIR/scripts/desktop-dev-control" status
             echo ""
             if [ -x "$BINARY" ]; then
-                echo "✅ Engine binary: $BINARY"
+                echo -e "[${C_GREEN}OK${C_RESET}] ${C_GREEN}Engine binary:${C_RESET} ${C_WHITE}$BINARY${C_RESET}"
             else
-                echo "⚠️  Engine binary not found — run: msf bennett build bennett-studio dev"
+                echo -e "[${C_YELLOW}WARN${C_RESET}] ${C_YELLOW}Engine binary not found${C_RESET} -- run: ${C_WHITE}msf bennett build bennett-studio dev${C_RESET}"
             fi
             echo ""
-            echo "=========================================="
+            echo -e "${C_BOLD}+--------------------------------------------------------------+${C_RESET}"
             ;;
 
           # ------------------------------------------------------------------
@@ -609,39 +645,39 @@ case "$PROJECT" in
           logs)
             LOG_SERVICE="${5:-all}"
 
-            echo "=========================================="
-            echo "  📜 Tailing Bennett Studio Dev Logs"
-            echo "=========================================="
+            echo -e "${C_BOLD}+--------------------------------------------------------------+${C_RESET}"
+            echo -e "${C_BOLD}|  ${C_BLUE}TAILING Bennett Studio Dev Logs${C_RESET}${C_BOLD}                              |${C_RESET}"
+            echo -e "${C_BOLD}+--------------------------------------------------------------+${C_RESET}"
             echo ""
 
             case "$LOG_SERVICE" in
               engine|e)
-                echo "🔧 Tailing Engine log only..."
-                echo "   Press Ctrl+C to stop"
+                echo -e "[${C_YELLOW}ENGINE${C_RESET}] Tailing Engine log..."
+                echo -e "   ${C_DIM}Press Ctrl+C to stop${C_RESET}"
                 echo ""
-                tail -f /tmp/bennett-engine.log 2>/dev/null || echo "❌ Engine log not found"
+                tail -f /tmp/bennett-engine.log 2>/dev/null || echo -e "[${C_RED}ERROR${C_RESET}] Engine log not found"
                 ;;
               web|w)
-                echo "🌐 Tailing Web log only..."
-                echo "   Press Ctrl+C to stop"
+                echo -e "[${C_GREEN}WEB${C_RESET}] Tailing Web log..."
+                echo -e "   ${C_DIM}Press Ctrl+C to stop${C_RESET}"
                 echo ""
-                tail -f /tmp/bennett-web.log 2>/dev/null || echo "❌ Web log not found"
+                tail -f /tmp/bennett-web.log 2>/dev/null || echo -e "[${C_RED}ERROR${C_RESET}] Web log not found"
                 ;;
               desktop|d)
-                echo "🖥️  Tailing Desktop log only..."
-                echo "   Press Ctrl+C to stop"
+                echo -e "[${C_MAGENTA}DESKTOP${C_RESET}] Tailing Desktop log..."
+                echo -e "   ${C_DIM}Press Ctrl+C to stop${C_RESET}"
                 echo ""
-                tail -f /tmp/bennett-desktop.log 2>/dev/null || echo "❌ Desktop log not found"
+                tail -f /tmp/bennett-desktop.log 2>/dev/null || echo -e "[${C_RED}ERROR${C_RESET}] Desktop log not found"
                 ;;
               docker|dockerd|doc)
-                echo "🐳 Tailing Docker log only..."
-                echo "   Press Ctrl+C to stop"
+                echo -e "[${C_BLUE}DOCKER${C_RESET}] Tailing Docker log..."
+                echo -e "   ${C_DIM}Press Ctrl+C to stop${C_RESET}"
                 echo ""
-                tail -f /tmp/dockerd.log 2>/dev/null || echo "❌ Docker log not found"
+                tail -f /tmp/dockerd.log 2>/dev/null || echo -e "[${C_RED}ERROR${C_RESET}] Docker log not found"
                 ;;
               all|a|*)
-                echo "📜 Tailing ALL logs..."
-                echo "   Press Ctrl+C to stop"
+                echo -e "[${C_WHITE}ALL${C_RESET}] Tailing ALL logs..."
+                echo -e "   ${C_DIM}Press Ctrl+C to stop${C_RESET}"
                 echo ""
                 tail -f /tmp/bennett-engine.log /tmp/bennett-web.log /tmp/bennett-desktop.log /tmp/dockerd.log 2>/dev/null || echo "Some log files not found. Servers may not be running."
                 ;;
@@ -653,10 +689,10 @@ case "$PROJECT" in
           # ------------------------------------------------------------------
           attach)
             if tmux has-session -t bennett-studio-dev 2>/dev/null; then
-              echo "📎 Attaching to bennett-studio-dev tmux session..."
+              echo -e "[${C_MAGENTA}TMUX${C_RESET}] Attaching to bennett-studio-dev session..."
               tmux attach -t bennett-studio-dev
             else
-              echo "❌ No tmux session 'bennett-studio-dev' found."
+              echo -e "[${C_RED}ERROR${C_RESET}] No tmux session 'bennett-studio-dev' found."
               echo "   Start servers first: msf bennett start bennett-studio dev"
               exit 1
             fi
@@ -666,9 +702,9 @@ case "$PROJECT" in
           # TREE
           # ------------------------------------------------------------------
           tree)
-            echo "=========================================="
-            echo "  📁 Bennett Studio Project Tree"
-            echo "=========================================="
+            echo -e "${C_BOLD}+--------------------------------------------------------------+${C_RESET}"
+            echo -e "${C_BOLD}|  ${C_MAGENTA}Bennett Studio Project Tree${C_RESET}${C_BOLD}                                  |${C_RESET}"
+            echo -e "${C_BOLD}+--------------------------------------------------------------+${C_RESET}"
             echo ""
             cd "$PROJECT_DIR" || exit 1
             tree -L 5 -I 'node_modules|dist|build|target|vendor|.git|storage|*.sqlite'
@@ -681,7 +717,7 @@ case "$PROJECT" in
 
           *)
             echo ""
-            echo "❌ Unknown action: '$ACTION'"
+            echo -e "[${C_RED}ERROR${C_RESET}] ${C_RED}Unknown action: '$ACTION'${C_RESET}"
             echo ""
             show_help
             exit 1
@@ -689,13 +725,13 @@ case "$PROJECT" in
         esac
         ;;
       *)
-        echo "Environment '$ENV' not found for bennett-studio. Use 'dev'."
+        echo -e "${C_RED}Environment '$ENV' not found for bennett-studio. Use 'dev'.${C_RESET}"
         exit 1
         ;;
     esac
     ;;
   *)
-    echo "Project '$PROJECT' not found. Available: oshocks, bennett-studio"
+    echo -e "${C_RED}Project '$PROJECT' not found. Available: oshocks, bennett-studio${C_RESET}"
     exit 1
     ;;
 esac
