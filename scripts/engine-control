@@ -53,9 +53,10 @@ start_engine() {
     local ENGINE_PID=$!
     echo "$ENGINE_PID" > "$PIDFILE"
 
-    # Wait for health check with progress
-    echo "⏳ Waiting for engine to be ready..."
-    for i in {1..30}; do
+    # Wait for health check with progress — INCREASED to 24 minutes
+    # because list_bennett_containers() can take 2+ minutes on first start
+    echo "⏳ Waiting for engine to be ready (up to 24 minutes)..."
+    for i in {1..1440}; do
         if curl -s "http://localhost:$PORT/api/health" > /dev/null 2>&1; then
             echo "✅ Engine ready (PID: $ENGINE_PID, Port: $PORT)"
             return 0
@@ -67,8 +68,21 @@ start_engine() {
             exit 1
         fi
 
-        if [ $((i % 5)) -eq 0 ]; then
+        # Show progress every 10 seconds, plus milestones
+        if [ $((i % 10)) -eq 0 ]; then
             echo "   ... waiting ($i seconds)"
+        fi
+        if [ $i -eq 300 ]; then
+            echo "   ... 5 minutes elapsed, still waiting..."
+        fi
+        if [ $i -eq 600 ]; then
+            echo "   ... 10 minutes elapsed, still waiting..."
+        fi
+        if [ $i -eq 900 ]; then
+            echo "   ... 15 minutes elapsed, still waiting..."
+        fi
+        if [ $i -eq 1200 ]; then
+            echo "   ... 20 minutes elapsed, still waiting..."
         fi
         sleep 1
     done

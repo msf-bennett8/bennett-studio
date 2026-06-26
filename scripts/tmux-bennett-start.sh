@@ -23,14 +23,41 @@ ENGINE_PORT=$(cat /tmp/bennett-engine.port 2>/dev/null || echo "3001")
 
 echo ""
 echo "⏳ Waiting for health check on port $ENGINE_PORT..."
-for i in {1..60}; do
+echo "   (Engine may take 2-3 minutes to scan Docker containers on first start)"
+for i in {1..1440}; do
     if curl -s "http://localhost:$ENGINE_PORT/api/health" > /dev/null 2>&1; then
         echo "✅ Engine ready on http://localhost:$ENGINE_PORT"
         break
     fi
     sleep 1
     if [ $i -eq 60 ]; then
-        echo "❌ Engine health check failed. Check /tmp/bennett-engine.log"
+        echo "   ... 1 minute elapsed, still waiting..."
+    fi
+    if [ $i -eq 120 ]; then
+        echo "   ... 2 minutes elapsed, still waiting..."
+    fi
+    if [ $i -eq 300 ]; then
+        echo "   ... 5 minutes elapsed, still waiting..."
+    fi
+    if [ $i -eq 600 ]; then
+        echo "   ... 10 minutes elapsed, still waiting..."
+    fi
+    if [ $i -eq 900 ]; then
+        echo "   ... 15 minutes elapsed, still waiting..."
+    fi
+    if [ $i -eq 1200 ]; then
+        echo "   ... 20 minutes elapsed, still waiting..."
+    fi
+    if [ $i -eq 1440 ]; then
+        echo "❌ Engine health check failed after 24 minutes."
+        echo "   Check the log for hangs:"
+        echo "   tail -50 /tmp/bennett-engine.log"
+        echo ""
+        echo "   Common causes:"
+        echo "   - Docker container scanning is slow (many containers)"
+        echo "   - SQLite database is locked by another engine process"
+        echo "   - Port conflict (another process on $ENGINE_PORT)"
+        echo "   - Engine binary is corrupted (try: msf bennett rebuild bennett-studio dev)"
         exit 1
     fi
 done

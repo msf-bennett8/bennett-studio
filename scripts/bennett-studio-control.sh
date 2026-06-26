@@ -8,13 +8,107 @@ ACTION="$2"
 PROJECT="$3"
 ENV="$4"
 
+# ============================================================================
+# Help message function
+# ============================================================================
+show_help() {
+    echo ""
+    echo "╔══════════════════════════════════════════════════════════════════════╗"
+    echo "║           MSF Bennett Studio Development Commands                    ║"
+    echo "╚══════════════════════════════════════════════════════════════════════╝"
+    echo ""
+    echo "Usage: msf bennett <action> <project> <env> [options]"
+    echo "       bennett <action> <project> <env> [options]"
+    echo ""
+    echo "Projects:"
+    echo "  bennett-studio    Bennett Studio (desktop + web + engine)"
+    echo "  oshocks           Oshocks project"
+    echo ""
+    echo "Environments:"
+    echo "  dev               Development mode"
+    echo "  prod              Production mode (not yet implemented)"
+    echo ""
+    echo "Actions:"
+    echo ""
+    echo "  ┌────────────────────────────────────────────────────────────────┐"
+    echo "  │ START / STOP                                                   │"
+    echo "  ├────────────────────────────────────────────────────────────────┤"
+    echo "  │ start                    Fast start (~2-130s)                  │"
+    echo "  │                          Builds engine only if binary missing  │"
+    echo "  │                                                                │"
+    echo "  │ restart                  Stop + start (~2-130s)                │"
+    echo "  │                          Preserves binary, prompts for Docker  │"
+    echo "  │                                                                │"
+    echo "  │ restart --with-docker    Restart + restart Docker containers   │"
+    echo "  │                                                                │"
+    echo "  │ rebuild                  Full clean rebuild (~6-10min)         │"
+    echo "  │                          cargo clean + build + start           │"
+    echo "  │                                                                │"
+    echo "  │ build                    Compile engine only (~2-5min)         │"
+    echo "  │                          Does not start servers                │"
+    echo "  │                                                                │"
+    echo "  │ stop                     Stop all servers + Docker (optional)  │"
+    echo "  └────────────────────────────────────────────────────────────────┘"
+    echo ""
+    echo "  ┌────────────────────────────────────────────────────────────────┐"
+    echo "  │ CLEAR / CLEAN                                                  │"
+    echo "  ├────────────────────────────────────────────────────────────────┤"
+    echo "  │ clear                    Clear logs only (preserves binary)    │"
+    echo "  │                          Next start is fast                    │"
+    echo "  │                                                                │"
+    echo "  │ clear-all                Clear logs + cargo clean              │"
+    echo "  │                          DESTRUCTIVE — forces full rebuild     │"
+    echo "  └────────────────────────────────────────────────────────────────┘"
+    echo ""
+    echo "  ┌────────────────────────────────────────────────────────────────┐"
+    echo "  │ MONITOR / DEBUG                                                │"
+    echo "  ├────────────────────────────────────────────────────────────────┤"
+    echo "  │ status                   Show running status of all services   │"
+    echo "  │                                                                │"
+    echo "  │ logs [service]           Tail logs (default: all)              │"
+    echo "  │                          Services: engine, web, desktop, docker│"
+    echo "  │                                                                │"
+    echo "  │ attach                   Attach to tmux session                │"
+    echo "  │                          Ctrl+B then D to detach               │"
+    echo "  │                                                                │"
+    echo "  │ tree                     Show project file tree                │"
+    echo "  └────────────────────────────────────────────────────────────────┘"
+    echo ""
+    echo "Examples:"
+    echo "  msf bennett start bennett-studio dev"
+    echo "  msf bennett restart bennett-studio dev"
+    echo "  msf bennett restart --with-docker bennett-studio dev"
+    echo "  msf bennett stop bennett-studio dev"
+    echo "  msf bennett clear bennett-studio dev"
+    echo "  msf bennett status bennett-studio dev"
+    echo "  msf bennett logs bennett-studio dev engine"
+    echo "  msf bennett attach bennett-studio dev"
+    echo ""
+    echo "  bennett start bennett-studio dev"
+    echo "  bennett restart bennett-studio dev"
+    echo "  bennett stop bennett-studio dev"
+    echo ""
+    echo "Tips:"
+    echo "  • First start after clear-all or rebuild: ~6-10 minutes"
+    echo "  • Daily start with existing binary: ~2-130 seconds"
+    echo "  • Engine startup time depends on Docker container scanning"
+    echo "  • Use Ctrl+C to exit logs, Ctrl+B then D to detach from tmux"
+    echo ""
+}
+
 if [ "$1" != "$USER_NAME" ]; then
-    echo "Usage: msf bennett <start|restart|rebuild|stop|clear|build|status|logs|attach|tree> <project> <dev|prod>"
+    show_help
     exit 1
 fi
 
+# Handle --help explicitly (for when called directly, not via ~/.bashrc)
+if [ "$ACTION" = "--help" ] || [ "$ACTION" = "-h" ]; then
+    show_help
+    exit 0
+fi
+
 if [ -z "$ACTION" ] || [ -z "$PROJECT" ] || [ -z "$ENV" ]; then
-    echo "Usage: msf bennett <start|restart|rebuild|stop|clear|build|status|logs|attach|tree> <project> <dev|prod>"
+    show_help
     exit 1
 fi
 
@@ -140,7 +234,7 @@ build_engine() {
 # ============================================================================
 kill_all_engines() {
     echo "🔧 Ensuring no engine processes are running..."
-    
+
     # Kill by PID file
     if [ -f /tmp/bennett-engine.pid ]; then
         local pid=$(cat /tmp/bennett-engine.pid)
@@ -150,7 +244,7 @@ kill_all_engines() {
         fi
         rm -f /tmp/bennett-engine.pid
     fi
-    
+
     # Kill ALL bennett-engine processes (catches orphans)
     local pids=$(pgrep -f "bennett-engine" 2>/dev/null || true)
     if [ -n "$pids" ]; then
@@ -158,14 +252,14 @@ kill_all_engines() {
         pkill -9 -f "bennett-engine" 2>/dev/null || true
         sleep 2
     fi
-    
+
     # Verify they're dead
     if pgrep -f "bennett-engine" > /dev/null 2>&1; then
         echo "⚠️  Some engine processes still running!"
         pkill -9 -f "bennett-engine" 2>/dev/null || true
         sleep 1
     fi
-    
+
     echo "✅ All engine processes stopped"
 }
 
@@ -177,6 +271,7 @@ case "$PROJECT" in
   oshocks)
     ~/studio.dev/oshocks/scripts/oshocks-control.sh "$@"
     ;;
+
   bennett-studio)
     case "$ENV" in
       dev)
@@ -240,7 +335,7 @@ case "$PROJECT" in
             ;;
 
           # ------------------------------------------------------------------
-          # RESTART: Stop + rebuild engine + start (keeps caches)
+          # RESTART: Fast restart — stop + start (NO rebuild unless binary missing)
           # ------------------------------------------------------------------
           restart)
             echo "=========================================="
@@ -248,27 +343,63 @@ case "$PROJECT" in
             echo "=========================================="
             echo ""
 
+            # Check for --with-docker flag (non-interactive mode)
+            RESTART_DOCKER_CONTAINERS=false
+            for arg in "$@"; do
+                if [ "$arg" = "--with-docker" ]; then
+                    RESTART_DOCKER_CONTAINERS=true
+                fi
+            done
+
             # Kill tmux session
             if tmux has-session -t bennett-studio-dev 2>/dev/null; then
               echo "📦 Stopping tmux session..."
               tmux kill-session -t bennett-studio-dev
             fi
-            
+
             # CRITICAL: Kill ALL engine processes to release SQLite lock
             kill_all_engines
-            
+
+            # Ask if user wants to restart Docker containers too
+            echo ""
+            while true; do
+                read -rp "🐳 Restart Docker database containers too? [y/N]: " restart_docker
+                case "$restart_docker" in
+                    [Yy]*)
+                        echo "🐳 Restarting Bennett containers..."
+                        docker restart $(docker ps -q --filter "label=bennett-managed=true") 2>/dev/null || echo "   No containers to restart"
+                        echo "✅ Containers restarted"
+                        break
+                        ;;
+                    [Nn]*|"")
+                        echo "🐳 Leaving containers running"
+                        break
+                        ;;
+                    *)
+                        echo "Please answer y or n"
+                        ;;
+                esac
+            done
+            echo ""
+
             echo "🌐 Stopping Web..."
             "$PROJECT_DIR/scripts/web-dev-control" stop 2>/dev/null || true
             echo "🖥️  Stopping Desktop..."
             "$PROJECT_DIR/scripts/desktop-dev-control" stop 2>/dev/null || true
             echo ""
 
-            # Rebuild engine (does NOT run cargo clean — keeps dependency cache)
-            echo "🔨 Rebuilding engine..."
-            if ! build_engine; then
-                exit 1
+            # Only rebuild if binary is missing (e.g., after cargo clean)
+            if [ ! -x "$BINARY" ]; then
+                echo "⚠️  Engine binary missing. Rebuilding..."
+                if ! build_engine; then
+                    exit 1
+                fi
+                echo ""
+            else
+                echo "✅ Using existing binary: $BINARY"
+                echo "   (Run 'msf bennett rebuild bennett-studio dev' for full clean rebuild)"
+                echo ""
             fi
-            echo ""
 
             # Start fresh
             echo "🚀 Starting servers..."
@@ -289,10 +420,10 @@ case "$PROJECT" in
               echo "📦 Stopping tmux session..."
               tmux kill-session -t bennett-studio-dev
             fi
-            
+
             # CRITICAL: Kill ALL engine processes
             kill_all_engines
-            
+
             "$PROJECT_DIR/scripts/web-dev-control" stop 2>/dev/null || true
             "$PROJECT_DIR/scripts/desktop-dev-control" stop 2>/dev/null || true
             echo ""
@@ -371,26 +502,65 @@ case "$PROJECT" in
             ;;
 
           # ------------------------------------------------------------------
-          # CLEAR: Clear logs and caches
+          # CLEAR: Clear logs only (does NOT destroy binary)
           # ------------------------------------------------------------------
           clear)
             echo "=========================================="
-            echo "  🧹 Clearing Bennett Studio Dev Caches"
+            echo "  🧹 Clearing Bennett Studio Dev Logs"
             echo "=========================================="
             echo ""
 
             clear_docker
             echo ""
 
-            echo "🧹 Clearing Engine..."
+            echo "🧹 Clearing Engine logs..."
             "$PROJECT_DIR/scripts/engine-control" clear 2>/dev/null || echo "Engine clear not available"
             echo ""
 
-            echo "🧹 Clearing Web..."
+            echo "🧹 Clearing Web logs..."
             "$PROJECT_DIR/scripts/web-dev-control" clear
             echo ""
 
-            echo "🧹 Clearing Desktop..."
+            echo "🧹 Clearing Desktop logs..."
+            "$PROJECT_DIR/scripts/desktop-dev-control" clear
+            echo ""
+
+            echo "=========================================="
+            echo "  ✅ All logs cleared!"
+            echo "   Binary preserved: $BINARY"
+            echo "   Next start will be fast (~2 seconds)"
+            echo "=========================================="
+            echo ""
+            echo "   To also clear build cache (forces full rebuild):"
+            echo "   msf bennett clear-all bennett-studio dev"
+            echo "=========================================="
+            ;;
+
+          # ------------------------------------------------------------------
+          # CLEAR-ALL: Clear logs + cargo clean (DESTRUCTIVE — forces rebuild)
+          # ------------------------------------------------------------------
+          clear-all)
+            echo "=========================================="
+            echo "  🧹🧹 CLEARING ALL — Logs + Build Cache"
+            echo "=========================================="
+            echo ""
+            echo "⚠️  WARNING: This will delete the compiled binary!"
+            echo "   Next start will require a full rebuild (~6-10 minutes)."
+            echo ""
+
+            # Run regular clear first
+            clear_docker
+            echo ""
+
+            echo "🧹 Clearing Engine logs..."
+            "$PROJECT_DIR/scripts/engine-control" clear 2>/dev/null || true
+            echo ""
+
+            echo "🧹 Clearing Web logs..."
+            "$PROJECT_DIR/scripts/web-dev-control" clear
+            echo ""
+
+            echo "🧹 Clearing Desktop logs..."
             "$PROJECT_DIR/scripts/desktop-dev-control" clear
             echo ""
 
@@ -400,13 +570,18 @@ case "$PROJECT" in
             echo ""
 
             echo "=========================================="
-            echo "  ✅ All caches cleared!"
-            echo "   Note: Next start will require full rebuild (~10 min)"
+            echo "  ✅ All logs AND build cache cleared!"
+            echo "   Binary deleted: $BINARY"
+            echo "   Next start will require full rebuild (~6-10 minutes)"
+            echo "=========================================="
+            echo ""
+            echo "   To rebuild and start:"
+            echo "   msf bennett rebuild bennett-studio dev"
             echo "=========================================="
             ;;
 
           # ------------------------------------------------------------------
-          # STATUS, LOGS, ATTACH, TREE
+          # STATUS
           # ------------------------------------------------------------------
           status)
             echo "=========================================="
@@ -427,16 +602,55 @@ case "$PROJECT" in
             echo "=========================================="
             ;;
 
+          # ------------------------------------------------------------------
+          # LOGS: Tail logs with optional service filter
+          # Usage: msf bennett logs bennett-studio dev [engine|web|desktop|docker|all]
+          # ------------------------------------------------------------------
           logs)
+            LOG_SERVICE="${5:-all}"
+
             echo "=========================================="
             echo "  📜 Tailing Bennett Studio Dev Logs"
             echo "=========================================="
             echo ""
-            echo "Press Ctrl+C to stop viewing logs"
-            echo ""
-            tail -f /tmp/bennett-engine.log /tmp/bennett-web.log /tmp/bennett-desktop.log /tmp/dockerd.log 2>/dev/null || echo "Some log files not found. Servers may not be running."
+
+            case "$LOG_SERVICE" in
+              engine|e)
+                echo "🔧 Tailing Engine log only..."
+                echo "   Press Ctrl+C to stop"
+                echo ""
+                tail -f /tmp/bennett-engine.log 2>/dev/null || echo "❌ Engine log not found"
+                ;;
+              web|w)
+                echo "🌐 Tailing Web log only..."
+                echo "   Press Ctrl+C to stop"
+                echo ""
+                tail -f /tmp/bennett-web.log 2>/dev/null || echo "❌ Web log not found"
+                ;;
+              desktop|d)
+                echo "🖥️  Tailing Desktop log only..."
+                echo "   Press Ctrl+C to stop"
+                echo ""
+                tail -f /tmp/bennett-desktop.log 2>/dev/null || echo "❌ Desktop log not found"
+                ;;
+              docker|dockerd|doc)
+                echo "🐳 Tailing Docker log only..."
+                echo "   Press Ctrl+C to stop"
+                echo ""
+                tail -f /tmp/dockerd.log 2>/dev/null || echo "❌ Docker log not found"
+                ;;
+              all|a|*)
+                echo "📜 Tailing ALL logs..."
+                echo "   Press Ctrl+C to stop"
+                echo ""
+                tail -f /tmp/bennett-engine.log /tmp/bennett-web.log /tmp/bennett-desktop.log /tmp/dockerd.log 2>/dev/null || echo "Some log files not found. Servers may not be running."
+                ;;
+            esac
             ;;
 
+          # ------------------------------------------------------------------
+          # ATTACH
+          # ------------------------------------------------------------------
           attach)
             if tmux has-session -t bennett-studio-dev 2>/dev/null; then
               echo "📎 Attaching to bennett-studio-dev tmux session..."
@@ -448,6 +662,9 @@ case "$PROJECT" in
             fi
             ;;
 
+          # ------------------------------------------------------------------
+          # TREE
+          # ------------------------------------------------------------------
           tree)
             echo "=========================================="
             echo "  📁 Bennett Studio Project Tree"
@@ -457,8 +674,16 @@ case "$PROJECT" in
             tree -L 5 -I 'node_modules|dist|build|target|vendor|.git|storage|*.sqlite'
             ;;
 
+          --help|-h)
+            show_help
+            exit 0
+            ;;
+
           *)
-            echo "Usage: msf bennett <start|restart|rebuild|stop|clear|build|status|logs|attach|tree> bennett-studio dev"
+            echo ""
+            echo "❌ Unknown action: '$ACTION'"
+            echo ""
+            show_help
             exit 1
             ;;
         esac
