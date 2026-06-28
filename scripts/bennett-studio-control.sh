@@ -172,7 +172,7 @@ check_docker_required() {
     echo ""
 
     echo -e "${C_YELLOW}Waiting 15 seconds for Docker to start (Ctrl+C to cancel)...${C_RESET}"
-    for i in 15 14 13 12 11 10 9 8 7 6 5 4 3 2 1; do
+    for i in 27 26 25 24 23 22 21 20 19 18 17 16 15 14 13 12 11 10 9 8 7 6 5 4 3 2 1; do
         if docker_is_running; then
             echo ""
             echo -e "[${C_GREEN}OK${C_RESET}] ${C_GREEN}Docker detected! Proceeding...${C_RESET}"

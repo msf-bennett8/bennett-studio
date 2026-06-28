@@ -15,15 +15,22 @@ import { SettingsPage } from './pages/SettingsPage';
 import './index.css';
 
 function App() {
-  const { theme, colors } = useThemeStore();
+  const { theme, colors, _hasHydrated } = useThemeStore();
 
   useEffect(() => {
+    if (!_hasHydrated) return; // Don't apply until persisted state is ready
+    
     const root = document.documentElement;
     Object.entries(colors).forEach(([key, value]) => {
       root.style.setProperty(`--${key}`, value);
     });
     root.setAttribute('data-theme', theme);
-  }, [theme, colors]);
+  }, [theme, colors, _hasHydrated]);
+
+  // Prevent flash of wrong theme before hydration
+  if (!_hasHydrated) {
+    return <div className="bg-black min-h-screen" />; // Or null, or a loader
+  }
 
   // Reconnect to persisted remote shares on app load
   useEffect(() => {
