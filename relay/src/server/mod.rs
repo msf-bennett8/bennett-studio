@@ -21,14 +21,15 @@ use crate::multiplexer::{
 };
 use crate::router::ShareRouter;
 use crate::transport::{ProtocolType, Transport, ALPN_HTTP1, ALPN_HTTP2, ALPN_MYSQL};
-use crate::transport::tcp::forward_zero_copy;
+// Note: splice() zero-copy only works on plain TcpStream pairs.
+// TLS-terminated traffic uses tokio::io::copy_bidirectional.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_rustls::{rustls, TlsAcceptor};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
 /// Relay server with ALPN-based single-port routing
 pub struct RelayServer {
@@ -115,27 +116,24 @@ impl RelayServer {
         // Get ALPN protocol from TLS session
         let alpn = tls_stream.get_ref().1.alpn_protocol();
         
-        let protocol = match alpn {
+        match alpn {
             Some(ALPN_HTTP2) => {
                 debug!(addr = %client_addr, "ALPN: h2");
                 self.handle_http2(tls_stream, client_addr).await?;
-                return Ok(());
             }
             Some(ALPN_HTTP1) | None => {
                 debug!(addr = %client_addr, "ALPN: http/1.1");
                 self.handle_http1(tls_stream, client_addr).await?;
-                return Ok(());
             }
             Some(ALPN_MYSQL) => {
                 debug!(addr = %client_addr, "ALPN: mysql");
                 self.handle_mysql_tls(tls_stream, client_addr).await?;
-                return Ok(());
             }
             Some(other) => {
                 warn!(addr = %client_addr, alpn = ?String::from_utf8_lossy(other), "Unknown ALPN");
-                return Ok(());
             }
-        };
+        }
+        Ok(())
     }
 
     // ========================================================================
@@ -188,14 +186,14 @@ impl RelayServer {
             })?;
 
         // Forward initial bytes
-        engine_conn.stream.write_all(&buf[..n]).await.map_err(|e| {
+        if let Err(e) = engine_conn.stream.write_all(&buf[..n]).await {
             self.connection_counter.release(&share_id);
             self.transport.release(engine_conn);
-            e
-        })?;
+            return Err(e.into());
+        }
 
-        // Zero-copy forward
-        let result = forward_zero_copy(&mut tls_stream, &mut engine_conn.stream).await;
+        // Bidirectional proxy: TLS stream ↔ plain TCP engine
+        let result = tokio::io::copy_bidirectional(&mut tls_stream, &mut engine_conn.stream).await;
         
         self.connection_counter.release(&share_id);
         self.transport.release(engine_conn);
@@ -269,7 +267,7 @@ impl RelayServer {
                 anyhow::anyhow!("Engine MySQL connection failed: {}", e)
             })?;
 
-        let result = forward_zero_copy(&mut tls_stream, &mut engine_conn.stream).await;
+        let result = tokio::io::copy_bidirectional(&mut tls_stream, &mut engine_conn.stream).await;
         
         self.connection_counter.release(&share_id);
         self.transport.release(engine_conn);

@@ -182,44 +182,44 @@ async fn splice_forward(
     engine: &mut tokio::net::TcpStream,
 ) -> std::io::Result<(u64, u64)> {
     use nix::fcntl::{splice, SpliceFFlags};
-    use std::os::fd::AsRawFd;
-    
-    let client_fd = client.as_raw_fd();
-    let engine_fd = engine.as_raw_fd();
-    
-    let (pipe_rd1, pipe_wr1) = nix::unistd::pipe()
-        .map_err(|e| std::io::Error::from_raw_os_error(e as i32))?;
-    let (pipe_rd2, pipe_wr2) = nix::unistd::pipe()
-        .map_err(|e| std::io::Error::from_raw_os_error(e as i32))?;
-    
+    use std::os::fd::{AsRawFd, FromRawFd};
+    use std::os::unix::io::RawFd;
+
+    // Get raw fds and convert to OwnedFd for 'static move into spawn_blocking
+    let client_fd = unsafe { std::os::fd::OwnedFd::from_raw_fd(client.as_raw_fd()) };
+    let engine_fd = unsafe { std::os::fd::OwnedFd::from_raw_fd(engine.as_raw_fd()) };
+
+    let (pipe_rd1, pipe_wr1) = nix::unistd::pipe()?;
+    let (pipe_rd2, pipe_wr2) = nix::unistd::pipe()?;
+
     tokio::task::spawn_blocking(move || {
         let mut c2e_done = false;
         let mut e2c_done = false;
         let mut c2e_total = 0u64;
         let mut e2c_total = 0u64;
-        
+
         while !c2e_done || !e2c_done {
             if !c2e_done {
-                match splice(client_fd, None, pipe_wr1, None, 65536, 
+                match splice(&client_fd, None, &pipe_wr1, None, 65536,
                     SpliceFFlags::SPLICE_F_NONBLOCK | SpliceFFlags::SPLICE_F_MOVE) {
                     Ok(0) => c2e_done = true,
                     Ok(n) => {
                         c2e_total += n as u64;
-                        let _ = splice(pipe_rd1, None, engine_fd, None, n, 
+                        let _ = splice(&pipe_rd1, None, &engine_fd, None, n,
                             SpliceFFlags::SPLICE_F_NONBLOCK);
                     }
                     Err(nix::errno::Errno::EAGAIN) => {}
                     Err(e) => return Err(std::io::Error::from(e)),
                 }
             }
-            
+
             if !e2c_done {
-                match splice(engine_fd, None, pipe_wr2, None, 65536,
+                match splice(&engine_fd, None, &pipe_wr2, None, 65536,
                     SpliceFFlags::SPLICE_F_NONBLOCK | SpliceFFlags::SPLICE_F_MOVE) {
                     Ok(0) => e2c_done = true,
                     Ok(n) => {
                         e2c_total += n as u64;
-                        let _ = splice(pipe_rd2, None, client_fd, None, n,
+                        let _ = splice(&pipe_rd2, None, &client_fd, None, n,
                             SpliceFFlags::SPLICE_F_NONBLOCK);
                     }
                     Err(nix::errno::Errno::EAGAIN) => {}
@@ -227,7 +227,7 @@ async fn splice_forward(
                 }
             }
         }
-        
+
         Ok((c2e_total, e2c_total))
     }).await.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?
 }

@@ -15,7 +15,7 @@ use axum::{
 };
 use std::sync::Arc;
 use tokio::sync::broadcast;
-use tracing::{debug, info, warn};
+use tracing::info;
 
 /// Signaling message between peers
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

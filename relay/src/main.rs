@@ -36,6 +36,10 @@ async fn main() -> anyhow::Result<()> {
         .with_target(true)
         .init();
 
+    // Install rustls crypto provider (required by rustls 0.23)
+    let _ = tokio_rustls::rustls::crypto::aws_lc_rs::default_provider()
+        .install_default();
+
     info!(
         version = env!("CARGO_PKG_VERSION"),
         bind = %config.bind,

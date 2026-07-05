@@ -2,7 +2,6 @@
 //! Polls engine endpoints and reports status
 
 use crate::router::ShareRouter;
-use crate::transport::Transport;
 use std::sync::Arc;
 use tokio::time::{interval, Duration};
 use tracing::{error, info, warn};
