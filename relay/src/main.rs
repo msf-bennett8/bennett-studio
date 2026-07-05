@@ -79,24 +79,67 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-     // Create transport (pooled TCP, or P2P)
-      let transport: Arc<dyn transport::Transport> = if config.enable_p2p {
-          info!("P2P transport enabled");
-          if let Some(remote_ice_b64) = &config.remote_ice {
-              // Client mode: we have remote ICE, create P2P transport
-              let remote_ice = transport::ice::IceCandidates::from_base64(remote_ice_b64)
-                  .map_err(|e| anyhow::anyhow!("Invalid remote ICE: {}", e))?;
-              transport::TransportFactory::create_p2p_client(remote_ice, config.share_code.clone()).await
-                  .map_err(|e| anyhow::anyhow!("P2P client setup failed: {}", e))?
-          } else {
-              // Server mode: gather our ICE and wait for connections
-              let local_ice = transport::ice::gather_ice_candidates().await
-                  .map_err(|e| anyhow::anyhow!("ICE gathering failed: {}", e))?;
-              info!("P2P server ICE: {}", serde_json::to_string_pretty(&local_ice).unwrap());
-              transport::TransportFactory::create_p2p_server(local_ice, config.share_code.clone()).await
-                  .map_err(|e| anyhow::anyhow!("P2P server setup failed: {}", e))?
-          }
-      } else {
+    // Create transport (pooled TCP, or P2P)
+    let transport: Arc<dyn transport::Transport> = if config.enable_p2p {
+        info!("P2P transport enabled");
+
+        // Firebase signaling mode (best UX)
+        let p2p_transport = if config.use_firebase {
+            let firebase_url = config.firebase_url.clone()
+                .ok_or_else(|| anyhow::anyhow!("--firebase-url required for Firebase signaling"))?;
+            let signaling = signaling::firebase::FirebaseSignaling::new(firebase_url);
+
+            if config.p2p_mode == "engine" {
+                // Engine mode: create room, upload ICE, wait for client
+                let room_code = config.share_code.clone()
+                    .unwrap_or_else(signaling::firebase::generate_room_code);
+
+                let local_ice = transport::ice::gather_ice_candidates().await
+                    .map_err(|e| anyhow::anyhow!("ICE gathering failed: {}", e))?;
+
+                signaling.create_room(&room_code, &local_ice).await
+                    .map_err(|e| anyhow::anyhow!("Failed to create signaling room: {}", e))?;
+
+                info!(room = %room_code, "Firebase room created. Share code with client.");
+                info!("Client should run: --enable-p2p --use-firebase --share-code {} --firebase-url {}", room_code, config.firebase_url.as_ref().unwrap());
+
+                // Wait for client's ICE
+                let client_ice = signaling.poll_for_client(&room_code, 300).await
+                    .map_err(|e| anyhow::anyhow!("Failed to get client ICE: {}", e))?;
+
+                signaling.mark_connected(&room_code).await.ok();
+
+                transport::TransportFactory::create_p2p_server(local_ice, Some(room_code)).await
+            } else if config.p2p_mode == "client" {
+                // Client mode: join room by code, upload our ICE, get engine's ICE
+                let room_code = config.share_code.clone()
+                    .ok_or_else(|| anyhow::anyhow!("--share-code required for Firebase client mode"))?;
+
+                let local_ice = transport::ice::gather_ice_candidates().await
+                    .map_err(|e| anyhow::anyhow!("ICE gathering failed: {}", e))?;
+
+                let engine_ice = signaling.join_room(&room_code, &local_ice).await
+                    .map_err(|e| anyhow::anyhow!("Failed to join room: {}", e))?;
+
+                transport::TransportFactory::create_p2p_client(engine_ice, Some(room_code)).await
+            } else {
+                return Err(anyhow::anyhow!("--p2p-mode must be 'engine' or 'client'"));
+            }
+        } else if let Some(remote_ice_b64) = &config.remote_ice {
+            // Manual ICE mode (fallback, no server)
+            let remote_ice = transport::ice::IceCandidates::from_base64(remote_ice_b64)
+                .map_err(|e| anyhow::anyhow!("Invalid remote ICE: {}", e))?;
+            transport::TransportFactory::create_p2p_client(remote_ice, config.share_code.clone()).await
+        } else {
+            // Server mode: gather our ICE and wait for connections
+            let local_ice = transport::ice::gather_ice_candidates().await
+                .map_err(|e| anyhow::anyhow!("ICE gathering failed: {}", e))?;
+            info!("P2P server ICE: {}", serde_json::to_string_pretty(&local_ice).unwrap());
+            transport::TransportFactory::create_p2p_server(local_ice, config.share_code.clone()).await
+        };
+
+        p2p_transport.map_err(|e| anyhow::anyhow!("P2P transport init failed: {}", e))?
+    } else {
         info!("Pooled TCP transport active (connection pooling + splice)");
         transport::TransportFactory::create_pooled_tcp(
             config.engine_http,

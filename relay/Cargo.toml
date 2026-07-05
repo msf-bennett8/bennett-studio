@@ -30,8 +30,8 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 chrono = { version = "0.4", features = ["serde"] }
 
-# For sidecar proxy
-reqwest = { version = "0.12", default-features = false, features = ["json"] }
+# HTTP client for Firebase signaling
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 
 # QUIC (for Phase 3)
 quinn = { version = "0.11", optional = true }

@@ -91,9 +91,31 @@ pub async fn create_share(
         }
     };
     
-    // Build share URL
+    // Gather ICE candidates if P2P is enabled on this host
+    let ice_candidates = if std::env::var("BENNETT_ENABLE_P2P").is_ok() {
+        match gather_engine_ice().await {
+            Ok(ice) => {
+                info!("P2P ICE gathered for share {}", code);
+                Some(ice)
+            }
+            Err(e) => {
+                warn!("P2P ICE gathering failed: {}", e);
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    // Build share URL — include signaling code for Firebase P2P
     let base_url = get_share_base_url();
-    let url = build_share_url(&base_url, &code, &token.token);
+    let url = if ice_candidates.is_some() {
+        // Generate short signaling code from share code
+        let sig_code = format!("{}-{}", &code[..3], &code[3..6]);
+        format!("{}/db/{}?t={}&sig={}", base_url, code, token.token, sig_code)
+    } else {
+        build_share_url(&base_url, &code, &token.token)
+    };
     
     // Store in database
     let record = ShareRecord {
@@ -128,18 +150,9 @@ pub async fn create_share(
 
     info!("Created share {} for db {} with {} permission", code, db.name, permission);
 
-    // Gather ICE candidates if P2P is enabled on this host
-    let ice_candidates = if std::env::var("BENNETT_ENABLE_P2P").is_ok() {
-        match gather_engine_ice().await {
-            Ok(ice) => {
-                info!("P2P ICE gathered for share {}", code);
-                Some(ice.to_base64())
-            }
-            Err(e) => {
-                warn!("P2P ICE gathering failed: {}", e);
-                None
-            }
-        }
+    // Generate short signaling code for Firebase P2P
+    let sig_code = if ice_candidates.is_some() {
+        Some(format!("{}-{}", &code[..3], &code[3..6]))
     } else {
         None
     };
@@ -150,6 +163,7 @@ pub async fn create_share(
         token: token.token,
         expires_at: token.expires_at,
         ice: ice_candidates,
+        sig: sig_code,
     })))
 }
 
@@ -660,9 +674,14 @@ pub async fn resolve_share(
         "base_url": format!("http://{}:{}", host_ip, host_port),
         "ttl_seconds": 300,
     })) ))
+}
+
+/// Default Firebase Realtime Database URL for P2P signaling
+/// Spark plan = free forever, no credit card needed
+const DEFAULT_FIREBASE_URL: &str = "https://bennett-p2p-signaling-default-rtdb.europe-west1.firebasedatabase.app/";
 
 /// Gather ICE candidates from the relay process
-/// Returns base64-encoded ICE string for embedding in share URL
+/// Returns URL-safe base64-encoded ICE string
 async fn gather_engine_ice() -> Result<String, String> {
     // Try to find relay binary
     let relay_path = std::env::var("BENNETT_RELAY_PATH")
@@ -678,14 +697,22 @@ async fn gather_engine_ice() -> Result<String, String> {
         return Err(format!("Relay ICE gathering failed: {}", String::from_utf8_lossy(&output.stderr)));
     }
 
-    // Relay outputs base64-encoded ICE candidates
+    // Relay outputs URL-safe base64-encoded ICE candidates (no padding)
     let b64 = String::from_utf8_lossy(&output.stdout).trim().to_string();
     
-    // Validate it's valid base64
-    let _ = base64::decode(&b64)
+    // Validate it's valid base64 using base64 0.22 API
+    use base64::Engine;
+    let _ = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(&b64)
+        .or_else(|_| base64::engine::general_purpose::URL_SAFE.decode(&b64))
+        .or_else(|_| base64::engine::general_purpose::STANDARD.decode(&b64))
         .map_err(|e| format!("Relay output is not valid base64: {}", e))?;
 
     Ok(b64)
 }
 
+/// Get Firebase Realtime Database URL for P2P signaling
+pub fn get_firebase_url() -> String {
+    std::env::var("BENNETT_FIREBASE_URL")
+        .unwrap_or_else(|_| DEFAULT_FIREBASE_URL.to_string())
 }

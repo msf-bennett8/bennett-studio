@@ -94,6 +94,7 @@ impl ShareService for ShareGrpcService {
             revoked: false,
             guest_count: 0,
             pinned: false,
+            ice: None, // gRPC path doesn't do P2P ICE gathering yet
         };
         
         self.state.share_store.create_share(&record).await
@@ -106,6 +107,7 @@ impl ShareService for ShareGrpcService {
             url,
             token: token_result.token,
             expires_at: token_result.expires_at.to_rfc3339(),
+            ice: String::new(), // Empty string for gRPC (no P2P in gRPC path yet)
         }))
     }
 

@@ -63,6 +63,18 @@ pub struct RelayConfig {
     #[arg(long, env = "BENNETT_RELAY_SHARE_CODE")]
     pub share_code: Option<String>,
 
+    /// Firebase Realtime Database URL for signaling
+    #[arg(long, env = "BENNETT_FIREBASE_URL")]
+    pub firebase_url: Option<String>,
+
+    /// Use Firebase signaling instead of manual ICE paste
+    #[arg(long, default_value_t = false, env = "BENNETT_USE_FIREBASE_SIGNALING")]
+    pub use_firebase: bool,
+
+    /// P2P mode: "engine" (host) or "client" (guest)
+    #[arg(long, default_value = "engine", env = "BENNETT_P2P_MODE")]
+    pub p2p_mode: String,
+
     /// Log level
     #[arg(long, default_value = "info", env = "RUST_LOG")]
     pub log_level: String,

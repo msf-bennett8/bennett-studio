@@ -56,6 +56,7 @@ pub struct CreateShareResponse {
     pub token: String,
     pub expires_at: DateTime<Utc>,
     pub ice: Option<String>, // Base64 ICE candidates for P2P (optional)
+    pub sig: Option<String>, // Short signaling code for Firebase P2P (optional)
 }
 
 /// Share validation request (from guest)

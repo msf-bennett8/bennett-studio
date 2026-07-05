@@ -59,6 +59,8 @@ impl SignalingState {
     }
 }
 
+pub mod firebase;
+
 /// WebSocket handler for signaling
 pub async fn signaling_handler(
     ws: WebSocketUpgrade,
