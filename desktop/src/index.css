@@ -88,6 +88,16 @@
     50% { opacity: 0; }
   }
 
+  /* Engine status dot — breathing indicator */
+  @keyframes blink-dot {
+    0%, 45% {
+      opacity: 1;
+    }
+    55%, 100% {
+      opacity: 0.1;
+    }
+  }
+
   .terminal-cursor {
     animation: blink 1s step-end infinite;
   }

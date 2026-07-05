@@ -12,6 +12,7 @@ import { SharePage } from './pages/SharePage';
 import { JoinSharePage } from './pages/JoinSharePage';
 import { RemoteQueryPage } from './pages/RemoteQueryPage';
 import { SettingsPage } from './pages/SettingsPage';
+import { NotesPage } from './pages/NotesPage';
 import './index.css';
 
 function App() {
@@ -51,6 +52,7 @@ function App() {
           <Route path="/share" element={<SharePage />} />
           <Route path="/join-share" element={<JoinSharePage />} />
           <Route path="/remote-query" element={<RemoteQueryPage />} />
+          <Route path="/notes" element={<NotesPage />} />
           <Route path="/settings" element={<SettingsPage />} />
         </Routes>
       </Layout>

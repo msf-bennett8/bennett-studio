@@ -71,6 +71,92 @@ pub async fn health_check() -> Json<ApiResponse<serde_json::Value>> {
 }
 
 // ============================================================================
+// Notes CRUD
+// ============================================================================
+
+use crate::models::note::{Note, CreateNoteRequest, UpdateNoteRequest, SyncNotesRequest};
+
+pub async fn list_notes(
+    State(state): State<AppState>,
+) -> Json<ApiResponse<Vec<Note>>> {
+    let store = state.notes_store.read().await;
+    match store.list_notes(false).await {
+        Ok(notes) => Json(ApiResponse::success(notes)),
+        Err(e) => Json(ApiResponse::error(format!("Failed to list notes: {}", e))),
+    }
+}
+
+pub async fn get_note(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Json<ApiResponse<Note>> {
+    let store = state.notes_store.read().await;
+    match store.get_note(&id).await {
+        Ok(Some(note)) => Json(ApiResponse::success(note)),
+        Ok(None) => Json(ApiResponse::error("Note not found".to_string())),
+        Err(e) => Json(ApiResponse::error(format!("Failed to get note: {}", e))),
+    }
+}
+
+pub async fn create_note(
+    State(state): State<AppState>,
+    Json(req): Json<CreateNoteRequest>,
+) -> Json<ApiResponse<Note>> {
+    let store = state.notes_store.read().await;
+    match store.create_note(req, None).await {
+        Ok(note) => Json(ApiResponse::success(note)),
+        Err(e) => Json(ApiResponse::error(format!("Failed to create note: {}", e))),
+    }
+}
+
+pub async fn update_note(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<UpdateNoteRequest>,
+) -> Json<ApiResponse<Note>> {
+    let store = state.notes_store.read().await;
+    match store.update_note(&id, req).await {
+        Ok(Some(note)) => Json(ApiResponse::success(note)),
+        Ok(None) => Json(ApiResponse::error("Note not found".to_string())),
+        Err(e) => Json(ApiResponse::error(format!("Failed to update note: {}", e))),
+    }
+}
+
+pub async fn delete_note(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Json<ApiResponse<bool>> {
+    let store = state.notes_store.read().await;
+    match store.delete_note(&id).await {
+        Ok(deleted) => Json(ApiResponse::success(deleted)),
+        Err(e) => Json(ApiResponse::error(format!("Failed to delete note: {}", e))),
+    }
+}
+
+pub async fn search_notes(
+    State(state): State<AppState>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Json<ApiResponse<Vec<Note>>> {
+    let query = params.get("q").cloned().unwrap_or_default();
+    let store = state.notes_store.read().await;
+    match store.search_notes(&query).await {
+        Ok(notes) => Json(ApiResponse::success(notes)),
+        Err(e) => Json(ApiResponse::error(format!("Search failed: {}", e))),
+    }
+}
+
+pub async fn sync_notes(
+    State(state): State<AppState>,
+    Json(req): Json<SyncNotesRequest>,
+) -> Json<ApiResponse<Vec<Note>>> {
+    let store = state.notes_store.read().await;
+    match store.sync_notes(req.notes, &req.device_id).await {
+        Ok(notes) => Json(ApiResponse::success(notes)),
+        Err(e) => Json(ApiResponse::error(format!("Sync failed: {}", e))),
+    }
+}
+
+// ============================================================================
 // Database CRUD
 // ============================================================================
 

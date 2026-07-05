@@ -37,6 +37,25 @@ async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
   return result.data as T;
 }
 
+import { Note } from '../stores/notesStore';
+
+export interface CreateNoteRequest {
+  title: string;
+  content: string;
+  tags?: string[];
+  color?: string;
+  pinned?: boolean;
+}
+
+export interface UpdateNoteRequest {
+  title?: string;
+  content?: string;
+  tags?: string[];
+  color?: string;
+  pinned?: boolean;
+  archived?: boolean;
+}
+
 export const api = {
   health: () => fetchApi<Record<string, any>>('/api/health'),
   listDatabases: () => fetchApi<DatabaseInstance[]>('/api/databases'),
@@ -138,4 +157,16 @@ export const api = {
 
   scanEnvFiles: (id: string) =>
     fetchApi<EnvFileSuggestion[]>(`/api/databases/${id}/env-scan`),
+
+  // Notes API
+  listNotes: () => fetchApi<Note[]>('/api/notes'),
+  getNote: (id: string) => fetchApi<Note>(`/api/notes/${id}`),
+  createNote: (req: CreateNoteRequest) => fetchApi<Note>('/api/notes', { method: 'POST', body: JSON.stringify(req) }),
+  updateNote: (id: string, req: UpdateNoteRequest) => fetchApi<Note>(`/api/notes/${id}`, { method: 'PUT', body: JSON.stringify(req) }),
+  deleteNote: (id: string) => fetchApi<boolean>(`/api/notes/${id}`, { method: 'DELETE' }),
+  searchNotes: (query: string) => fetchApi<Note[]>(`/api/notes/search?q=${encodeURIComponent(query)}`),
+  syncNotes: (notes: Note[], deviceId: string) => fetchApi<Note[]>('/api/notes/sync', {
+    method: 'POST',
+    body: JSON.stringify({ notes, device_id: deviceId, last_sync: null }),
+  }),
 };

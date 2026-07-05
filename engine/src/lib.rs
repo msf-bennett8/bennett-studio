@@ -26,6 +26,7 @@ use auth::share_token::ShareTokenManager;
 use audit::AuditService;
 use rate_limit::RateLimitService;
 use control_plane::query::cache::QueryCache;
+use control_plane::notes_store::NotesStore;
 use api::websocket_buffer::WsMessageBuffer;
 
 #[derive(Clone)]
@@ -41,6 +42,7 @@ pub struct AppState {
     pub rate_limiter: Arc<RateLimitService>,
     pub query_cache: Arc<QueryCache>,
     pub ws_buffer: Arc<WsMessageBuffer>,
+    pub notes_store: Arc<tokio::sync::RwLock<NotesStore>>,
 }
 
 impl AppState {
@@ -76,7 +78,15 @@ impl AppState {
             }
         };
         
-        let rate_limiter = Arc::new(RateLimitService::new());
+                let rate_limiter = Arc::new(RateLimitService::new());
+
+        // Initialize notes store — reuse the same SQLite DB as shares to avoid file/path issues
+        let notes_store = Arc::new(tokio::sync::RwLock::new(
+            NotesStore::new(&db_path).await
+                .map_err(|e| crate::runtime::container::docker::DockerError::Other(format!("Notes store init failed: {}", e)))?
+        ));
+
+        let query_cache = Arc::new(QueryCache::new());
         
         Ok(Self {
             databases: Arc::new(Mutex::new(Vec::new())),
@@ -90,6 +100,7 @@ impl AppState {
             rate_limiter,
             query_cache: Arc::new(QueryCache::new()),
             ws_buffer: Arc::new(WsMessageBuffer::new()),
+            notes_store,
         })
     }
 }

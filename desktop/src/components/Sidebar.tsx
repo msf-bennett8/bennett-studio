@@ -1,5 +1,7 @@
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Database, Search, Table2, Share2, Settings, Home, Terminal, Cpu, Rows3, Globe } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Database, Search, Table2, Share2, Settings, Home, Terminal, Cpu, Rows3, Globe, StickyNote } from 'lucide-react';
+import { api } from '../services/api';
 
 const navItems = [
   { icon: Home, label: 'Home', path: '/' },
@@ -9,12 +11,36 @@ const navItems = [
   { icon: Rows3, label: 'Data', path: '/data' },
   { icon: Share2, label: 'Share', path: '/share' },
   { icon: Globe, label: 'Remote', path: '/remote-query' },
+  { icon: StickyNote, label: 'Notes', path: '/notes' },
   { icon: Settings, label: 'Settings', path: '/settings' },
 ];
 
 export function Sidebar() {
   const location = useLocation();
   const navigate = useNavigate();
+  const [engineOnline, setEngineOnline] = useState(true);
+
+  // Real-time engine health polling
+  useEffect(() => {
+    let mounted = true;
+
+    const checkHealth = async () => {
+      try {
+        await api.health();
+        if (mounted) setEngineOnline(true);
+      } catch {
+        if (mounted) setEngineOnline(false);
+      }
+    };
+
+    checkHealth();
+    const interval = setInterval(checkHealth, 5000); // Check every 5s
+
+    return () => {
+      mounted = false;
+      clearInterval(interval);
+    };
+  }, []);
 
   return (
     <aside className="w-64 flex flex-col border-r" style={{ backgroundColor: 'var(--bgSecondary)', borderColor: 'var(--borderDefault)' }}>
@@ -44,8 +70,16 @@ export function Sidebar() {
 
       <div className="p-4 border-t space-y-2" style={{ borderColor: 'var(--borderDefault)' }}>
         <div className="flex items-center gap-3 px-4 py-3 rounded-xl" style={{ backgroundColor: 'var(--surfaceDefault)' }}>
-          <div className="w-2 h-2 rounded-full" style={{ backgroundColor: 'var(--accentSuccess)' }} />
-          <span className="text-xs" style={{ color: 'var(--textSecondary)' }}>Engine Online</span>
+          <div
+            className="w-2 h-2 rounded-full"
+            style={{
+              backgroundColor: engineOnline ? 'var(--accentSuccess)' : 'var(--accentError)',
+              animation: 'blink-dot 3s steps(1) infinite',
+            }}
+          />
+          <span className="text-xs" style={{ color: 'var(--textSecondary)' }}>
+            {engineOnline ? 'Engine Online' : 'Engine Offline'}
+          </span>
         </div>
         <div className="flex items-center gap-3 px-4 py-2 rounded-xl" style={{ backgroundColor: 'var(--bgTertiary)' }}>
           <Cpu size={14} style={{ color: 'var(--textMuted)' }} />

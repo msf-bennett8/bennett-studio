@@ -65,6 +65,14 @@ pub fn routes() -> Router<AppState> {
         .route("/api/shares/:code/validate", post(sharing::validate_share))
         .route("/api/shares/:code/resolve", get(sharing::resolve_share))
         .route("/api/health", get(crate::api::health::comprehensive_health_check))
+        // Notes endpoints
+        .route("/api/notes", get(http::list_notes))
+        .route("/api/notes", post(http::create_note))
+        .route("/api/notes/search", get(http::search_notes))
+        .route("/api/notes/sync", post(http::sync_notes))
+        .route("/api/notes/:id", get(http::get_note))
+        .route("/api/notes/:id", put(http::update_note))
+        .route("/api/notes/:id", delete(http::delete_note))
         .route("/metrics", get(metrics_endpoint))
         // Phase 2: Connect-RPC full service endpoints
         .route("/bennett.v1.HealthService/Check", post(crate::connect_rpc::health::connect_health))
