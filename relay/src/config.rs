@@ -56,7 +56,7 @@ impl RelayConfig {
     /// Expand tilde in paths
     pub fn resolve_db_path(&self) -> PathBuf {
         let path = shellexpand::tilde(&self.db_path);
-        PathBuf::from(path.as_ref())
+        PathBuf::from(path.as_str())
     }
 }
 

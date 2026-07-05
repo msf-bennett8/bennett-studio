@@ -7,11 +7,13 @@
 //! - Share ID extraction from URL path or MySQL username
 //! - Route lookup in SQLite (engine's share store)
 //! - Bidirectional TCP proxy to local engine
+//! - Graceful shutdown on SIGTERM/SIGINT
 //!
 //! Future: P2P transport fallback via WebRTC/QUIC
 
 mod config;
 mod health;
+mod metrics;
 mod multiplexer;
 mod router;
 mod server;
@@ -20,6 +22,7 @@ mod transport;
 
 use clap::Parser;
 use std::sync::Arc;
+use tokio::signal;
 use tracing::{error, info};
 
 #[tokio::main]
@@ -76,11 +79,54 @@ async fn main() -> anyhow::Result<()> {
         config.health_interval,
     );
 
+    // Start metrics HTTP endpoint (separate from TLS relay)
+    let _metrics_handle = metrics::start_metrics_server(config.bind.port() + 1000).await;
+
+    // Shutdown channel
+    let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+
+    // Spawn signal handler
+    let shutdown_tx_clone = shutdown_tx.clone();
+    tokio::spawn(async move {
+        let mut sigterm = signal::unix::signal(signal::unix::SignalKind::terminate())
+            .expect("Failed to register SIGTERM handler");
+        let mut sigint = signal::unix::signal(signal::unix::SignalKind::interrupt())
+            .expect("Failed to register SIGINT handler");
+
+        tokio::select! {
+            _ = sigterm.recv() => {
+                info!("Received SIGTERM, initiating graceful shutdown");
+            }
+            _ = sigint.recv() => {
+                info!("Received SIGINT, initiating graceful shutdown");
+            }
+        }
+
+        let _ = shutdown_tx_clone.send(true);
+    });
+
+    // Also handle Ctrl+C for Windows/non-Unix
+    #[cfg(not(unix))]
+    {
+        let shutdown_tx_clone = shutdown_tx.clone();
+        tokio::spawn(async move {
+            if let Err(e) = tokio::signal::ctrl_c().await {
+                warn!("Failed to listen for ctrl-c: {}", e);
+                return;
+            }
+            info!("Received Ctrl+C, initiating graceful shutdown");
+            let _ = shutdown_tx_clone.send(true);
+        });
+    }
+
     // Initialize and run relay server
     let relay = server::RelayServer::new(config, router, transport).await?;
 
-    info!("Relay server ready");
-    relay.run().await?;
+    info!("Relay server ready — waiting for connections");
+    
+    // Run server with shutdown support
+    relay.run(shutdown_rx).await?;
 
+    info!("Relay server shutdown complete");
     Ok(())
 }

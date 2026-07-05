@@ -13,7 +13,7 @@ pub struct HealthMonitor;
 impl HealthMonitor {
     pub fn start(
         router: Arc<ShareRouter>,
-        transport: Arc<dyn Transport>,
+        transport: Arc<dyn crate::transport::Transport>,
         interval_secs: u64,
     ) -> tokio::task::JoinHandle<()> {
         tokio::spawn(async move {

@@ -2,12 +2,12 @@
 //! This is the active, production-ready transport
 
 use super::{ProtocolType, Transport};
-use async_trait::async_trait;
 use std::io;
 use tokio::net::TcpStream;
 use tracing::{debug, error, info};
 
 /// TCP transport connecting to local engine
+#[derive(Clone)]
 pub struct TcpTransport {
     engine_http: std::net::SocketAddr,
     engine_mysql: std::net::SocketAddr,
@@ -33,62 +33,69 @@ impl TcpTransport {
     }
 }
 
-#[async_trait]
 impl Transport for TcpTransport {
     fn name(&self) -> &'static str {
         "tcp"
     }
 
-    async fn connect(
+    fn connect(
         &self,
         share_id: &str,
         protocol: ProtocolType,
-    ) -> io::Result<TcpStream> {
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = io::Result<TcpStream>> + Send + '_>> {
         let target = self.target(protocol);
-        debug!(
-            share_id = %share_id,
-            transport = "tcp",
-            target = %target,
-            protocol = ?protocol,
-            "Connecting to engine"
-        );
+        let share_id = share_id.to_string();
+        Box::pin(async move {
+            debug!(
+                share_id = %share_id,
+                transport = "tcp",
+                target = %target,
+                protocol = ?protocol,
+                "Connecting to engine"
+            );
 
-        match TcpStream::connect(target).await {
-            Ok(stream) => {
-                info!(
-                    share_id = %share_id,
-                    target = %target,
-                    "Connected to engine via TCP"
-                );
-                Ok(stream)
+            match TcpStream::connect(target).await {
+                Ok(stream) => {
+                    info!(
+                        share_id = %share_id,
+                        target = %target,
+                        "Connected to engine via TCP"
+                    );
+                    Ok(stream)
+                }
+                Err(e) => {
+                    error!(
+                        share_id = %share_id,
+                        target = %target,
+                        error = %e,
+                        "Failed to connect to engine"
+                    );
+                    Err(e)
+                }
             }
-            Err(e) => {
-                error!(
-                    share_id = %share_id,
-                    target = %target,
-                    error = %e,
-                    "Failed to connect to engine"
-                );
-                Err(e)
-            }
-        }
+        })
     }
 
-    async fn health_check(&self) -> bool {
-        // Try to connect to both engine endpoints
-        let http_ok = TcpStream::connect(self.engine_http).await.is_ok();
-        let mysql_ok = TcpStream::connect(self.engine_mysql).await.is_ok();
+    fn health_check(
+        &self,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = bool> + Send + '_>> {
+        let http = self.engine_http;
+        let mysql = self.engine_mysql;
+        Box::pin(async move {
+            let http_ok = TcpStream::connect(http).await.is_ok();
+            let mysql_ok = TcpStream::connect(mysql).await.is_ok();
 
-        if http_ok && mysql_ok {
-            debug!("TCP transport health check: OK");
-        } else {
-            error!(
-                http_ok = http_ok,
-                mysql_ok = mysql_ok,
-                "TCP transport health check: FAILED"
-            );
-        }
+            if http_ok && mysql_ok {
+                debug!("TCP transport health check: OK");
+            } else {
+                error!(
+                    http_ok = http_ok,
+                    mysql_ok = mysql_ok,
+                    "TCP transport health check: FAILED"
+                );
+            }
 
-        http_ok && mysql_ok
+            http_ok && mysql_ok
+        })
     }
 }

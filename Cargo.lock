@@ -560,6 +560,7 @@ name = "bennett-relay"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "axum",
  "bytes",
  "chrono",
@@ -568,6 +569,8 @@ dependencies = [
  "futures",
  "hyper",
  "hyper-util",
+ "pin-project",
+ "rand",
  "rcgen",
  "rustls",
  "rustls-pemfile",
@@ -584,6 +587,7 @@ dependencies = [
  "tower-http 0.5.2",
  "tracing",
  "tracing-subscriber",
+ "trait-variant",
  "uuid",
 ]
 
@@ -4028,6 +4032,17 @@ dependencies = [
  "tracing-core",
  "tracing-log",
  "tracing-serde",
+]
+
+[[package]]
+name = "trait-variant"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "70977707304198400eb4835a78f6a9f928bf41bba420deb8fdb175cd965d77a7"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]

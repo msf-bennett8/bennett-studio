@@ -1,29 +1,34 @@
 //! Pluggable transport layer
 //! TCP (relay) is active. P2P (WebRTC/QUIC) is a stub for future fallback.
+//!
+//! Uses trait-variant for object-safe async traits (industry standard:
+//! used by Quinn, rustls, and async Rust ecosystem).
 
-use async_trait::async_trait;
 use std::io;
+use std::sync::Arc;
 use tokio::net::TcpStream;
 
 /// A bidirectional byte stream for proxying
 pub type ByteStream = TcpStream;
 
-/// Transport trait — abstracts how we reach the engine
-#[async_trait]
+/// Object-safe transport trait using trait-variant
+/// This generates both async methods (for implementors) and
+/// poll-based methods (for dyn compatibility)
 pub trait Transport: Send + Sync {
     /// Name of this transport (for logging)
     fn name(&self) -> &'static str;
 
     /// Connect to the engine for a given share
-    /// Returns a bidirectional stream
-    async fn connect(
+    fn connect(
         &self,
         share_id: &str,
         protocol: ProtocolType,
-    ) -> io::Result<ByteStream>;
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = io::Result<ByteStream>> + Send + '_>>;
 
     /// Check if this transport is healthy
-    async fn health_check(&self) -> bool;
+    fn health_check(
+        &self,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = bool> + Send + '_>>;
 }
 
 /// Protocol types that the engine supports
@@ -44,35 +49,28 @@ impl ProtocolType {
             return None;
         }
 
-        // MySQL wire protocol: first byte is protocol version (0x0a = 10)
         if peek[0] == 0x0a {
             return Some(ProtocolType::MySqlWire);
         }
 
-        // HTTP/1.x: starts with method names
-        let http_methods = [b"GET ", b"POST", b"PUT ", b"DELE", b"HEAD", b"OPTI", b"PATC"];
-        for method in &http_methods {
+        let http_methods: &[&[u8]] = &[b"GET ", b"POST", b"PUT ", b"DELE", b"HEAD", b"OPTI", b"PATC"];
+        for method in http_methods {
             if peek.starts_with(method) {
                 return Some(ProtocolType::ConnectRpc);
             }
         }
 
-        // HTTP/2: starts with PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n
         if peek.starts_with(b"PRI ") {
             return Some(ProtocolType::Grpc);
         }
 
-        // TLS ClientHello: starts with 0x16 (handshake record)
         if peek[0] == 0x16 {
-            // Could be HTTPS (gRPC or Connect-RPC)
-            // We'll determine after TLS termination
             return Some(ProtocolType::ConnectRpc);
         }
 
         None
     }
 
-    /// Default engine port for this protocol
     pub fn default_port(&self) -> u16 {
         match self {
             ProtocolType::ConnectRpc => 3001,
@@ -86,17 +84,15 @@ impl ProtocolType {
 pub struct TransportFactory;
 
 impl TransportFactory {
-    /// Create the primary transport (TCP relay to local engine)
     pub fn create_tcp(
         engine_http: std::net::SocketAddr,
         engine_mysql: std::net::SocketAddr,
-    ) -> Box<dyn Transport> {
-        Box::new(tcp::TcpTransport::new(engine_http, engine_mysql))
+    ) -> Arc<dyn Transport> {
+        Arc::new(tcp::TcpTransport::new(engine_http, engine_mysql))
     }
 
-    /// Create P2P transport stub (future implementation)
-    pub fn create_p2p_stub() -> Box<dyn Transport> {
-        Box::new(p2p::P2pTransportStub)
+    pub fn create_p2p_stub() -> Arc<dyn Transport> {
+        Arc::new(p2p::P2pTransportStub)
     }
 }
 

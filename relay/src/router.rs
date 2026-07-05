@@ -2,10 +2,10 @@
 //! Polls SQLite DB for active shares, maintains in-memory cache
 
 use dashmap::DashMap;
-use sqlx::{Pool, Sqlite};
+use sqlx::{Pool, Row, Sqlite};
 use std::sync::Arc;
 use tokio::time::{interval, Duration};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 
 /// Route entry for a share
 #[derive(Debug, Clone)]
@@ -69,7 +69,7 @@ impl ShareRouter {
     pub async fn refresh_routes(&self) -> anyhow::Result<()> {
         debug!("Refreshing share routes from database");
 
-        let rows = sqlx::query!(
+        let rows = sqlx::query(
             r#"
             SELECT code, db_id, permission, tables, created_at, expires_at, revoked
             FROM shares
@@ -83,15 +83,20 @@ impl ShareRouter {
             Ok(shares) => {
                 let mut count = 0;
                 for share in shares {
+                    let code: String = share.get("code");
+                    let db_id: String = share.get("db_id");
+                    let expires_at_str: String = share.get("expires_at");
+                    let revoked_i64: i64 = share.get("revoked");
+
                     let route = ShareRoute {
-                        share_id: share.code.clone(),
-                        db_id: share.db_id,
+                        share_id: code.clone(),
+                        db_id,
                         protocol: crate::transport::ProtocolType::ConnectRpc,
                         engine_port: self.engine_http_port,
-                        expires_at: share.expires_at.parse().unwrap_or_else(|_| {
+                        expires_at: expires_at_str.parse().unwrap_or_else(|_| {
                             chrono::DateTime::UNIX_EPOCH
                         }),
-                        revoked: share.revoked != 0,
+                        revoked: revoked_i64 != 0,
                     };
 
                     // Also add MySQL wire route for the same share
@@ -102,11 +107,11 @@ impl ShareRouter {
                     };
 
                     self.cache.insert(
-                        format!("{}:http", share.code),
+                        format!("{}:http", code),
                         route,
                     );
                     self.cache.insert(
-                        format!("{}:mysql", share.code),
+                        format!("{}:mysql", code),
                         mysql_route,
                     );
                     count += 1;
