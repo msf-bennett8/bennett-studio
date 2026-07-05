@@ -3,7 +3,7 @@ name = "bennett-relay"
 version = "0.1.0"
 edition = "2021"
 authors = ["Bennett Studio"]
-description = "Bennett Studio Relay Server"
+description = "Bennett Studio Public Relay Server — TLS-terminating TCP proxy with pluggable transport"
 license = "MIT"
 
 [[bin]]
@@ -11,11 +11,53 @@ name = "bennett-relay"
 path = "src/main.rs"
 
 [dependencies]
+# Async runtime
 tokio = { version = "1", features = ["full"] }
-axum = "0.7"
+tokio-util = { version = "0.7", features = ["codec"] }
+
+# HTTP server + routing
+axum = { version = "0.7", features = ["ws", "http2"] }
 tower = "0.4"
+tower-http = { version = "0.5", features = ["cors", "trace"] }
+hyper = { version = "1.0", features = ["full"] }
+hyper-util = { version = "0.1", features = ["full"] }
+
+# WebSocket (for P2P signaling stub)
 tokio-tungstenite = "0.21"
 futures = "0.3"
+
+# Serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+
+# TLS
+tokio-rustls = "0.26"
+rustls = "0.23"
+rustls-pemfile = "2.0"
+rcgen = "0.13"
+
+# SQLite (read-only access to engine's share store)
+sqlx = { version = "0.8", features = ["runtime-tokio-native-tls", "sqlite", "chrono"] }
+
+# CLI / Config
+clap = { version = "4.5", features = ["derive", "env"] }
+
+# Logging / Observability
 tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
+
+# Error handling
+thiserror = "1.0"
+anyhow = "1.0"
+
+# Utilities
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.10", features = ["v4", "serde"] }
+dashmap = "6"
+bytes = "1.6"
+
+# Shared types from workspace
+# bennett-shared = { path = "../shared" }  # Uncomment when shared crate exists
+
+[dev-dependencies]
+tokio-test = "0.4"
