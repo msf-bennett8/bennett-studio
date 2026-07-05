@@ -113,6 +113,7 @@ pub async fn create_share(
         revoked: false,
         guest_count: 0,
         pinned: false,
+        ice: ice_candidates.clone(),
     };
     
     if let Err(e) = state.share_store.create_share(&record).await {
@@ -127,11 +128,28 @@ pub async fn create_share(
 
     info!("Created share {} for db {} with {} permission", code, db.name, permission);
 
+    // Gather ICE candidates if P2P is enabled on this host
+    let ice_candidates = if std::env::var("BENNETT_ENABLE_P2P").is_ok() {
+        match gather_engine_ice().await {
+            Ok(ice) => {
+                info!("P2P ICE gathered for share {}", code);
+                Some(ice.to_base64())
+            }
+            Err(e) => {
+                warn!("P2P ICE gathering failed: {}", e);
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     Ok(Json(crate::models::database::ApiResponse::success(CreateShareResponse {
         code: code.clone(),
         url,
         token: token.token,
         expires_at: token.expires_at,
+        ice: ice_candidates,
     })))
 }
 
@@ -176,6 +194,7 @@ pub async fn list_shares(
                         guest_count: record.guest_count,
                         pinned: record.pinned,
                         status,
+                        ice: record.ice.clone(), // Pass through ICE if stored
                     });
                 }
             }
@@ -641,4 +660,32 @@ pub async fn resolve_share(
         "base_url": format!("http://{}:{}", host_ip, host_port),
         "ttl_seconds": 300,
     })) ))
+
+/// Gather ICE candidates from the relay process
+/// Returns base64-encoded ICE string for embedding in share URL
+async fn gather_engine_ice() -> Result<String, String> {
+    // Try to find relay binary
+    let relay_path = std::env::var("BENNETT_RELAY_PATH")
+        .unwrap_or_else(|_| "./target/release/bennett-relay".to_string());
+
+    let output = tokio::process::Command::new(&relay_path)
+        .arg("--gather-ice")
+        .output()
+        .await
+        .map_err(|e| format!("Failed to run relay: {}", e))?;
+
+    if !output.status.success() {
+        return Err(format!("Relay ICE gathering failed: {}", String::from_utf8_lossy(&output.stderr)));
+    }
+
+    // Relay outputs base64-encoded ICE candidates
+    let b64 = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    
+    // Validate it's valid base64
+    let _ = base64::decode(&b64)
+        .map_err(|e| format!("Relay output is not valid base64: {}", e))?;
+
+    Ok(b64)
+}
+
 }

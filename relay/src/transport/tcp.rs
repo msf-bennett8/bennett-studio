@@ -51,7 +51,11 @@ impl ProtocolPool {
             match conn {
                 Some(conn) => {
                     // Check if connection is still alive (guard dropped before await)
-                    if !conn.is_stale(300) && is_connection_alive(&conn.stream).await {
+                      let alive = match conn.stream.as_tcp() {
+                          Some(s) => is_connection_alive(s).await,
+                          None => false,
+                      };
+                      if !conn.is_stale(300) && alive {
                         self.in_use.fetch_add(1, Ordering::Relaxed);
                         debug!(protocol = ?self.protocol, "Reused pooled connection");
                         return Ok(conn);
@@ -69,11 +73,11 @@ impl ProtocolPool {
         let stream = TcpStream::connect(self.target).await?;
         self.in_use.fetch_add(1, Ordering::Relaxed);
 
-        Ok(PooledConnection {
-            stream,
-            protocol: self.protocol,
-            created_at: Instant::now(),
-        })
+          Ok(PooledConnection {
+              stream: super::ByteStream::Tcp(stream),
+              protocol: self.protocol,
+              created_at: Instant::now(),
+          })
     }
 
     /// Return connection to pool

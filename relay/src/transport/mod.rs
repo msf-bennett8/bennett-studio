@@ -9,18 +9,48 @@ use std::pin::Pin;
 use std::future::Future;
 use std::sync::Arc;
 use tokio::net::TcpStream;
+use crate::transport::ice::IceCandidates;
 
 /// ALPN protocol identifiers (industry standard from IANA)
 pub const ALPN_HTTP2: &[u8] = b"h2";
 pub const ALPN_HTTP1: &[u8] = b"http/1.1";
 pub const ALPN_MYSQL: &[u8] = b"mysql";
 
-/// A bidirectional byte stream for proxying
-pub type ByteStream = TcpStream;
+/// A bidirectional byte stream for proxying — can be TCP or P2P QUIC
+pub enum ByteStream {
+    Tcp(TcpStream),
+    #[cfg(feature = "p2p")]
+    Quic(quinn::Connection, quinn::SendStream, quinn::RecvStream),
+}
 
-/// A pooled TCP connection wrapper
+impl Clone for ByteStream {
+    fn clone(&self) -> Self {
+        match self {
+            ByteStream::Tcp(s) => ByteStream::Tcp(s.try_clone().expect("TCP stream clone failed")),
+            #[cfg(feature = "p2p")]
+            ByteStream::Quic(_, _, _) => panic!("Cannot clone QUIC ByteStream"),
+        }
+    }
+}
+
+impl ByteStream {
+    /// Try to get TCP stream reference (for legacy splice() code)
+    pub fn as_tcp(&self) -> Option<&TcpStream> {
+        match self {
+            ByteStream::Tcp(s) => Some(s),
+            _ => None,
+        }
+    }
+
+    /// Check if this is a TCP stream
+    pub fn is_tcp(&self) -> bool {
+        matches!(self, ByteStream::Tcp(_))
+    }
+}
+
+/// A pooled connection wrapper — generic over transport type
 pub struct PooledConnection {
-    pub stream: TcpStream,
+    pub stream: ByteStream,
     pub protocol: ProtocolType,
     pub created_at: std::time::Instant,
 }
@@ -28,6 +58,24 @@ pub struct PooledConnection {
 impl PooledConnection {
     pub fn is_stale(&self, max_age_secs: u64) -> bool {
         self.created_at.elapsed().as_secs() > max_age_secs
+    }
+
+    /// Get local address (for logging)
+    pub fn local_addr(&self) -> std::io::Result<std::net::SocketAddr> {
+        match &self.stream {
+            ByteStream::Tcp(s) => s.local_addr(),
+            #[cfg(feature = "p2p")]
+            ByteStream::Quic(_, _, _) => Ok(std::net::SocketAddr::from(([0,0,0,0], 0))),
+        }
+    }
+
+    /// Get peer address (for logging)
+    pub fn peer_addr(&self) -> std::io::Result<std::net::SocketAddr> {
+        match &self.stream {
+            ByteStream::Tcp(s) => s.peer_addr(),
+            #[cfg(feature = "p2p")]
+            ByteStream::Quic(_, _, _) => Ok(std::net::SocketAddr::from(([0,0,0,0], 0))),
+        }
     }
 }
 
@@ -136,7 +184,28 @@ impl TransportFactory {
     pub fn create_p2p_stub() -> Arc<dyn Transport> {
         Arc::new(p2p::P2pTransportStub)
     }
+
+    pub async fn create_p2p_server(
+        local_ice: IceCandidates,
+        share_code: Option<String>,
+    ) -> Result<Arc<dyn Transport>, p2p::P2pError> {
+        let transport = p2p::P2pTransport::new_server(local_ice, share_code).await?;
+        Ok(Arc::new(transport))
+    }
+
+    pub async fn create_p2p_client(
+        remote_ice: IceCandidates,
+        share_code: Option<String>,
+    ) -> Result<Arc<dyn Transport>, p2p::P2pError> {
+        let transport = p2p::P2pTransport::new_client(remote_ice, share_code).await?;
+        Ok(Arc::new(transport))
+    }
 }
 
 pub mod tcp;
 pub mod p2p;
+pub mod stun;
+pub mod ice;
+pub mod punch;
+pub mod dtls;
+pub mod quic;

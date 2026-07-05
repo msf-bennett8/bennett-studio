@@ -72,10 +72,16 @@ export const useShareStore = create<ShareState>((set, get) => ({
         // Continue — token will be lost on reload but share works now
       }
 
+      // Build ShareLink for UI — append ICE if available
+      let shareUrl = result.url;
+      if (result.ice) {
+        shareUrl = `${result.url}&ice=${encodeURIComponent(result.ice)}`;
+      }
+
       // Build ShareLink for UI
       const newShare: ShareLink = {
         code: result.code,
-        url: result.url,
+        url: shareUrl,
         db_id: req.database_id,
         db_name: '',
         db_type: '',

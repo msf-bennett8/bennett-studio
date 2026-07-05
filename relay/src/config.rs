@@ -47,9 +47,21 @@ pub struct RelayConfig {
     #[arg(long, default_value_t = 50, env = "BENNETT_RELAY_POOL_SIZE")]
     pub pool_size: usize,
 
-    /// Enable P2P transport (stub for now)
+    /// Enable P2P transport
     #[arg(long, default_value_t = false, env = "BENNETT_RELAY_ENABLE_P2P")]
     pub enable_p2p: bool,
+
+    /// Gather ICE candidates and print them (diagnostic)
+    #[arg(long, default_value_t = false, env = "BENNETT_RELAY_GATHER_ICE")]
+    pub gather_ice: bool,
+
+    /// ICE candidates from remote peer (base64, for P2P client mode)
+    #[arg(long, env = "BENNETT_RELAY_REMOTE_ICE")]
+    pub remote_ice: Option<String>,
+
+    /// Share code to connect to (P2P client mode)
+    #[arg(long, env = "BENNETT_RELAY_SHARE_CODE")]
+    pub share_code: Option<String>,
 
     /// Log level
     #[arg(long, default_value = "info", env = "RUST_LOG")]

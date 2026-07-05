@@ -107,6 +107,27 @@ export const shareApi = {
     return result.data;
   },
 
+  // Create share with P2P ICE candidates
+  createShareWithIce: async (req: CreateShareRequest): Promise<CreateShareResponse & { ice?: string }> => {
+    const response = await fetch(`${API_BASE_URL}/api/shares`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(req),
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+
+    const result = await response.json();
+    if (!result.success) {
+      throw new Error(result.error || 'Failed to create share');
+    }
+
+    // If engine returned ICE, include it
+    return result.data;
+  },
+
   // Get public share info
   getShareInfo: async (code: string): Promise<Partial<ValidateShareResponse>> => {
     const response = await fetch(`${API_BASE_URL}/api/shares/${code}`);

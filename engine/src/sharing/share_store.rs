@@ -31,6 +31,8 @@ pub struct ShareRecord {
     pub revoked: bool,
     pub guest_count: i32,
     pub pinned: bool,
+    /// Base64 ICE candidates for P2P connections
+    pub ice: Option<String>,
 }
 
 /// Guest session record
@@ -112,7 +114,8 @@ impl ShareStore {
                 expires_at TEXT NOT NULL,
                 revoked INTEGER NOT NULL DEFAULT 0,
                 guest_count INTEGER NOT NULL DEFAULT 0,
-                pinned INTEGER NOT NULL DEFAULT 0
+                pinned INTEGER NOT NULL DEFAULT 0,
+                ice TEXT
             );
 
             CREATE INDEX IF NOT EXISTS idx_shares_db_id ON shares(db_id);
@@ -158,6 +161,11 @@ impl ShareStore {
             .execute(pool)
             .await;
 
+        // Migration: Add ice column to existing shares table (for P2P)
+        let _ = sqlx::query("ALTER TABLE shares ADD COLUMN ice TEXT")
+            .execute(pool)
+            .await;
+
         Ok(())
     }
     
@@ -165,8 +173,8 @@ impl ShareStore {
     pub async fn create_share(&self, record: &ShareRecord) -> anyhow::Result<()> {
         sqlx::query(
             r#"
-            INSERT INTO shares (code, db_id, host_id, host, port, token_jti, token, permission, tables, cols, rls, created_at, expires_at, revoked, guest_count, pinned)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO shares (code, db_id, host_id, host, port, token_jti, token, permission, tables, cols, rls, created_at, expires_at, revoked, guest_count, pinned, ice)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#
         )
         .bind(&record.code)
@@ -185,6 +193,7 @@ impl ShareStore {
         .bind(record.revoked as i32)
         .bind(record.guest_count)
         .bind(record.pinned as i32)
+        .bind(record.ice.as_ref())
         .execute(&self.pool)
         .await?;
         
@@ -550,6 +559,7 @@ impl ShareStore {
             revoked: row.get::<i32, _>("revoked") != 0,
             guest_count: row.get("guest_count"),
             pinned: row.get::<i32, _>("pinned") != 0,
+            ice: row.get("ice"),
         }
     }
 }
@@ -578,6 +588,7 @@ mod tests {
             expires_at: Utc::now() + Duration::hours(24),
             revoked: false,
             guest_count: 0,
+            ice: None,
         };
         
         store.create_share(&record).await.unwrap();

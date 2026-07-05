@@ -26,6 +26,7 @@ pub struct ShareLink {
     pub guest_count: i32,
     pub pinned: bool,
     pub status: ShareStatus,
+    pub ice: Option<String>, // Base64 ICE candidates for P2P (optional)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -54,6 +55,7 @@ pub struct CreateShareResponse {
     pub url: String,
     pub token: String,
     pub expires_at: DateTime<Utc>,
+    pub ice: Option<String>, // Base64 ICE candidates for P2P (optional)
 }
 
 /// Share validation request (from guest)

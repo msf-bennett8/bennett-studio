@@ -44,9 +44,13 @@ export function JoinSharePage() {
 
   const handleConnect = async () => {
     if (!validationResult?.valid) return;
-    
+
     try {
-      await connect(url.trim());
+      // Extract ICE candidates from URL if present
+      const iceMatch = url.match(/[?&]ice=([^&]+)/);
+      const iceCandidates = iceMatch ? decodeURIComponent(iceMatch[1]) : undefined;
+
+      await connect(url.trim(), iceCandidates);
       navigate('/remote-query');
     } catch {
       // Error handled in store

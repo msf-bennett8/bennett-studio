@@ -35,6 +35,7 @@ message CreateShareResponse {
   string url = 2;
   string token = 3;
   string expires_at = 4;  // RFC3339
+  string ice = 5;         // Base64 ICE candidates for P2P (optional)
 }
 
 message ListSharesRequest {

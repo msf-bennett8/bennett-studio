@@ -64,10 +64,36 @@ async fn main() -> anyhow::Result<()> {
     // Start background route refresh
     let _refresh_handle = router.start_refresh_task(config.route_refresh);
 
-    // Create transport (pooled TCP, or P2P stub)
+    // Gather ICE candidates if requested
+    if config.gather_ice {
+        match transport::ice::gather_ice_candidates().await {
+            Ok(candidates) => {
+                // Output base64-encoded ICE for easy embedding in URLs
+                println!("{}", candidates.to_base64());
+                return Ok(());
+            }
+            Err(e) => {
+                eprintln!("Failed to gather ICE candidates: {}", e);
+                std::process::exit(1);
+            }
+        }
+    }
+
+    // Create transport (pooled TCP, or P2P)
     let transport: Arc<dyn transport::Transport> = if config.enable_p2p {
-        info!("P2P transport enabled (stub)");
-        transport::TransportFactory::create_p2p_stub()
+        info!("P2P transport enabled");
+        if let Some(remote_ice_b64) = &config.remote_ice {
+            // Client mode: we have remote ICE, create P2P transport
+            let remote_ice = transport::ice::IceCandidates::from_base64(remote_ice_b64)
+                .map_err(|e| anyhow::anyhow!("Invalid remote ICE: {}", e))?;
+            transport::TransportFactory::create_p2p_client(remote_ice, config.share_code.clone())
+        } else {
+            // Server mode: gather our ICE and wait for connections
+            let local_ice = transport::ice::gather_ice_candidates().await
+                .map_err(|e| anyhow::anyhow!("ICE gathering failed: {}", e))?;
+            info!("P2P server ICE: {}", serde_json::to_string_pretty(&local_ice).unwrap());
+            transport::TransportFactory::create_p2p_server(local_ice, config.share_code.clone())
+        }
     } else {
         info!("Pooled TCP transport active (connection pooling + splice)");
         transport::TransportFactory::create_pooled_tcp(

@@ -10,10 +10,28 @@ license = "MIT"
 name = "bennett-relay"
 path = "src/main.rs"
 
+[[bin]]
+name = "bennett-p2p-proxy"
+path = "src/sidecar/main.rs"
+
 [dependencies]
 # Async runtime
 tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.7", features = ["codec"] }
+
+# P2P transport dependencies
+rand = "0.8"
+base64 = "0.22"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+chrono = { version = "0.4", features = ["serde"] }
+
+# For sidecar proxy
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
+
+# QUIC (for Phase 3)
+quinn = "0.11"
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
 
 # Connection pooling
 deadpool = "0.12"
@@ -24,13 +42,8 @@ http = "1.0"
 
 # TLS with ALPN
 tokio-rustls = "0.26"
-rustls = "0.23"
 rustls-pemfile = "2.0"
 rcgen = "0.13"
-
-# Serialization
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
 
 # SQLite
 sqlx = { version = "0.8", features = ["runtime-tokio-native-tls", "sqlite", "chrono"] }
@@ -47,11 +60,9 @@ thiserror = "1.0"
 anyhow = "1.0"
 
 # Utilities
-chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1.10", features = ["v4", "serde"] }
 dashmap = "6"
 bytes = "1.6"
-rand = "0.8"
 
 # splice() for Linux zero-copy
 nix = { version = "0.29", features = ["process", "zerocopy"] }
@@ -68,7 +79,7 @@ hyper = { version = "1.0", features = ["full"] }
 hyper-util = { version = "0.1", features = ["full"] }
 
 # WebSocket (P2P signaling)
-tokio-tungstenite = "0.21"
+tokio-tungstenite = { version = "0.21", optional = true }
 futures = "0.3"
 
 [dev-dependencies]

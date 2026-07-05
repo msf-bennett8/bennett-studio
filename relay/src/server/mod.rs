@@ -68,6 +68,11 @@ impl RelayServer {
     }
 
     pub async fn run(self, mut shutdown_rx: tokio::sync::watch::Receiver<bool>) -> anyhow::Result<()> {
+        // P2P mode: don't bind TLS listener, handle QUIC streams instead
+        if self.config.enable_p2p {
+            return self.run_p2p(shutdown_rx).await;
+        }
+
         let listener = TcpListener::bind(self.config.bind).await?;
         info!(bind = %self.config.bind, "Relay listening (ALPN: h2, http/1.1, mysql)");
 
@@ -256,6 +261,39 @@ impl RelayServer {
         Ok(())
     }
 }
+
+    // ========================================================================  
+    // P2P Mode — QUIC stream handling
+    // ========================================================================
+
+    async fn run_p2p(
+        self: Arc<Self>,
+        mut shutdown_rx: tokio::sync::watch::Receiver<bool>,
+    ) -> anyhow::Result<()> {
+        info!("Relay running in P2P mode");
+
+        loop {
+            tokio::select! {
+                _ = shutdown_rx.changed() => {
+                    if *shutdown_rx.borrow() {
+                        info!("P2P shutdown signal received");
+                        break;
+                    }
+                }
+                // The P2P transport handles connections internally
+                // We just need to proxy between QUIC streams and engine
+                _ = tokio::time::sleep(tokio::time::Duration::from_secs(1)) => {
+                    // Health check
+                    if !self.transport.health_check().await {
+                        warn!("P2P transport unhealthy");
+                    }
+                }
+            }
+        }
+
+        info!("P2P relay stopped");
+        Ok(())
+    }
 
 impl Clone for RelayServer {
     fn clone(&self) -> Self {

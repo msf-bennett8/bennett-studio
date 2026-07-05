@@ -29,12 +29,14 @@ pub struct CreateShareResponse {
     pub url: String,
     pub token: String,
     pub expires_at: String,
+    pub ice: Option<String>, // Base64 ICE candidates for P2P
 }
 
 #[command]
 pub async fn create_share(req: CreateShareRequest) -> Result<CreateShareResponse, String> {
+    // First create the share via engine API
     let client = reqwest::Client::new();
-    match client
+    let share_result = match client
         .post("http://localhost:3001/api/shares")
         .json(&req)
         .send()
@@ -45,22 +47,60 @@ pub async fn create_share(req: CreateShareRequest) -> Result<CreateShareResponse
                 match resp.json::<serde_json::Value>().await {
                     Ok(json) => {
                         if let Some(data) = json.get("data") {
-                            match serde_json::from_value(data.clone()) {
-                                Ok(share) => Ok(share),
-                                Err(e) => Err(format!("Parse error: {}", e)),
+                            match serde_json::from_value::<CreateShareResponse>(data.clone()) {
+                                Ok(share) => share,
+                                Err(e) => return Err(format!("Parse error: {}", e)),
                             }
                         } else {
-                            Err("No data field".to_string())
+                            return Err("No data field".to_string());
                         }
                     }
-                    Err(e) => Err(format!("JSON error: {}", e)),
+                    Err(e) => return Err(format!("JSON error: {}", e)),
                 }
             } else {
-                Err(format!("HTTP error: {}", resp.status()))
+                return Err(format!("HTTP error: {}", resp.status()));
             }
         }
-        Err(e) => Err(format!("Request failed: {}", e)),
+        Err(e) => return Err(format!("Request failed: {}", e)),
+    };
+
+    // Gather ICE candidates for P2P (fire and forget — don't fail if STUN fails)
+    let ice_b64 = match gather_ice_candidates().await {
+        Ok(ice) => {
+            tracing::info!("ICE candidates gathered for share {}", share_result.code);
+            Some(ice.to_base64())
+        }
+        Err(e) => {
+            tracing::warn!("Failed to gather ICE candidates: {}", e);
+            None
+        }
+    };
+
+    Ok(CreateShareResponse {
+        code: share_result.code,
+        url: share_result.url,
+        token: share_result.token,
+        expires_at: share_result.expires_at,
+        ice: ice_b64,
+    })
+}
+
+/// Gather ICE candidates by calling relay binary
+async fn gather_ice_candidates() -> Result<bennett_relay::transport::ice::IceCandidates, String> {
+    // Run relay binary with --gather-ice flag
+    let output = tokio::process::Command::new("bennett-relay")
+        .arg("--gather-ice")
+        .output()
+        .await
+        .map_err(|e| format!("Failed to run relay: {}", e))?;
+
+    if !output.status.success() {
+        return Err(format!("Relay failed: {}", String::from_utf8_lossy(&output.stderr)));
     }
+
+    let json = String::from_utf8_lossy(&output.stdout);
+    serde_json::from_str(&json)
+        .map_err(|e| format!("Failed to parse ICE: {}", e))
 }
 
 #[command]
