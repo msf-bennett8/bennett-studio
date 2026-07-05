@@ -15,39 +15,30 @@ path = "src/main.rs"
 tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.7", features = ["codec"] }
 
-# Industry standard for object-safe async traits
-trait-variant = "0.1"
-pin-project = "1"
-async-trait = "0.1"
+# Connection pooling
+deadpool = "0.12"
 
-# HTTP server + routing
-axum = { version = "0.7", features = ["ws", "http2"] }
-tower = "0.4"
-tower-http = { version = "0.5", features = ["cors", "trace"] }
-hyper = { version = "1.0", features = ["full"] }
-hyper-util = { version = "0.1", features = ["full"] }
+# HTTP/2 + ALPN
+h2 = "0.4"
+http = "1.0"
 
-# WebSocket (for P2P signaling stub)
-tokio-tungstenite = "0.21"
-futures = "0.3"
-
-# Serialization
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-
-# TLS
+# TLS with ALPN
 tokio-rustls = "0.26"
 rustls = "0.23"
 rustls-pemfile = "2.0"
 rcgen = "0.13"
 
-# SQLite (read-only access to engine's share store)
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# SQLite
 sqlx = { version = "0.8", features = ["runtime-tokio-native-tls", "sqlite", "chrono"] }
 
-# CLI / Config
+# CLI
 clap = { version = "4.5", features = ["derive", "env"] }
 
-# Logging / Observability
+# Logging
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
 
@@ -62,8 +53,23 @@ dashmap = "6"
 bytes = "1.6"
 rand = "0.8"
 
-# Shared types from workspace
-# bennett-shared = { path = "../shared" }  # Uncomment when shared crate exists
+# splice() for Linux zero-copy
+nix = { version = "0.29", features = ["process", "zerocopy"] }
+
+# Metrics
+metrics = "0.23"
+metrics-exporter-prometheus = "0.15"
+
+# HTTP server (for P2P signaling stub)
+axum = { version = "0.7", features = ["ws", "http2"] }
+tower = "0.4"
+tower-http = { version = "0.5", features = ["cors", "trace"] }
+hyper = { version = "1.0", features = ["full"] }
+hyper-util = { version = "0.1", features = ["full"] }
+
+# WebSocket (P2P signaling)
+tokio-tungstenite = "0.21"
+futures = "0.3"
 
 [dev-dependencies]
 tokio-test = "0.4"

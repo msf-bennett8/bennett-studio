@@ -155,6 +155,84 @@ where
 }
 
 // ============================================================================
+// Zero-Copy Forwarding (Linux splice() kernel bypass)
+// ============================================================================
+
+/// Forward between two TCP streams using splice() on Linux
+/// Falls back to tokio::io::copy_bidirectional on other platforms
+pub async fn forward_zero_copy(
+    client: &mut tokio::net::TcpStream,
+    engine: &mut tokio::net::TcpStream,
+) -> std::io::Result<(u64, u64)> {
+    #[cfg(target_os = "linux")]
+    {
+        match splice_forward(client, engine).await {
+            Ok(result) => return Ok(result),
+            Err(e) => {
+                tracing::warn!("splice() failed ({}), falling back to userspace copy", e);
+            }
+        }
+    }
+    tokio::io::copy_bidirectional(client, engine).await
+}
+
+#[cfg(target_os = "linux")]
+async fn splice_forward(
+    client: &mut tokio::net::TcpStream,
+    engine: &mut tokio::net::TcpStream,
+) -> std::io::Result<(u64, u64)> {
+    use nix::fcntl::{splice, SpliceFFlags};
+    use std::os::fd::AsRawFd;
+    
+    let client_fd = client.as_raw_fd();
+    let engine_fd = engine.as_raw_fd();
+    
+    let (pipe_rd1, pipe_wr1) = nix::unistd::pipe()
+        .map_err(|e| std::io::Error::from_raw_os_error(e as i32))?;
+    let (pipe_rd2, pipe_wr2) = nix::unistd::pipe()
+        .map_err(|e| std::io::Error::from_raw_os_error(e as i32))?;
+    
+    tokio::task::spawn_blocking(move || {
+        let mut c2e_done = false;
+        let mut e2c_done = false;
+        let mut c2e_total = 0u64;
+        let mut e2c_total = 0u64;
+        
+        while !c2e_done || !e2c_done {
+            if !c2e_done {
+                match splice(client_fd, None, pipe_wr1, None, 65536, 
+                    SpliceFFlags::SPLICE_F_NONBLOCK | SpliceFFlags::SPLICE_F_MOVE) {
+                    Ok(0) => c2e_done = true,
+                    Ok(n) => {
+                        c2e_total += n as u64;
+                        let _ = splice(pipe_rd1, None, engine_fd, None, n, 
+                            SpliceFFlags::SPLICE_F_NONBLOCK);
+                    }
+                    Err(nix::errno::Errno::EAGAIN) => {}
+                    Err(e) => return Err(std::io::Error::from(e)),
+                }
+            }
+            
+            if !e2c_done {
+                match splice(engine_fd, None, pipe_wr2, None, 65536,
+                    SpliceFFlags::SPLICE_F_NONBLOCK | SpliceFFlags::SPLICE_F_MOVE) {
+                    Ok(0) => e2c_done = true,
+                    Ok(n) => {
+                        e2c_total += n as u64;
+                        let _ = splice(pipe_rd2, None, client_fd, None, n,
+                            SpliceFFlags::SPLICE_F_NONBLOCK);
+                    }
+                    Err(nix::errno::Errno::EAGAIN) => {}
+                    Err(e) => return Err(std::io::Error::from(e)),
+                }
+            }
+        }
+        
+        Ok((c2e_total, e2c_total))
+    }).await.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?
+}
+
+// ============================================================================
 // HTTP Error Responses
 // ============================================================================
 

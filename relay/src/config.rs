@@ -16,7 +16,7 @@ pub struct RelayConfig {
     pub bind: SocketAddr,
 
     /// Path to SQLite database (engine's share store)
-    #[arg(long, default_value = "~/.bennett/share_store.db", env = "BENNETT_RELAY_DB_PATH")]
+    #[arg(long, default_value = "~/.bennett/data/shares.db", env = "BENNETT_RELAY_DB_PATH")]
     pub db_path: String,
 
     /// Path to TLS certificate directory
@@ -42,6 +42,10 @@ pub struct RelayConfig {
     /// Maximum concurrent connections per share
     #[arg(long, default_value_t = 100, env = "BENNETT_RELAY_MAX_CONN_PER_SHARE")]
     pub max_conn_per_share: usize,
+
+    /// Connection pool size per protocol
+    #[arg(long, default_value_t = 50, env = "BENNETT_RELAY_POOL_SIZE")]
+    pub pool_size: usize,
 
     /// Enable P2P transport (stub for now)
     #[arg(long, default_value_t = false, env = "BENNETT_RELAY_ENABLE_P2P")]

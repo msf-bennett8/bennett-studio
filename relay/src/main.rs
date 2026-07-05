@@ -60,15 +60,16 @@ async fn main() -> anyhow::Result<()> {
     // Start background route refresh
     let _refresh_handle = router.start_refresh_task(config.route_refresh);
 
-    // Create transport (TCP to local engine, or P2P stub)
+    // Create transport (pooled TCP, or P2P stub)
     let transport: Arc<dyn transport::Transport> = if config.enable_p2p {
         info!("P2P transport enabled (stub)");
         transport::TransportFactory::create_p2p_stub()
     } else {
-        info!("TCP transport active");
-        transport::TransportFactory::create_tcp(
+        info!("Pooled TCP transport active (connection pooling + splice)");
+        transport::TransportFactory::create_pooled_tcp(
             config.engine_http,
             config.engine_mysql,
+            config.max_conn_per_share,
         )
     };
 

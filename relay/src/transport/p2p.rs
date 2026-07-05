@@ -7,7 +7,7 @@
 //! - SCTP or QUIC data channels
 //! - Signaling via WebSocket
 
-use super::{ProtocolType, Transport};
+use super::{ProtocolType, PooledConnection, Transport};
 use std::io;
 
 /// P2P transport stub — returns "not implemented" for all operations
@@ -19,11 +19,10 @@ impl Transport for P2pTransportStub {
         "p2p-stub"
     }
 
-    fn connect(
+    fn acquire(
         &self,
-        _share_id: &str,
         _protocol: ProtocolType,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = io::Result<tokio::net::TcpStream>> + Send + '_>> {
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = io::Result<PooledConnection>> + Send + '_>> {
         Box::pin(async move {
             Err(io::Error::new(
                 io::ErrorKind::Unsupported,
@@ -31,6 +30,8 @@ impl Transport for P2pTransportStub {
             ))
         })
     }
+
+    fn release(&self, _conn: PooledConnection) {}
 
     fn health_check(
         &self,

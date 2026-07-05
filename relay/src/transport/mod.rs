@@ -5,41 +5,82 @@
 //! used by Quinn, rustls, and async Rust ecosystem).
 
 use std::io;
+use std::pin::Pin;
+use std::future::Future;
 use std::sync::Arc;
 use tokio::net::TcpStream;
+
+/// ALPN protocol identifiers (industry standard from IANA)
+pub const ALPN_HTTP2: &[u8] = b"h2";
+pub const ALPN_HTTP1: &[u8] = b"http/1.1";
+pub const ALPN_MYSQL: &[u8] = b"mysql";
 
 /// A bidirectional byte stream for proxying
 pub type ByteStream = TcpStream;
 
-/// Object-safe transport trait using trait-variant
-/// This generates both async methods (for implementors) and
-/// poll-based methods (for dyn compatibility)
+/// A pooled TCP connection wrapper
+pub struct PooledConnection {
+    pub stream: TcpStream,
+    pub protocol: ProtocolType,
+    pub created_at: std::time::Instant,
+}
+
+impl PooledConnection {
+    pub fn is_stale(&self, max_age_secs: u64) -> bool {
+        self.created_at.elapsed().as_secs() > max_age_secs
+    }
+}
+
+/// Object-safe transport trait with connection pooling
 pub trait Transport: Send + Sync {
     /// Name of this transport (for logging)
     fn name(&self) -> &'static str;
 
-    /// Connect to the engine for a given share
-    fn connect(
+    /// Acquire a connection from the pool (or create new)
+    fn acquire(
         &self,
-        share_id: &str,
         protocol: ProtocolType,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = io::Result<ByteStream>> + Send + '_>>;
+    ) -> Pin<Box<dyn Future<Output = io::Result<PooledConnection>> + Send + '_>>;
+
+    /// Return connection to pool
+    fn release(&self, conn: PooledConnection);
 
     /// Check if this transport is healthy
     fn health_check(
         &self,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = bool> + Send + '_>>;
+    ) -> Pin<Box<dyn Future<Output = bool> + Send + '_>>;
 }
 
 /// Protocol types that the engine supports
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProtocolType {
-    /// Connect-RPC / HTTP API
+    /// Connect-RPC / HTTP API (HTTP/1.1)
     ConnectRpc,
+    /// gRPC / HTTP/2
+    Grpc,
     /// MySQL wire protocol
     MySqlWire,
-    /// gRPC HTTP/2
-    Grpc,
+}
+
+impl ProtocolType {
+    /// Convert to ALPN protocol identifier
+    pub fn as_alpn(&self) -> &'static [u8] {
+        match self {
+            ProtocolType::Grpc => ALPN_HTTP2,
+            ProtocolType::ConnectRpc => ALPN_HTTP1,
+            ProtocolType::MySqlWire => ALPN_MYSQL,
+        }
+    }
+
+    /// Detect from ALPN protocol identifier
+    pub fn from_alpn(alpn: &[u8]) -> Option<Self> {
+        match alpn {
+            b"h2" => Some(ProtocolType::Grpc),
+            b"http/1.1" => Some(ProtocolType::ConnectRpc),
+            b"mysql" => Some(ProtocolType::MySqlWire),
+            _ => None,
+        }
+    }
 }
 
 impl ProtocolType {
@@ -84,11 +125,12 @@ impl ProtocolType {
 pub struct TransportFactory;
 
 impl TransportFactory {
-    pub fn create_tcp(
+    pub fn create_pooled_tcp(
         engine_http: std::net::SocketAddr,
         engine_mysql: std::net::SocketAddr,
+        pool_size: usize,
     ) -> Arc<dyn Transport> {
-        Arc::new(tcp::TcpTransport::new(engine_http, engine_mysql))
+        Arc::new(tcp::PooledTcpTransport::new(engine_http, engine_mysql, pool_size))
     }
 
     pub fn create_p2p_stub() -> Arc<dyn Transport> {

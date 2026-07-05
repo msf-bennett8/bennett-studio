@@ -57,12 +57,19 @@ impl ShareRouter {
         self.cache.get(share_id).map(|e| e.clone())
     }
 
-    /// Check if share exists and is active
+    /// Check if share exists and is active (checks both HTTP and MySQL entries)
     pub fn is_active(&self, share_id: &str) -> bool {
-        match self.cache.get(share_id) {
-            Some(route) => !route.revoked && route.expires_at > chrono::Utc::now(),
-            None => false,
+        // Try with :http suffix first (most common)
+        if let Some(route) = self.cache.get(&format!("{}:http", share_id)) {
+            if !route.revoked && route.expires_at > chrono::Utc::now() {
+                return true;
+            }
         }
+        // Fallback: check bare share_id (backward compat)
+        if let Some(route) = self.cache.get(share_id) {
+            return !route.revoked && route.expires_at > chrono::Utc::now();
+        }
+        false
     }
 
     /// Refresh routes from database
@@ -86,17 +93,17 @@ impl ShareRouter {
                     let code: String = share.get("code");
                     let db_id: String = share.get("db_id");
                     let expires_at_str: String = share.get("expires_at");
-                    let revoked_i64: i64 = share.get("revoked");
+                    let revoked_i32: i32 = share.get("revoked");
 
                     let route = ShareRoute {
                         share_id: code.clone(),
                         db_id,
                         protocol: crate::transport::ProtocolType::ConnectRpc,
                         engine_port: self.engine_http_port,
-                        expires_at: expires_at_str.parse().unwrap_or_else(|_| {
-                            chrono::DateTime::UNIX_EPOCH
-                        }),
-                        revoked: revoked_i64 != 0,
+                        expires_at: chrono::DateTime::parse_from_rfc3339(&expires_at_str)
+                            .map(|d| d.with_timezone(&chrono::Utc))
+                            .unwrap_or_else(|_| chrono::DateTime::UNIX_EPOCH),
+                        revoked: revoked_i32 != 0,
                     };
 
                     // Also add MySQL wire route for the same share
