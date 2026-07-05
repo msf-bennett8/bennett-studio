@@ -137,93 +137,69 @@ impl RelayServer {
     }
 
     // ========================================================================
-    // HTTP/1.1 Handler
+    // HTTP/1.1 Handler — Transparent Proxy
     // ========================================================================
-    
+
     async fn handle_http1(
         &self,
         mut tls_stream: tokio_rustls::server::TlsStream<TcpStream>,
         client_addr: SocketAddr,
     ) -> anyhow::Result<()> {
-        // Read request line
-        let mut buf = [0u8; 4096];
-        let n = match tls_stream.read(&mut buf).await {
-            Ok(0) => return Ok(()),
-            Ok(n) => n,
+        info!(addr = %client_addr, "HTTP/1.1 connection");
+
+        // Acquire pooled connection to engine HTTP port
+        let mut engine_conn = match self.transport.acquire(ProtocolType::ConnectRpc).await {
+            Ok(conn) => conn,
             Err(e) => {
-                warn!(addr = %client_addr, error = %e, "HTTP/1.1 read failed");
+                warn!(addr = %client_addr, error = %e, "Engine HTTP connection failed");
                 return Ok(());
             }
         };
 
-        let request_line = parse_http_request_line(&buf[..n])?;
-        let share_id = extract_share_id_from_http_path(&request_line.path)
-            .unwrap_or_else(|| "unknown".to_string());
-
-        info!(
-            addr = %client_addr,
-            method = %request_line.method,
-            path = %request_line.path,
-            share_id = %share_id,
-            "HTTP/1.1 request"
-        );
-
-        if !self.router.is_active(&share_id) {
-            send_http_404(&mut tls_stream, &format!("Share '{}' not found", share_id)).await?;
-            return Ok(());
-        }
-
-        if !self.connection_counter.acquire(&share_id) {
-            send_http_429(&mut tls_stream, &share_id).await?;
-            return Ok(());
-        }
-
-        // Acquire pooled connection
-        let mut engine_conn = self.transport.acquire(ProtocolType::ConnectRpc).await
-            .map_err(|e| {
-                self.connection_counter.release(&share_id);
-                anyhow::anyhow!("Engine connection failed: {}", e)
-            })?;
-
-        // Forward initial bytes
-        if let Err(e) = engine_conn.stream.write_all(&buf[..n]).await {
-            self.connection_counter.release(&share_id);
-            self.transport.release(engine_conn);
-            return Err(e.into());
-        }
-
-        // Bidirectional proxy: TLS stream ↔ plain TCP engine
+        // Transparent bidirectional proxy — engine validates JWT, not relay
         let result = tokio::io::copy_bidirectional(&mut tls_stream, &mut engine_conn.stream).await;
-        
-        self.connection_counter.release(&share_id);
+
         self.transport.release(engine_conn);
 
         match result {
-            Ok((up, down)) => debug!(share_id = %share_id, bytes_up = up, bytes_down = down, "HTTP/1.1 done"),
-            Err(e) => warn!(share_id = %share_id, error = %e, "HTTP/1.1 forward error"),
+            Ok((up, down)) => debug!(addr = %client_addr, bytes_up = up, bytes_down = down, "HTTP/1.1 done"),
+            Err(e) => debug!(addr = %client_addr, error = %e, "HTTP/1.1 forward error"),
         }
 
         Ok(())
     }
 
     // ========================================================================
-    // HTTP/2 Handler (gRPC-Web)
+    // HTTP/2 Handler — Transparent Proxy
     // ========================================================================
-    
+
     async fn handle_http2(
         &self,
         mut tls_stream: tokio_rustls::server::TlsStream<TcpStream>,
         client_addr: SocketAddr,
     ) -> anyhow::Result<()> {
-        // For HTTP/2, we need to read the preface and SETTINGS frame
-        // Then proxy the entire h2 connection to the engine
-        // This is simplified — full h2 proxy requires more work
-        
-        info!(addr = %client_addr, "HTTP/2 (gRPC) connection");
-        
-        // For now, treat as HTTP/1.1 (engine handles h2 upgrade)
-        // TODO: Implement full h2 connection proxy
-        self.handle_http1(tls_stream, client_addr).await
+        info!(addr = %client_addr, "HTTP/2 connection");
+
+        // Acquire pooled connection to engine HTTP port
+        let mut engine_conn = match self.transport.acquire(ProtocolType::ConnectRpc).await {
+            Ok(conn) => conn,
+            Err(e) => {
+                warn!(addr = %client_addr, error = %e, "Engine HTTP/2 connection failed");
+                return Ok(());
+            }
+        };
+
+        // Transparent bidirectional proxy — engine handles h2 natively
+        let result = tokio::io::copy_bidirectional(&mut tls_stream, &mut engine_conn.stream).await;
+
+        self.transport.release(engine_conn);
+
+        match result {
+            Ok((up, down)) => debug!(addr = %client_addr, bytes_up = up, bytes_down = down, "HTTP/2 done"),
+            Err(e) => debug!(addr = %client_addr, error = %e, "HTTP/2 forward error"),
+        }
+
+        Ok(())
     }
 
     // ========================================================================
@@ -372,9 +348,9 @@ async fn load_tls_config(cert_dir: &std::path::Path) -> anyhow::Result<rustls::S
         .with_single_cert(certs, key)?;
 
     config.alpn_protocols = vec![
-        ALPN_HTTP2.to_vec(),
-        ALPN_HTTP1.to_vec(),
-        ALPN_MYSQL.to_vec(),
+        ALPN_HTTP1.to_vec(),  // Prefer HTTP/1.1 (Connect-RPC)
+        ALPN_HTTP2.to_vec(),  // HTTP/2 fallback
+        ALPN_MYSQL.to_vec(),  // MySQL wire
     ];
 
     Ok(config)
