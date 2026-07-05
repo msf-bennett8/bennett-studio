@@ -79,22 +79,24 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    // Create transport (pooled TCP, or P2P)
-    let transport: Arc<dyn transport::Transport> = if config.enable_p2p {
-        info!("P2P transport enabled");
-        if let Some(remote_ice_b64) = &config.remote_ice {
-            // Client mode: we have remote ICE, create P2P transport
-            let remote_ice = transport::ice::IceCandidates::from_base64(remote_ice_b64)
-                .map_err(|e| anyhow::anyhow!("Invalid remote ICE: {}", e))?;
-            transport::TransportFactory::create_p2p_client(remote_ice, config.share_code.clone())
-        } else {
-            // Server mode: gather our ICE and wait for connections
-            let local_ice = transport::ice::gather_ice_candidates().await
-                .map_err(|e| anyhow::anyhow!("ICE gathering failed: {}", e))?;
-            info!("P2P server ICE: {}", serde_json::to_string_pretty(&local_ice).unwrap());
-            transport::TransportFactory::create_p2p_server(local_ice, config.share_code.clone())
-        }
-    } else {
+     // Create transport (pooled TCP, or P2P)
+      let transport: Arc<dyn transport::Transport> = if config.enable_p2p {
+          info!("P2P transport enabled");
+          if let Some(remote_ice_b64) = &config.remote_ice {
+              // Client mode: we have remote ICE, create P2P transport
+              let remote_ice = transport::ice::IceCandidates::from_base64(remote_ice_b64)
+                  .map_err(|e| anyhow::anyhow!("Invalid remote ICE: {}", e))?;
+              transport::TransportFactory::create_p2p_client(remote_ice, config.share_code.clone()).await
+                  .map_err(|e| anyhow::anyhow!("P2P client setup failed: {}", e))?
+          } else {
+              // Server mode: gather our ICE and wait for connections
+              let local_ice = transport::ice::gather_ice_candidates().await
+                  .map_err(|e| anyhow::anyhow!("ICE gathering failed: {}", e))?;
+              info!("P2P server ICE: {}", serde_json::to_string_pretty(&local_ice).unwrap());
+              transport::TransportFactory::create_p2p_server(local_ice, config.share_code.clone()).await
+                  .map_err(|e| anyhow::anyhow!("P2P server setup failed: {}", e))?
+          }
+      } else {
         info!("Pooled TCP transport active (connection pooling + splice)");
         transport::TransportFactory::create_pooled_tcp(
             config.engine_http,

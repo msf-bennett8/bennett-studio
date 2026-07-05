@@ -10,8 +10,6 @@ use super::{ProtocolType, PooledConnection, Transport};
 use std::collections::VecDeque;
 use std::future::Future;
 use std::io;
-#[cfg(target_os = "linux")]
-use std::os::fd::{AsRawFd, FromRawFd};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};

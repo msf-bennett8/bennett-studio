@@ -140,26 +140,26 @@ impl Transport for P2pTransport {
         &self,
         protocol: ProtocolType,
     ) -> Pin<Box<dyn Future<Output = io::Result<PooledConnection>> + Send + '_>> {
-        Box::pin(async move {
-            // Try to get from pool first
-            {
-                let mut pool = self.stream_pool.lock().unwrap();
-                while let Some(stream) = pool.pop_front() {
-                    if stream.created_at.elapsed().as_secs() < 300 {
-                        debug!(protocol = ?protocol, "Reused pooled P2P stream");
-                          let conn = self.get_connection().await.map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
-                          return Ok(PooledConnection {
-                              stream: ByteStream::Quic(
-                                  conn.connection,
-                                  stream.send,
-                                  stream.recv,
-                              ),
-                              protocol,
-                              created_at: Instant::now(),
-                          });
-                    }
-                }
-            }
+          Box::pin(async move {
+              // Try to get from pool first
+              let pooled_stream = {
+                  let mut pool = self.stream_pool.lock().unwrap();
+                  pool.pop_front().filter(|s| s.created_at.elapsed().as_secs() < 300)
+              };
+              
+              if let Some(stream) = pooled_stream {
+                  debug!(protocol = ?protocol, "Reused pooled P2P stream");
+                  let conn = self.get_connection().await.map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+                  return Ok(PooledConnection {
+                      stream: ByteStream::Quic(
+                          conn.connection,
+                          stream.send,
+                          stream.recv,
+                      ),
+                      protocol,
+                      created_at: Instant::now(),
+                  });
+              }
 
             // Open new stream
             let conn = self.get_connection().await

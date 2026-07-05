@@ -14,6 +14,10 @@ path = "src/main.rs"
 name = "bennett-p2p-proxy"
 path = "src/sidecar/main.rs"
 
+[features]
+default = ["p2p"]
+p2p = ["quinn", "tokio-tungstenite"]
+
 [dependencies]
 # Async runtime
 tokio = { version = "1", features = ["full"] }
@@ -30,7 +34,7 @@ chrono = { version = "0.4", features = ["serde"] }
 reqwest = { version = "0.12", default-features = false, features = ["json"] }
 
 # QUIC (for Phase 3)
-quinn = "0.11"
+quinn = { version = "0.11", optional = true }
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
 
 # Connection pooling

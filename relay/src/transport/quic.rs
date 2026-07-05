@@ -53,7 +53,7 @@ pub async fn start_quic_server(
         .map_err(|e| QuicError::ConnectionFailed(e))?;
 
     let remote_addr = connection.remote_address();
-    let local_addr = connection.local_ip().unwrap_or_else(|| std::net::IpAddr::from([0,0,0,0]));
+    let local_ip = connection.local_ip().unwrap_or_else(|| std::net::IpAddr::from([0,0,0,0]));
 
     info!(
         remote = %remote_addr,
@@ -64,7 +64,7 @@ pub async fn start_quic_server(
     Ok(P2pQuicConnection {
         connection,
         remote_addr,
-        local_addr: SocketAddr::new(local_addr, 0),
+        local_addr: SocketAddr::new(local_ip, 0),
         is_server: true,
     })
 }
@@ -76,7 +76,7 @@ pub async fn start_quic_server(
 /// * `local_ice` — Our ICE candidates (for hole punching)
 pub async fn connect_quic_client(
     remote_ice: &IceCandidates,
-    _local_ice: &IceCandidates,
+    local_ice: &IceCandidates,
 ) -> Result<P2pQuicConnection, QuicError> {
     // Bind local UDP socket
     let local_socket = tokio::net::UdpSocket::bind("0.0.0.0:0")
@@ -111,7 +111,7 @@ pub async fn connect_quic_client(
         .map_err(|e| QuicError::ConnectionFailed(e))?;
 
     let remote_addr = connection.remote_address();
-    let local_addr = connection.local_ip().unwrap_or_else(|| std::net::IpAddr::from([0,0,0,0]));
+    let local_ip = connection.local_ip().unwrap_or_else(|| std::net::IpAddr::from([0,0,0,0]));
 
     info!(
         remote = %remote_addr,
@@ -122,7 +122,7 @@ pub async fn connect_quic_client(
     Ok(P2pQuicConnection {
         connection,
         remote_addr,
-        local_addr: SocketAddr::new(local_addr, 0),
+        local_addr: SocketAddr::new(local_ip, 0),
         is_server: false,
     })
 }
@@ -147,7 +147,7 @@ pub async fn open_stream(
       let mut send = send;
       send.write_all(&[proto_byte])
           .await
-          .map_err(|e| QuicError::IoError(e))?;
+          .map_err(|e| QuicError::StreamWriteFailed(e))?;
 
     debug!(protocol = ?protocol, "Opened QUIC stream");
 
@@ -167,7 +167,7 @@ pub async fn accept_stream(
     let mut proto_buf = [0u8; 1];
       recv.read_exact(&mut proto_buf)
           .await
-          .map_err(|e| QuicError::IoError(e))?;
+          .map_err(|e| QuicError::StreamReadFailed(e))?;
 
     let protocol = match proto_buf[0] {
         0x01 => super::ProtocolType::ConnectRpc,
@@ -207,6 +207,8 @@ impl std::fmt::Display for QuicError {
             QuicError::ConnectFailed(e) => write!(f, "QUIC connect failed: {}", e),
             QuicError::ConnectionFailed(e) => write!(f, "QUIC connection failed: {}", e),
             QuicError::StreamFailed(e) => write!(f, "QUIC stream failed: {}", e),
+            QuicError::StreamWriteFailed(e) => write!(f, "QUIC stream write failed: {}", e),
+            QuicError::StreamReadFailed(e) => write!(f, "QUIC stream read failed: {}", e),
         }
     }
 }

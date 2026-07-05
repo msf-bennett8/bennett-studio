@@ -9,7 +9,7 @@ use std::pin::Pin;
 use std::future::Future;
 use std::sync::Arc;
 use tokio::net::TcpStream;
-use crate::transport::ice::IceCandidates;
+pub use crate::transport::ice::IceCandidates;
 
 /// ALPN protocol identifiers (industry standard from IANA)
 pub const ALPN_HTTP2: &[u8] = b"h2";
@@ -23,21 +23,12 @@ pub enum ByteStream {
     Quic(quinn::Connection, quinn::SendStream, quinn::RecvStream),
 }
 
-impl Clone for ByteStream {
-    fn clone(&self) -> Self {
-        match self {
-            ByteStream::Tcp(s) => ByteStream::Tcp(s.try_clone().expect("TCP stream clone failed")),
-            #[cfg(feature = "p2p")]
-            ByteStream::Quic(_, _, _) => panic!("Cannot clone QUIC ByteStream"),
-        }
-    }
-}
-
 impl ByteStream {
     /// Try to get TCP stream reference (for legacy splice() code)
     pub fn as_tcp(&self) -> Option<&TcpStream> {
         match self {
             ByteStream::Tcp(s) => Some(s),
+            #[cfg(feature = "p2p")]
             _ => None,
         }
     }
@@ -45,6 +36,66 @@ impl ByteStream {
     /// Check if this is a TCP stream
     pub fn is_tcp(&self) -> bool {
         matches!(self, ByteStream::Tcp(_))
+    }
+}
+
+impl tokio::io::AsyncRead for ByteStream {
+    fn poll_read(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        match self.get_mut() {
+            ByteStream::Tcp(s) => std::pin::Pin::new(s).poll_read(cx, buf),
+            #[cfg(feature = "p2p")]
+            ByteStream::Quic(_, _, recv) => std::pin::Pin::new(recv).poll_read(cx, buf),
+        }
+    }
+}
+
+impl tokio::io::AsyncWrite for ByteStream {
+    fn poll_write(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &[u8],
+    ) -> std::task::Poll<std::io::Result<usize>> {
+        match self.get_mut() {
+            ByteStream::Tcp(s) => std::pin::Pin::new(s).poll_write(cx, buf),
+            #[cfg(feature = "p2p")]
+            ByteStream::Quic(_, send, _) => {
+                match std::pin::Pin::new(send).poll_write(cx, buf) {
+                    std::task::Poll::Ready(Ok(n)) => std::task::Poll::Ready(Ok(n)),
+                    std::task::Poll::Ready(Err(e)) => std::task::Poll::Ready(Err(std::io::Error::new(std::io::ErrorKind::Other, e))),
+                    std::task::Poll::Pending => std::task::Poll::Pending,
+                }
+            }
+        }
+    }
+
+    fn poll_flush(
+        self: std::pin::Pin<&mut Self>,
+        _cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        match self.get_mut() {
+            ByteStream::Tcp(s) => std::pin::Pin::new(s).poll_flush(_cx),
+            #[cfg(feature = "p2p")]
+            // QUIC SendStream has no explicit flush; data is sent immediately
+            ByteStream::Quic(_, _, _) => std::task::Poll::Ready(Ok(())),
+        }
+    }
+
+    fn poll_shutdown(
+        self: std::pin::Pin<&mut Self>,
+        _cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        match self.get_mut() {
+            ByteStream::Tcp(s) => std::pin::Pin::new(s).poll_shutdown(_cx),
+            #[cfg(feature = "p2p")]
+            // QUIC streams are closed via finish(), but that's a synchronous call
+            // that returns ClosedStream. We can't call it in poll_shutdown without
+            // risking a panic. Just return Ok for now.
+            ByteStream::Quic(_, _, _) => std::task::Poll::Ready(Ok(())),
+        }
     }
 }
 

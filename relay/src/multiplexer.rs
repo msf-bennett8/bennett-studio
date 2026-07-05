@@ -183,7 +183,6 @@ async fn splice_forward(
 ) -> std::io::Result<(u64, u64)> {
     use nix::fcntl::{splice, SpliceFFlags};
     use std::os::fd::{AsRawFd, FromRawFd};
-    use std::os::unix::io::RawFd;
 
     // Get raw fds and convert to OwnedFd for 'static move into spawn_blocking
     let client_fd = unsafe { std::os::fd::OwnedFd::from_raw_fd(client.as_raw_fd()) };

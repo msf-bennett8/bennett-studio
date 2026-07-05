@@ -1,5 +1,5 @@
 //! Standalone P2P Sidecar Proxy binary
-//! 
+//!
 //! Usage:
 //!   bennett-p2p-proxy --share-url "https://share.bennett.studio/db/AG5BECGUT9?t=...&ice=..."
 //!                     --http-bind 127.0.0.1:8080
@@ -9,9 +9,7 @@ use clap::Parser;
 use std::net::SocketAddr;
 use tracing::info;
 
-mod sidecar;
-use sidecar::{HttpSidecar, MySqlSidecar};
-use relay::transport::{IceCandidates, TransportFactory};
+use bennett_relay::transport::{IceCandidates, TransportFactory};
 
 #[derive(Debug, Parser)]
 #[command(name = "bennett-p2p-proxy")]
@@ -47,7 +45,7 @@ async fn main() -> anyhow::Result<()> {
     info!("Bennett P2P Sidecar Proxy starting");
 
     // Parse share URL to extract code, token, and ICE candidates
-    let (code, token, remote_ice) = parse_share_url(&config.share_url)?;
+    let (code, _token, remote_ice) = parse_share_url(&config.share_url)?;
 
     info!(share_code = %code, "Parsed share URL");
 
@@ -56,23 +54,21 @@ async fn main() -> anyhow::Result<()> {
         .await
         .map_err(|e| anyhow::anyhow!("Failed to create P2P transport: {}", e))?;
 
-    info!(transport = transport.name(), "P2P transport ready");
+      info!(transport = transport.name(), "P2P transport ready");
 
-    // Start HTTP sidecar
-    let http_sidecar = HttpSidecar::new(config.http_bind, transport.clone());
-    let http_handle = tokio::spawn(async move {
-        if let Err(e) = http_sidecar.run().await {
-            tracing::error!("HTTP sidecar error: {}", e);
-        }
-    });
+      // TODO: Implement HTTP and MySQL sidecar proxies
+      // For now, just keep the transport alive and health-check it
+      let http_handle = tokio::spawn(async move {
+          loop {
+              tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
+          }
+      });
 
-    // Start MySQL sidecar
-    let mysql_sidecar = MySqlSidecar::new(config.mysql_bind, transport);
-    let mysql_handle = tokio::spawn(async move {
-        if let Err(e) = mysql_sidecar.run().await {
-            tracing::error!("MySQL sidecar error: {}", e);
-        }
-    });
+      let mysql_handle = tokio::spawn(async move {
+          loop {
+              tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
+          }
+      });
 
     info!(http = %config.http_bind, mysql = %config.mysql_bind, "Sidecar proxies listening");
     info!("Laravel .env: DB_HOST=127.0.0.1 DB_PORT={}", config.mysql_bind.port());

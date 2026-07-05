@@ -61,8 +61,8 @@ pub fn build_quinn_server_config() -> Result<quinn::ServerConfig, DtlsError> {
 
     // Transport config: keep connections alive, enable 0-RTT
     let mut transport = quinn::TransportConfig::default();
-    transport.max_idle_timeout(Some(Duration::from_secs(30).try_into().unwrap()));
-    transport.keep_alive_interval(Some(Duration::from_secs(5)));
+    transport.max_idle_timeout(Some(std::time::Duration::from_secs(30).try_into().unwrap()));
+    transport.keep_alive_interval(Some(std::time::Duration::from_secs(5)));
     server_config.transport_config(Arc::new(transport));
 
     Ok(server_config)
@@ -100,8 +100,8 @@ impl rustls::client::danger::ServerCertVerifier for SkipServerVerification {
         _server_name: &rustls::pki_types::ServerName<'_>,
         _ocsp_response: &[u8],
         _now: rustls::pki_types::UnixTime,
-    ) -> Result<rustls::client::danger::Verified, rustls::Error> {
-        Ok(rustls::client::danger::Verified::assertion())
+    ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
+        Ok(rustls::client::danger::ServerCertVerified::assertion())
     }
 
     fn verify_tls12_signature(
@@ -136,8 +136,6 @@ impl rustls::client::danger::ServerCertVerifier for SkipServerVerification {
         ]
     }
 }
-
-use std::time::Duration;
 
 /// DTLS/QUIC errors
 #[derive(Debug)]

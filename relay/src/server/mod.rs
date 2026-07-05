@@ -14,9 +14,8 @@
 
 use crate::config::RelayConfig;
 use crate::multiplexer::{
-    extract_share_id_from_http_path, extract_share_id_from_mysql_username,
-    read_mysql_auth_response, send_http_404, send_http_429,
-    send_mysql_error, send_mysql_handshake_v10, send_mysql_share_not_found,
+    extract_share_id_from_mysql_username,
+    read_mysql_auth_response, send_mysql_error, send_mysql_handshake_v10, send_mysql_share_not_found,
     send_mysql_too_many_connections, ConnectionCounter,
 };
 use crate::router::ShareRouter;
@@ -26,7 +25,6 @@ use crate::transport::{ProtocolType, Transport, ALPN_HTTP1, ALPN_HTTP2, ALPN_MYS
 
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_rustls::{rustls, TlsAcceptor};
 use tracing::{debug, info, warn};
@@ -70,7 +68,7 @@ impl RelayServer {
     pub async fn run(self, mut shutdown_rx: tokio::sync::watch::Receiver<bool>) -> anyhow::Result<()> {
         // P2P mode: don't bind TLS listener, handle QUIC streams instead
         if self.config.enable_p2p {
-            return self.run_p2p(shutdown_rx).await;
+            return Arc::new(self).run_p2p(shutdown_rx).await;
         }
 
         let listener = TcpListener::bind(self.config.bind).await?;
@@ -260,9 +258,8 @@ impl RelayServer {
 
         Ok(())
     }
-}
 
-    // ========================================================================  
+    // ========================================================================
     // P2P Mode — QUIC stream handling
     // ========================================================================
 
@@ -294,6 +291,7 @@ impl RelayServer {
         info!("P2P relay stopped");
         Ok(())
     }
+}
 
 impl Clone for RelayServer {
     fn clone(&self) -> Self {
