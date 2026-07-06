@@ -18,6 +18,7 @@ Thumbs.db
 /dist/
 /build/
 /out/
+**/dist/                  # ← ADD THIS: catches nested dist/ dirs (e.g. shared/sdk/typescript/dist/)
 *.exe
 *.dll
 *.so
@@ -68,6 +69,7 @@ docker-compose.override.yml
 .eslintcache
 .stylelintcache
 *.tsbuildinfo
+**/tsconfig.tsbuildinfo   #
 
 # --- Node.js ---
 node_modules/
@@ -77,3 +79,13 @@ pnpm-lock.yaml
 
 # --- Windows WSL Zone.Identifier files ---
 *:Zone.Identifier
+
+# --- Generated JS next to TS source (tsc --outDir .) ---
+desktop/src/services/*.js
+desktop/src/services/*.d.ts
+desktop/src/services/*.d.ts.map
+web/src/services/*.js
+web/src/services/*.d.ts
+web/src/services/*.d.ts.map**/dist/
+shared/sdk/typescript/dist/
+web/src/services/*.d.ts.map

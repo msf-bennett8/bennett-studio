@@ -66,32 +66,8 @@ pub async fn create_share(
     let host_ip = detect_lan_ip().unwrap_or_else(|| "127.0.0.1".to_string());
     let host_port = detect_engine_port();
 
-    // Create JWT token with embedded host endpoint
-    let token_manager = state.token_manager.read().await;
-    let token_result = token_manager.create_token(
-        code.clone(),
-        db.id.clone(),
-        host_id.clone(),
-        Some(host_ip.clone()),
-        Some(host_port),
-        perm.clone(),
-        tables.clone(),
-        req.cols.clone(),
-        req.rls.clone(),
-        duration,
-    );
-    
-    let token = match token_result {
-        Ok(t) => t,
-        Err(e) => {
-            warn!("Failed to create token: {}", e);
-            return Ok(Json(crate::models::database::ApiResponse::error(
-                "Failed to create share token".to_string()
-            )));
-        }
-    };
-    
     // Gather ICE candidates if P2P is enabled on this host
+    // MUST happen before token creation so ICE can be embedded in JWT
     let ice_candidates = if std::env::var("BENNETT_ENABLE_P2P").is_ok() {
         match gather_engine_ice().await {
             Ok(ice) => {
@@ -107,15 +83,37 @@ pub async fn create_share(
         None
     };
 
-    // Build share URL — include signaling code for Firebase P2P
-    let base_url = get_share_base_url();
-    let url = if ice_candidates.is_some() {
-        // Generate short signaling code from share code
-        let sig_code = format!("{}-{}", &code[..3], &code[3..6]);
-        format!("{}/db/{}?t={}&sig={}", base_url, code, token.token, sig_code)
-    } else {
-        build_share_url(&base_url, &code, &token.token)
+    // Create JWT token with embedded host endpoint + ICE candidates
+    let token_manager = state.token_manager.read().await;
+    let token_result = token_manager.create_token(
+        code.clone(),
+        db.id.clone(),
+        host_id.clone(),
+        Some(host_ip.clone()),
+        Some(host_port),
+        ice_candidates.clone(), // Embed ICE in JWT for self-contained URL
+        perm.clone(),
+        tables.clone(),
+        req.cols.clone(),
+        req.rls.clone(),
+        duration,
+    );
+
+    let token = match token_result {
+        Ok(t) => t,
+        Err(e) => {
+            warn!("Failed to create token: {}", e);
+            return Ok(Json(crate::models::database::ApiResponse::error(
+                "Failed to create share token".to_string()
+            )));
+        }
     };
+
+    // Build share URL — ICE is now embedded in the JWT token itself
+    // The URL is clean: https://share.bennett.studio/db/CODE?t=JWT
+    // The JWT contains everything: host, port, ICE candidates, permissions, etc.
+    let base_url = get_share_base_url();
+    let url = build_share_url(&base_url, &code, &token.token);
     
     // Store in database
     let record = ShareRecord {

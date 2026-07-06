@@ -148,6 +148,7 @@ pub async fn handle_mysql_client(
         host_id: record.host_id.clone(),
         host: record.host.clone(),
         port: record.port,
+        ice: record.ice.clone(), // ICE candidates for P2P connection
         permission: crate::auth::share_token::SharePermission::from_str(&record.permission),
         tables: serde_json::from_str(&record.tables).unwrap_or_else(|_| vec!["*".to_string()]),
         cols: record.cols.and_then(|c| serde_json::from_str(&c).ok()),

@@ -64,6 +64,7 @@ impl ShareService for ShareGrpcService {
             host_id.clone(),
             None, // host
             None, // port
+            None, // ice (gRPC path doesn't do P2P ICE gathering yet)
             perm,
             tables.clone(),
             None, // cols

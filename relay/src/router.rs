@@ -167,3 +167,34 @@ impl Clone for ShareRouter {
         }
     }
 }
+
+/// HTTP proxy request for share queries
+/// Used by external websites to query through the P2P tunnel
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct ProxyQueryRequest {
+    pub sql: String,
+    pub token: String,
+    pub limit: Option<i64>,
+    pub offset: Option<i64>,
+}
+
+/// HTTP proxy response
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ProxyQueryResponse {
+    pub success: bool,
+    pub columns: Vec<String>,
+    pub rows: Vec<Vec<serde_json::Value>>,
+    pub row_count: usize,
+    pub execution_time_ms: u64,
+    pub error: Option<String>,
+}
+
+/// CORS headers for external website access
+pub fn cors_headers() -> Vec<(&'static str, &'static str)> {
+    vec![
+        ("Access-Control-Allow-Origin", "*"),
+        ("Access-Control-Allow-Methods", "GET, POST, OPTIONS"),
+        ("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Share-Token"),
+        ("Access-Control-Max-Age", "86400"),
+    ]
+}

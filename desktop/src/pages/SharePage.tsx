@@ -272,6 +272,12 @@ export function SharePage() {
                       <span className="text-xs px-2 py-1 rounded-full" style={{ backgroundColor: 'var(--bgTertiary)', color: 'var(--textSecondary)' }}>
                         {share.db_type || 'Unknown'}
                       </span>
+                      {/* Show P2P badge if ICE is embedded in the share */}
+                      {share.ice && (
+                        <span className="text-xs px-2 py-1 rounded-full" style={{ backgroundColor: 'rgba(0,212,170,0.15)', color: 'var(--accentSuccess)' }}>
+                          P2P Ready
+                        </span>
+                      )}
                       <span className="text-xs flex items-center gap-1" style={{ color: 'var(--textMuted)' }}>
                         <PermIcon size={12} /> {getPermissionLabel(share.permission)}
                       </span>

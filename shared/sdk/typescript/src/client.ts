@@ -289,7 +289,7 @@ export class BennettShareClient {
    */
   async exportTable(tableName: string, format: 'csv' | 'json' = 'csv'): Promise<ExportResult> {
     await this.ensureResolved();
-    
+
     return this.call<ExportResult>(
       'bennett.v1.ExportService/ExportTableDump',
       {
@@ -299,6 +299,98 @@ export class BennettShareClient {
         format,
       }
     );
+  }
+
+  /**
+   * Create a WebSocket streaming connection for real-time queries
+   * Returns a WebSocket instance — caller handles messages
+   */
+  createStream(baseWsUrl?: string): WebSocket {
+    // Determine WebSocket URL
+    // If baseUrl is http://host:port, wsUrl is ws://host:port/ws/share/CODE
+    const httpUrl = this.baseUrl || baseWsUrl || 'http://localhost:8443';
+    const wsProtocol = httpUrl.startsWith('https') ? 'wss' : 'ws';
+    const wsHost = httpUrl.replace(/^https?:\/\//, '').replace(/\/$/, '');
+    const wsUrl = `${wsProtocol}://${wsHost}/ws/share/${this.code}`;
+
+    console.log(`[BennettClient] Opening WebSocket stream: ${wsUrl}`);
+
+    const ws = new WebSocket(wsUrl);
+
+    ws.onopen = () => {
+      console.log('[BennettClient] WebSocket connected');
+    };
+
+    ws.onerror = (err) => {
+      console.error('[BennettClient] WebSocket error:', err);
+    };
+
+    ws.onclose = () => {
+      console.log('[BennettClient] WebSocket closed');
+    };
+
+    return ws;
+  }
+
+  /**
+   * Execute a query via WebSocket streaming (returns async iterator)
+   */
+  async *queryStream(sql: string, limit?: number): AsyncGenerator<any, void, unknown> {
+    const ws = this.createStream();
+
+    // Wait for connection
+    await new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('WebSocket connection timeout')), 10000);
+      ws.onopen = () => {
+        clearTimeout(timeout);
+        resolve();
+      };
+      ws.onerror = (err) => {
+        clearTimeout(timeout);
+        reject(new Error(`WebSocket connection failed: ${err}`));
+      };
+    });
+
+    // Send query
+    ws.send(JSON.stringify({
+      type: 'query',
+      sql,
+      limit: limit || 1000,
+      request_id: `query-${Date.now()}`,
+    }));
+
+    // Yield results as they arrive
+    const messageQueue: any[] = [];
+    let done = false;
+    let error: Error | null = null;
+
+    ws.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      if (data.type === 'query_result') {
+        messageQueue.push(data);
+      } else if (data.type === 'query_error') {
+        error = new Error(data.error);
+        done = true;
+      } else if (data.type === 'status' && data.message === 'Keepalive') {
+        // Ignore keepalives
+      }
+    };
+
+    ws.onclose = () => {
+      done = true;
+    };
+
+    // Yield messages until done
+    while (!done || messageQueue.length > 0) {
+      if (messageQueue.length > 0) {
+        yield messageQueue.shift();
+      } else {
+        await new Promise(r => setTimeout(r, 10));
+      }
+      if (error) throw error;
+    }
+
+    ws.close();
   }
 
   /**
@@ -364,21 +456,125 @@ export class BennettShareClient {
 }
 
 /**
+ * Decode JWT payload without verification (for extracting connection info)
+ */
+function decodeJwtPayload(token: string): any {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+    // Base64Url decode
+    const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const padded = base64.padEnd(base64.length + (4 - base64.length % 4) % 4, '=');
+    const json = atob(padded);
+    return JSON.parse(json);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Connection mode: how the client connects to the host
+ */
+export type ConnectionMode = 'direct' | 'p2p' | 'relay' | 'unknown';
+
+/**
+ * Connection info extracted from JWT
+ */
+export interface ConnectionInfo {
+  mode: ConnectionMode;
+  host?: string;
+  port?: number;
+  ice?: string;
+  code: string;
+  dbId: string;
+  permission: string;
+  tables: string[];
+  expiresAt: number;
+}
+
+/**
  * Convenience function to create client from share URL
+ * Automatically detects connection mode from embedded JWT
  */
 export function clientFromUrl(url: string): BennettShareClient {
   // Parse https://share.bennett.studio/db/ACQPFDAQ7P?t=eyJhbG...
-  const codeMatch = url.match(/\/db\/([A-Z0-9]+)/);
+  const codeMatch = url.match(/\/db\/([A-Z0-9]+)/i);
   const tokenMatch = url.match(/[?&]t=([^&]+)/);
-  
+
   if (!codeMatch || !tokenMatch) {
-    throw new Error('Invalid share URL format');
+    throw new Error('Invalid share URL format. Expected: https://host/db/CODE?t=JWT');
   }
-  
-  return new BennettShareClient({
-    code: codeMatch[1],
-    token: decodeURIComponent(tokenMatch[1]),
+
+  const code = codeMatch[1].toUpperCase();
+  const token = decodeURIComponent(tokenMatch[1]);
+
+  // Decode JWT to extract connection info
+  const claims = decodeJwtPayload(token);
+  if (!claims) {
+    console.warn('Could not decode JWT payload — falling back to direct mode');
+    return new BennettShareClient({ code, token });
+  }
+
+  // Determine connection mode from JWT contents
+  const hasIce = !!claims.ice;
+  const hasHost = !!claims.host && !!claims.port;
+
+  let mode: ConnectionMode = 'unknown';
+  if (hasIce) {
+    mode = 'p2p'; // P2P via ICE candidates (QUIC tunnel)
+  } else if (hasHost) {
+    mode = 'direct'; // Direct HTTP to host:port
+  }
+
+  console.log(`[BennettClient] Connection mode: ${mode}`, {
+    code,
+    dbId: claims.db_id,
+    host: claims.host,
+    port: claims.port,
+    hasIce,
+    permission: claims.perm,
+    expiresAt: new Date(claims.exp * 1000).toISOString(),
   });
+
+  // Build base URL based on connection mode
+  let baseUrl: string | undefined;
+  if (mode === 'direct' && claims.host && claims.port) {
+    baseUrl = `http://${claims.host}:${claims.port}`;
+  }
+  // For P2P mode, baseUrl will be resolved later via relay or direct QUIC
+
+  return new BennettShareClient({
+    code,
+    token,
+    baseUrl,
+  });
+}
+
+/**
+ * Extract connection info from a share URL without creating a client
+ */
+export function extractConnectionInfo(url: string): ConnectionInfo | null {
+  const codeMatch = url.match(/\/db\/([A-Z0-9]+)/i);
+  const tokenMatch = url.match(/[?&]t=([^&]+)/);
+  if (!codeMatch || !tokenMatch) return null;
+
+  const claims = decodeJwtPayload(decodeURIComponent(tokenMatch[1]));
+  if (!claims) return null;
+
+  const hasIce = !!claims.ice;
+  const hasHost = !!claims.host && !!claims.port;
+
+  return {
+    mode: hasIce ? 'p2p' : (hasHost ? 'direct' : 'unknown'),
+    host: claims.host,
+    port: claims.port,
+    ice: claims.ice,
+    code: codeMatch[1].toUpperCase(),
+    dbId: claims.db_id,
+    permission: claims.perm,
+    tables: claims.tables || ['*'],
+    expiresAt: claims.exp,
+  };
 }
 
 /**

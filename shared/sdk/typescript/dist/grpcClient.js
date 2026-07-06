@@ -52,12 +52,24 @@ export class BennettGrpcWebClient {
         };
     }
     /**
+     * Convert camelCase keys to snake_case for protobuf JSON compatibility
+     */
+    toSnakeCase(obj) {
+        const result = {};
+        for (const [key, value] of Object.entries(obj)) {
+            const snakeKey = key.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`);
+            result[snakeKey] = value;
+        }
+        return result;
+    }
+    /**
      * Low-level gRPC-Web call using Connect-RPC protocol
      */
     async call(method, payload) {
         const url = `${this.baseUrl}/${method}`;
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), this.timeout);
+        // Server accepts camelCase natively
         try {
             const response = await fetch(url, {
                 method: 'POST',

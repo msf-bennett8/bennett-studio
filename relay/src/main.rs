@@ -20,10 +20,22 @@ mod server;
 mod signaling;
 mod transport;
 
+use axum::{
+    extract::{
+        Path, State, Json,
+        ws::{Message, WebSocket, WebSocketUpgrade},
+    },
+    http::StatusCode,
+    response::IntoResponse,
+    routing::{get, post, options},
+    Router,
+};
 use clap::Parser;
+use futures_util::{sink::SinkExt, stream::StreamExt};
+use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::signal;
-use tracing::{error, info};
+use tracing::{debug, error, info, warn};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -148,6 +160,23 @@ async fn main() -> anyhow::Result<()> {
         )
     };
 
+    // Start HTTP proxy API for external websites (runs alongside P2P transport)
+    let _api_handle = if config.enable_p2p && config.p2p_mode == "engine" {
+        let router_clone = router.clone();
+        let transport_clone = transport.clone();
+        let bind_addr = format!("0.0.0.0:{}", config.bind.port());
+        
+        info!(addr = %bind_addr, "Starting HTTP proxy API for external website access");
+        
+        Some(tokio::spawn(async move {
+            if let Err(e) = start_http_proxy_api(bind_addr, router_clone, transport_clone).await {
+                error!("HTTP proxy API error: {}", e);
+            }
+        }))
+    } else {
+        None
+    };
+
     // Start health monitor
     let _health_handle = health::HealthMonitor::start(
         router.clone(),
@@ -205,4 +234,383 @@ async fn main() -> anyhow::Result<()> {
 
     info!("Relay server shutdown complete");
     Ok(())
+}
+
+/// HTTP Proxy API for external websites
+/// Allows any website (Vercel, etc.) to query the shared database
+/// through the P2P tunnel via simple HTTP requests
+async fn start_http_proxy_api(
+    bind_addr: String,
+    router: Arc<router::ShareRouter>,
+    _transport: Arc<dyn transport::Transport>,
+) -> anyhow::Result<()> {
+    let app_state = ProxyApiState { router };
+
+    let app = Router::new()
+        // Health check
+        .route("/health", get(proxy_health))
+        // CORS preflight
+        .route("/api/share/:code/query", options(cors_preflight))
+        .route("/api/share/:code/schema", options(cors_preflight))
+        .route("/ws/share/:code", options(cors_preflight))
+        // Query execution
+        .route("/api/share/:code/query", post(proxy_query))
+        // Schema fetch
+        .route("/api/share/:code/schema", get(proxy_schema))
+        // Share info
+        .route("/api/share/:code", get(proxy_share_info))
+        // WebSocket streaming for real-time queries
+        .route("/ws/share/:code", get(ws_proxy_handler))
+        .with_state(app_state);
+
+    let addr: SocketAddr = bind_addr.parse()?;
+    info!("HTTP proxy API listening on http://{}", addr);
+
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    axum::serve(listener, app).await?;
+
+    Ok(())
+}
+
+#[derive(Clone)]
+struct ProxyApiState {
+    router: Arc<router::ShareRouter>,
+}
+
+/// CORS preflight response
+async fn cors_preflight() -> impl IntoResponse {
+    let mut headers = axum::http::HeaderMap::new();
+    for (k, v) in router::cors_headers() {
+        headers.insert(k, v.parse().unwrap());
+    }
+    (StatusCode::NO_CONTENT, headers)
+}
+
+/// Health check for proxy API
+async fn proxy_health() -> impl IntoResponse {
+    let body = serde_json::json!({ "status": "ok", "service": "bennett-proxy" });
+    (StatusCode::OK, axum::Json(body))
+}
+
+/// Execute a query through the proxy
+/// External websites POST here with { sql, token }
+async fn proxy_query(
+    Path(code): Path<String>,
+    State(state): State<ProxyApiState>,
+    Json(req): Json<router::ProxyQueryRequest>,
+) -> impl IntoResponse {
+    let mut headers = axum::http::HeaderMap::new();
+    for (k, v) in router::cors_headers() {
+        headers.insert(k, v.parse().unwrap());
+    }
+
+    // Check if share is active
+    if !state.router.is_active(&code) {
+        return (
+            StatusCode::NOT_FOUND,
+            headers,
+            axum::Json(serde_json::json!({
+                "success": false,
+                "error": "Share not found or expired"
+            })),
+        );
+    }
+
+    // TODO: Forward query through P2P tunnel to engine
+    // For now, return a placeholder that indicates the tunnel is being established
+    info!(share = %code, sql_len = %req.sql.len(), "Proxy query received");
+
+    (
+        StatusCode::OK,
+        headers,
+        axum::Json(serde_json::json!({
+            "success": true,
+            "message": "Query received — P2P tunnel forwarding in progress",
+            "share_code": code,
+            "columns": [],
+            "rows": [],
+            "row_count": 0,
+            "execution_time_ms": 0,
+        })),
+    )
+}
+
+/// Get schema through the proxy
+async fn proxy_schema(
+    Path(code): Path<String>,
+    State(state): State<ProxyApiState>,
+) -> impl IntoResponse {
+    let mut headers = axum::http::HeaderMap::new();
+    for (k, v) in router::cors_headers() {
+        headers.insert(k, v.parse().unwrap());
+    }
+
+    if !state.router.is_active(&code) {
+        return (
+            StatusCode::NOT_FOUND,
+            headers,
+            axum::Json(serde_json::json!({
+                "success": false,
+                "error": "Share not found or expired"
+            })),
+        );
+    }
+
+    info!(share = %code, "Proxy schema request received");
+
+    (
+        StatusCode::OK,
+        headers,
+        axum::Json(serde_json::json!({
+            "success": true,
+            "message": "Schema fetch — P2P tunnel forwarding in progress",
+            "tables": [],
+            "databaseName": "Remote Database",
+            "databaseType": "unknown",
+        })),
+    )
+}
+
+/// Get public share info
+async fn proxy_share_info(
+    Path(code): Path<String>,
+    State(state): State<ProxyApiState>,
+) -> impl IntoResponse {
+    let mut headers = axum::http::HeaderMap::new();
+    for (k, v) in router::cors_headers() {
+        headers.insert(k, v.parse().unwrap());
+    }
+
+    if !state.router.is_active(&code) {
+        return (
+            StatusCode::NOT_FOUND,
+            headers,
+            axum::Json(serde_json::json!({
+                "success": false,
+                "error": "Share not found or expired"
+            })),
+        );
+    }
+
+    (
+        StatusCode::OK,
+        headers,
+        axum::Json(serde_json::json!({
+            "success": true,
+            "code": code,
+            "status": "active",
+            "message": "Share is active — connect with BennettClient"
+        })),
+    )
+}
+
+// ============================================================================
+// WebSocket Streaming Proxy
+// ============================================================================
+
+/// WebSocket request messages from client
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum WsProxyRequest {
+    /// Execute a query
+    Query { sql: String, limit: Option<i64>, request_id: Option<String> },
+    /// Subscribe to schema changes
+    SubscribeSchema,
+    /// Ping to keep connection alive
+    Ping,
+    /// Acknowledge receipt (for flow control)
+    Ack { message_id: u64 },
+}
+
+/// WebSocket response messages to client
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum WsProxyResponse {
+    /// Query result
+    QueryResult {
+        columns: Vec<String>,
+        rows: Vec<Vec<serde_json::Value>>,
+        row_count: usize,
+        execution_time_ms: u64,
+        request_id: Option<String>,
+        message_id: u64,
+    },
+    /// Query error
+    QueryError {
+        error: String,
+        request_id: Option<String>,
+        message_id: u64,
+    },
+    /// Schema update
+    SchemaUpdate {
+        tables: Vec<serde_json::Value>,
+        database_name: String,
+        database_type: String,
+        message_id: u64,
+    },
+    /// Connection status
+    Status {
+        connected: bool,
+        share_code: String,
+        message: String,
+        message_id: u64,
+    },
+    /// Pong response
+    Pong,
+    /// Server error
+    Error { message: String, message_id: u64 },
+}
+
+/// WebSocket upgrade handler
+async fn ws_proxy_handler(
+    ws: WebSocketUpgrade,
+    Path(code): Path<String>,
+    State(state): State<ProxyApiState>,
+) -> impl IntoResponse {
+    ws.on_upgrade(move |socket| handle_ws_proxy(socket, code, state))
+}
+
+/// Handle WebSocket connection for share streaming
+async fn handle_ws_proxy(
+    socket: WebSocket,
+    code: String,
+    state: ProxyApiState,
+) {
+    let (mut sender, mut receiver) = socket.split();
+    let mut message_id: u64 = 0;
+
+    info!(share = %code, "WebSocket proxy connection established");
+
+    // Send initial status
+    message_id += 1;
+    let status_msg = WsProxyResponse::Status {
+        connected: state.router.is_active(&code),
+        share_code: code.clone(),
+        message: "Connected to Bennett relay proxy".to_string(),
+        message_id,
+    };
+    let _ = sender.send(Message::Text(
+        serde_json::to_string(&status_msg).unwrap()
+    )).await;
+
+    // If share not active, close connection
+    if !state.router.is_active(&code) {
+        message_id += 1;
+        let _ = sender.send(Message::Text(
+            serde_json::to_string(&WsProxyResponse::Error {
+                message: "Share not found or expired".to_string(),
+                message_id,
+            }).unwrap()
+        )).await;
+        let _ = sender.close().await;
+        return;
+    }
+
+    // Main message loop
+    loop {
+        tokio::select! {
+            msg = receiver.next() => {
+                match msg {
+                    Some(Ok(Message::Text(text))) => {
+                        match serde_json::from_str::<WsProxyRequest>(&text) {
+                            Ok(WsProxyRequest::Ping) => {
+                                let _ = sender.send(Message::Text(
+                                    serde_json::to_string(&WsProxyResponse::Pong).unwrap()
+                                )).await;
+                            }
+                            Ok(WsProxyRequest::Query { sql, limit, request_id }) => {
+                                info!(share = %code, sql_len = %sql.len(), "WebSocket query received");
+
+                                // Validate SQL (basic)
+                                if sql.trim().is_empty() {
+                                    message_id += 1;
+                                    let _ = sender.send(Message::Text(
+                                        serde_json::to_string(&WsProxyResponse::QueryError {
+                                            error: "Empty SQL query".to_string(),
+                                            request_id: request_id.clone(),
+                                            message_id,
+                                        }).unwrap()
+                                    )).await;
+                                    continue;
+                                }
+
+                                // TODO: Forward query through P2P tunnel to engine
+                                // For now, return placeholder indicating tunnel is active
+                                message_id += 1;
+                                let start = std::time::Instant::now();
+
+                                // Placeholder: In production, this forwards through the P2P QUIC tunnel
+                                // to the engine, which executes the query and returns results
+                                let response = WsProxyResponse::QueryResult {
+                                    columns: vec!["id".to_string(), "name".to_string()],
+                                    rows: vec![
+                                        vec![serde_json::json!(1), serde_json::json!("Demo Row")],
+                                    ],
+                                    row_count: 1,
+                                    execution_time_ms: start.elapsed().as_millis() as u64,
+                                    request_id,
+                                    message_id,
+                                };
+
+                                let _ = sender.send(Message::Text(
+                                    serde_json::to_string(&response).unwrap()
+                                )).await;
+                            }
+                            Ok(WsProxyRequest::SubscribeSchema) => {
+                                info!(share = %code, "Schema subscription requested");
+
+                                // TODO: Fetch schema through P2P tunnel
+                                message_id += 1;
+                                let response = WsProxyResponse::SchemaUpdate {
+                                    tables: vec![],
+                                    database_name: "Remote Database".to_string(),
+                                    database_type: "unknown".to_string(),
+                                    message_id,
+                                };
+                                let _ = sender.send(Message::Text(
+                                    serde_json::to_string(&response).unwrap()
+                                )).await;
+                            }
+                            Ok(WsProxyRequest::Ack { message_id: ack_id }) => {
+                                debug!("Client acked message {}", ack_id);
+                            }
+                            Err(e) => {
+                                message_id += 1;
+                                let _ = sender.send(Message::Text(
+                                    serde_json::to_string(&WsProxyResponse::Error {
+                                        message: format!("Invalid message: {}", e),
+                                        message_id,
+                                    }).unwrap()
+                                )).await;
+                            }
+                        }
+                    }
+                    Some(Ok(Message::Close(_))) | None => {
+                        info!(share = %code, "WebSocket client disconnected");
+                        break;
+                    }
+                    Some(Err(e)) => {
+                        warn!(share = %code, error = %e, "WebSocket error");
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+
+            // Periodic keepalive
+            _ = tokio::time::sleep(tokio::time::Duration::from_secs(30)) => {
+                message_id += 1;
+                let _ = sender.send(Message::Text(
+                    serde_json::to_string(&WsProxyResponse::Status {
+                        connected: state.router.is_active(&code),
+                        share_code: code.clone(),
+                        message: "Keepalive".to_string(),
+                        message_id,
+                    }).unwrap()
+                )).await;
+            }
+        }
+    }
+
+    info!(share = %code, "WebSocket proxy connection closed");
 }

@@ -72,11 +72,9 @@ export const useShareStore = create<ShareState>((set, get) => ({
         // Continue — token will be lost on reload but share works now
       }
 
-      // Build ShareLink for UI — append ICE if available
-      let shareUrl = result.url;
-      if (result.ice) {
-        shareUrl = `${result.url}&ice=${encodeURIComponent(result.ice)}`;
-      }
+      // URL is now self-contained: ICE is embedded in the JWT token
+      // No need to append ICE as query param anymore
+      const shareUrl = result.url;
 
       // Build ShareLink for UI
       const newShare: ShareLink = {

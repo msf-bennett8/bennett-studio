@@ -25,6 +25,9 @@ pub struct ShareClaims {
     /// Host port for direct guest connection
     #[serde(skip_serializing_if = "Option::is_none")]
     pub port: Option<u16>,
+    /// ICE candidates (base64) for P2P connection — self-contained in URL
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ice: Option<String>,
     /// Permission level: "ro" | "rw" | "adm"
     pub perm: String,
     /// Allowed tables: ["*"] = all, or ["users", "orders"]
@@ -99,6 +102,7 @@ pub struct ValidatedShare {
     pub host_id: String,
     pub host: Option<String>,
     pub port: Option<u16>,
+    pub ice: Option<String>,
     pub permission: SharePermission,
     pub tables: Vec<String>,
     pub cols: Option<serde_json::Value>,
@@ -162,6 +166,7 @@ impl ShareTokenManager {
         host_id: String,
         host: Option<String>,
         port: Option<u16>,
+        ice: Option<String>,
         permission: SharePermission,
         tables: Vec<String>,
         cols: Option<serde_json::Value>,
@@ -178,6 +183,7 @@ impl ShareTokenManager {
             host_id,
             host,
             port,
+            ice,
             perm: permission.as_str().to_string(),
             tables,
             cols,
@@ -218,6 +224,7 @@ impl ShareTokenManager {
             host_id: claims.host_id,
             host: claims.host,
             port: claims.port,
+            ice: claims.ice,
             permission: SharePermission::from_str(&claims.perm),
             tables: claims.tables,
             cols: claims.cols,

@@ -568,6 +568,7 @@ dependencies = [
  "dashmap 6.2.1",
  "deadpool",
  "futures",
+ "futures-util",
  "h2",
  "http",
  "hyper",
