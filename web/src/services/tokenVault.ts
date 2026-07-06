@@ -91,7 +91,7 @@ async function decryptToken(iv: string, ciphertext: string, key: CryptoKey): Pro
   return decoder.decode(plaintext);
 }
 
-function arrayBufferToBase64(buffer: ArrayBuffer): string {
+function arrayBufferToBase64(buffer: ArrayBuffer | Uint8Array): string {
   const bytes = new Uint8Array(buffer);
   let binary = '';
   for (let i = 0; i < bytes.byteLength; i++) {

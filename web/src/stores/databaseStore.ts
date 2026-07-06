@@ -170,7 +170,25 @@ export const useDatabaseStore = create<DatabaseState>()(
     set({ tableDataLoading: true, error: null });
 
     // Check if this is a remote database
-    const remoteDb = get().getRemoteDatabases().find(d => d.id === dbId);
+    const { connections } = useRemoteConnectionStore.getState();
+    const remoteDb = connections
+      .filter(c => c.status === 'connected')
+      .map(c => ({
+        id: c.id,
+        name: `${c.dbName || 'Remote Database'} ${c.code}`,
+        type: (c.dbType || 'postgres') as 'postgres' | 'mysql' | 'mariadb' | 'sqlite' | 'redis',
+        version: '',
+        status: 'running' as const,
+        port: 0,
+        size: '',
+        created_at: c.connectedAt,
+        source: 'bennett' as DatabaseSource,
+        isRemote: true,
+        shareCode: c.code,
+        remotePermission: c.permission,
+        remoteHost: c.baseUrl,
+      }))
+      .find(d => d.id === dbId);
     if (remoteDb) {
       const { connections } = useRemoteConnectionStore.getState();
       const conn = connections.find(c => c.id === dbId);

@@ -1,15 +1,15 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Theme, defaultTheme, getThemeColors, ThemeColors } from '../theme';
+import { Theme, defaultTheme, getThemeColors } from '../theme';
 
 const THEME_STORAGE_KEY = 'bennett-theme';
 
 export function useTheme() {
-  const [theme, setThemeState] = useState<<Theme>(() => {
+  const [theme, setThemeState] = useState<Theme>(() => {
     const stored = localStorage.getItem(THEME_STORAGE_KEY);
     return (stored as Theme) || defaultTheme;
   });
 
-  const [colors, setColors] = useState<<ThemeColors>(() => getThemeColors(theme));
+  const [colors, setColors] = useState<ReturnType<typeof getThemeColors>>(() => getThemeColors(theme));
 
   useEffect(() => {
     const newColors = getThemeColors(theme);

@@ -2,7 +2,7 @@ export * from './database';
 export * from './api';
 // sharing.ts defines TableSchema/ColumnSchema which conflict with database.ts
 // Export individually to avoid ambiguity
-export {
+export type {
   SharePermission,
   ShareLink,
   ShareSession,

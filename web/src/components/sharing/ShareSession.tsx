@@ -1,8 +1,8 @@
-import React from 'react';
-import { useShareStore } from '../../stores/shareStore';
+import { useRemoteConnectionStore } from '../../stores/remoteConnectionStore';
 
 export const ShareSession: React.FC = () => {
-  const { remoteConnection, disconnect } = useShareStore();
+  const { connections, activeConnectionId, disconnect } = useRemoteConnectionStore();
+  const remoteConnection = connections.find(c => c.id === activeConnectionId);
 
   if (!remoteConnection) {
     return (
@@ -17,7 +17,7 @@ export const ShareSession: React.FC = () => {
       <div className="flex justify-between items-center mb-3">
         <h3 className="text-lg font-semibold">Connected to {remoteConnection.dbName}</h3>
         <button
-          onClick={disconnect}
+          onClick={() => disconnect(remoteConnection.id)}
           className="px-3 py-1 text-sm bg-red-100 text-red-700 rounded hover:bg-red-200"
         >
           Disconnect

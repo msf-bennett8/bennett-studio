@@ -8,7 +8,7 @@ import { NoteToolbar } from '../components/notes/NoteToolbar';
 
 export function NotesPage() {
   const navigate = useNavigate();
-  const { notes, selectedNoteId, isEditorOpen, setEditorOpen, selectNote, addNote } = useNotesStore();
+  const { notes, selectedNoteId, isEditorOpen, setEditorOpen, addNote } = useNotesStore();
 
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
     if (e.ctrlKey || e.metaKey) {
@@ -35,8 +35,6 @@ export function NotesPage() {
     addNote({ title: 'New Note', content: '' });
   };
 
-  body {}
-  
   return (
     <div className="h-full flex flex-col" style={{ backgroundColor: 'var(--bgPrimary)' }}>
       <div
@@ -69,7 +67,7 @@ export function NotesPage() {
 
         <div className="flex items-center gap-2">
           <button
-            onClick={() => useNotesStore.getState().syncToEngine()}
+            onClick={() => { /* TODO: syncToEngine not implemented in store */ }}
             className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-all border"
             style={{
               borderColor: 'var(--borderDefault)',

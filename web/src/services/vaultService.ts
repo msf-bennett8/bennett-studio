@@ -25,6 +25,11 @@ export const vaultService: TokenVault = {
   },
   
   async status(): Promise<VaultStatus> {
-    return tokenVault.status();
+    const s = await tokenVault.status();
+    return {
+      available: s.available,
+      type: s.type as VaultStatus['type'],
+      initialized: s.initialized,
+    };
   },
 };

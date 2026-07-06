@@ -122,7 +122,7 @@ class RemoteApiService {
       id: `conn-${Date.now()}`,
       code: parsed.code,
       token: parsed.token,
-      baseUrl: API_BASE_URL, // Use local backend, not the fake share domain
+      baseUrl: API_BASE_URL,
       dbId: '',
       dbName: '',
       dbType: '',
@@ -131,6 +131,7 @@ class RemoteApiService {
       connectedAt: new Date().toISOString(),
       lastActivity: new Date().toISOString(),
       status: 'connecting',
+      shareUrl: url,
     };
 
     try {
@@ -178,8 +179,7 @@ class RemoteApiService {
    */
   disconnect(connectionId: string): void {
     // Find connection by ID and remove client
-    for (const [code, client] of this.clients) {
-      // Note: In real implementation, track connection ID to client mapping
+    for (const code of this.clients.keys()) {
       this.clients.delete(code);
     }
     this.schemaCache.delete(connectionId);
@@ -195,22 +195,23 @@ class RemoteApiService {
     if (!forceRefresh && cached) {
       const expiresAt = new Date(cached.expiresAt).getTime();
       if (Date.now() < expiresAt) {
-        return cached.schema;
+        return cached.schema as any;
       }
     }
     
     const client = this.getClient(connection);
-    const response = await client.getSchema();
-    
-    if (!response.success) {
-      throw new Error(response.error || 'Failed to fetch schema');
-    }
-    
-    this.cacheSchema(connection.code, response.tables);
-    return response.tables;
+      const response = await client.getSchema();
+
+      if (!response.success) {
+        throw new Error(response.error || 'Failed to fetch schema');
+      }
+
+      // Cast to shared TableSchema[] (SDK types may differ slightly)
+      this.cacheSchema(connection.code, response.tables as any);
+      return response.tables as any;
   }
 
-  private cacheSchema(code: string, schema: TableSchema[]): void {
+  private cacheSchema(code: string, schema: any[]): void {
     const now = Date.now();
     this.schemaCache.set(code, {
       code,
@@ -354,13 +355,13 @@ class RemoteApiService {
     const tableSchema = schema.find(t => t.name === table);
     if (!tableSchema) throw new Error(`Table ${table} not found in schema`);
 
-    return tableSchema.columns.map(c => ({
+    return (tableSchema as any).columns.map((c: any) => ({
       name: c.name,
-      data_type: c.dataType,
+      data_type: c.dataType || c.data_type,
       nullable: c.nullable,
-      has_default: !!c.defaultValue,
-      is_primary_key: c.isPrimaryKey,
-      column_default: c.defaultValue || null,
+      has_default: !!(c.defaultValue || c.column_default),
+      is_primary_key: c.isPrimaryKey || c.is_primary_key,
+      column_default: c.defaultValue || c.column_default || null,
     }));
   }
 

@@ -44,11 +44,13 @@ export function UnlockDatabaseModal({
     setLoading(true);
     setError(null);
     const dbName = database || databaseName;
-    const success = await onUnlock(databaseId, username, password, dbName);
-    if (!success) {
+    try {
+      await onUnlock(databaseId, username, password, dbName);
+    } catch {
       setError('Authentication failed. Please check your credentials.');
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const applySuggestion = (suggestion: typeof envSuggestions[0]) => {

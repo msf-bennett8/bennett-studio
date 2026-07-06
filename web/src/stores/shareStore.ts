@@ -13,6 +13,8 @@ interface ShareState {
   fetchShares: () => Promise<void>;
   createShare: (req: CreateShareRequest) => Promise<ShareLink | null>;
   revokeShare: (code: string) => Promise<boolean>;
+  deleteShare: (code: string) => Promise<boolean>;
+  togglePin: (code: string) => Promise<boolean>;
   getShareUrl: (code: string) => Promise<string | null>;
   clearError: () => void;
   initVault: () => Promise<void>;
@@ -27,7 +29,7 @@ export const useShareStore = create<ShareState>((set, get) => ({
 
   initVault: async () => {
     try {
-      const status = await vaultService.status();
+      const status = await vaultService.status!();
       set({ vaultAvailable: status.available });
     } catch {
       set({ vaultAvailable: false });
@@ -89,6 +91,7 @@ export const useShareStore = create<ShareState>((set, get) => ({
         created_at: new Date().toISOString(),
         guest_count: 0,
         status: 'active',
+        pinned: false,
       };
 
       set(state => ({
@@ -104,7 +107,7 @@ export const useShareStore = create<ShareState>((set, get) => ({
     }
   },
 
-    togglePin: async (code) => {
+    togglePin: async (code: string) => {
     try {
       const success = await shareApi.togglePin(code);
       if (success) {
@@ -122,7 +125,7 @@ export const useShareStore = create<ShareState>((set, get) => ({
     }
   },
 
-  deleteShare: async (code) => {
+  deleteShare: async (code: string) => {
     try {
       const success = await shareApi.deleteShare(code);
       if (success) {

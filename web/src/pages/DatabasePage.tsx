@@ -14,14 +14,29 @@ const dbTypes = [
 
 export function DatabasePage() {
   const {
-    databases, loading, error, logs, clearError, unlockedDatabases,
+    databases, loading, error, clearError, unlockedDatabases,
     fetchDatabases, discoverLocalDatabases, createDatabase, deleteDatabase,
     startDatabase, stopDatabase, unlockDatabase, scanEnvFiles,
-    getRemoteDatabases,
   } = useDatabaseStore();
 
   const { connections: remoteConnections, disconnect: disconnectRemote } = useRemoteConnectionStore();
-  const allDatabases = [...databases, ...getRemoteDatabases()];
+  const allDatabases = [...databases, ...remoteConnections
+    .filter(c => c.status === 'connected')
+    .map(c => ({
+      id: c.id,
+      name: `${c.dbName || 'Remote Database'} ${c.code}`,
+      type: (c.dbType && c.dbType !== 'unknown' ? c.dbType : 'mysql') as 'postgres' | 'mysql' | 'mariadb' | 'sqlite' | 'redis',
+      version: '',
+      status: 'running' as const,
+      port: 0,
+      size: '',
+      created_at: c.connectedAt,
+      source: 'bennett' as any,
+      isRemote: true,
+      shareCode: c.code,
+      remotePermission: c.permission,
+      remoteHost: c.baseUrl,
+    }))];
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [selectedType, setSelectedType] = useState('postgres');
@@ -140,24 +155,24 @@ export function DatabasePage() {
                           BnT
                         </span>
                       )}
-                      {(db.source === 'local' || db.is_discovered) && (
+                      {('is_discovered' in db || db.source === 'local') && !db.isRemote && (
                         <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ backgroundColor: 'var(--accentInfo)', color: 'var(--textInverse)' }}>
                           Local
                         </span>
                       )}
-                      {(db.source === 'local' || db.is_discovered) && !unlockedDatabases.has(db.id) && (
+                      {('is_discovered' in db || db.source === 'local') && !db.isRemote && !unlockedDatabases.has(db.id) && (
                         <span className="text-xs px-2 py-0.5 rounded-full font-medium flex items-center gap-1" style={{ backgroundColor: 'var(--accentWarning)', color: 'var(--textInverse)' }}>
                           <Lock size={10} /> Locked
                         </span>
                       )}
-                      {(db.source === 'local' || db.is_discovered) && unlockedDatabases.has(db.id) && (
+                      {('is_discovered' in db || db.source === 'local') && !db.isRemote && unlockedDatabases.has(db.id) && (
                         <span className="text-xs px-2 py-0.5 rounded-full font-medium flex items-center gap-1" style={{ backgroundColor: 'var(--accentSuccess)', color: 'var(--textInverse)' }}>
                           <Unlock size={10} /> Unlocked
                         </span>
                       )}
                       <span className="text-xs" style={{ color: 'var(--textMuted)' }}>port:{db.port}</span>
                       <span className="text-xs" style={{ color: 'var(--textMuted)' }}>{db.size}</span>
-                      {db.container_id && (
+                      {'container_id' in db && db.container_id && (
                         <span className="text-xs font-mono" style={{ color: 'var(--textMuted)' }}>{db.container_id}</span>
                       )}
                     </>
@@ -183,7 +198,7 @@ export function DatabasePage() {
                   </>
                 ) : (
                   <>
-                    {(db.source === 'local' || db.is_discovered) && !unlockedDatabases.has(db.id) && (
+                    {('is_discovered' in db || db.source === 'local') && !db.isRemote && !unlockedDatabases.has(db.id) && (
                       <button
                         onClick={() => handleOpenUnlock(db.id)}
                         className="p-2 rounded-lg transition-all"
@@ -216,7 +231,8 @@ export function DatabasePage() {
                     </button>
                     {db.source !== 'local' && (
                       <button
-                        onClick={() => handleOpenFolder(db.id)}
+                        //onClick={() => handleOpenFolder(db.id)}
+                        onClick={() => { /* TODO: handleOpenFolder not implemented */ }}
                         className="p-2 rounded-lg transition-all"
                         style={{ backgroundColor: 'var(--bgTertiary)' }}
                         title="Open data folder"

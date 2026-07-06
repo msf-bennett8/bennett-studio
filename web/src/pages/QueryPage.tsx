@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Play, Copy, Check, Download, Clock, Save, FileText, AlertCircle, Database, Globe } from 'lucide-react';
-import { api, DatabaseInstance } from '../services/api';
+import { Play, Copy, Check, Download, Clock, AlertCircle } from 'lucide-react';
+import { api } from '../services/api';
 import { useDatabaseStore } from '../stores/databaseStore';
 import { useRemoteConnectionStore } from '../stores/remoteConnectionStore';
 import { remoteApi } from '../services/remoteApi';
@@ -10,9 +10,25 @@ interface QueryResult {
 }
 
 export function QueryPage() {
-  const { databases, selectedDatabase, selectDatabase, getRemoteDatabases } = useDatabaseStore();
+  const { databases, selectedDatabase, selectDatabase } = useDatabaseStore();
   const { connections: remoteConnections } = useRemoteConnectionStore();
-  const runningDbs = [...databases.filter(d => d.status === 'running'), ...getRemoteDatabases()];
+  const runningDbs = [...databases.filter(d => d.status === 'running'), ...remoteConnections
+    .filter(c => c.status === 'connected')
+    .map(c => ({
+      id: c.id,
+      name: `${c.dbName || 'Remote Database'} ${c.code}`,
+      type: (c.dbType || 'postgres') as 'postgres' | 'mysql' | 'mariadb' | 'sqlite' | 'redis',
+      version: '',
+      status: 'running' as const,
+      port: 0,
+      size: '',
+      created_at: c.connectedAt,
+      source: 'bennett' as any,
+      isRemote: true,
+      shareCode: c.code,
+      remotePermission: c.permission,
+      remoteHost: c.baseUrl,
+    }))];
 
   // Sync with shared store — no local state for DB selection
   const selectedDb = selectedDatabase?.id || '';

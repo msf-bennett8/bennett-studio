@@ -1,5 +1,4 @@
 import { useState, useCallback } from 'react';
-import { shareApi } from '../services/shareApi';
 import { clientFromUrl } from '@bennett/sdk';
 import type { RemoteConnection } from '@bennett/shared';
 
@@ -28,11 +27,12 @@ export function useShareSession() {
         dbId: info.databaseName,
         dbName: info.databaseName,
         dbType: info.databaseType,
-        permission: 'ro', // Will be updated from validation
+        permission: 'ro',
         tables: info.tables.map(t => t.name),
         connectedAt: new Date().toISOString(),
         lastActivity: new Date().toISOString(),
         status: 'connected',
+        shareUrl: url,
       };
 
       setConnection(newConnection);

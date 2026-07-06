@@ -1,10 +1,9 @@
-import { useState, useMemo, useEffect } from 'react';
-import { Table2, Columns, Key, Link2, Search, Database, Hash, Filter, ArrowRight, AlertCircle, Globe } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Table2, Columns, Key, Link2, AlertCircle } from 'lucide-react';
 import { api } from '../services/api';
 import { useDatabaseStore } from '../stores/databaseStore';
 import { useRemoteConnectionStore } from '../stores/remoteConnectionStore';
 import { remoteApi } from '../services/remoteApi';
-import type { ColumnSchema } from '../services/dataService';
 
 interface ColumnInfo {
   name: string; type: string; nullable: boolean; default?: string;
@@ -16,11 +15,26 @@ interface TableInfo {
 }
 
 export function SchemaPage() {
-  const { databases, selectedDatabase, selectDatabase, getRemoteDatabases } = useDatabaseStore();
+  const { databases, selectedDatabase, selectDatabase } = useDatabaseStore();
   const { connections: remoteConnections } = useRemoteConnectionStore();
-  const runningDbs = [...databases.filter(d => d.status === 'running'), ...getRemoteDatabases()];
+  const runningDbs = [...databases.filter(d => d.status === 'running'), ...remoteConnections
+    .filter(c => c.status === 'connected')
+    .map(c => ({
+      id: c.id,
+      name: `${c.dbName || 'Remote Database'} ${c.code}`,
+      type: (c.dbType || 'postgres') as 'postgres' | 'mysql' | 'mariadb' | 'sqlite' | 'redis',
+      version: '',
+      status: 'running' as const,
+      port: 0,
+      size: '',
+      created_at: c.connectedAt,
+      source: 'bennett' as any,
+      isRemote: true,
+      shareCode: c.code,
+      remotePermission: c.permission,
+      remoteHost: c.baseUrl,
+    }))];
 
-  // Sync with shared store — no local state for DB selection
   const selectedDb = selectedDatabase?.id || '';
   const setSelectedDb = (id: string) => {
     const db = runningDbs.find(d => d.id === id);
@@ -44,7 +58,6 @@ export function SchemaPage() {
 
     const remoteDb = runningDbs.find(d => d.id === selectedDb && d.isRemote);
     if (remoteDb) {
-      // Remote schema fetch
       const conn = remoteConnections.find(c => c.id === selectedDb);
       if (!conn) {
         setError('Remote connection not found');
@@ -57,38 +70,19 @@ export function SchemaPage() {
             name: t.name,
             engine: conn.dbType || 'postgres',
             version: 'remote',
-            row_count: t.estimatedRowCount || 0,
-            size: t.tableSize || '-',
+            rowCount: 0,
+            size: '-',
             columns: t.columns.map(c => ({
               name: c.name,
-              type: c.dataType || c.type || 'UNKNOWN',
-              nullable: c.nullable,
-              is_primary: c.isPrimaryKey,
-              is_foreign: c.isForeignKey,
-              default: c.defaultValue,
-              constraints: c.nullable ? [] : ['NOT NULL'],
-              description: c.comment || '',
+              type: (c as any).dataType || (c as any).data_type || 'UNKNOWN',
+              nullable: (c as any).nullable ?? true,
+              isPrimary: (c as any).isPrimaryKey ?? false,
+              isForeign: (c as any).isForeignKey ?? false,
+              default: (c as any).defaultValue || (c as any).column_default || undefined,
             })),
-            indexes: t.indexes.map(i => ({
-              name: i.name,
-              columns: i.columns,
-              type: i.indexType,
-              unique: i.isUnique,
-            })),
-            constraints: t.constraints.map(c => ({
-              name: c.name,
-              type: c.constraintType,
-              columns: c.columns,
-              definition: c.definition,
-            })),
-            triggers: [],
           }));
           setTables(mapped);
-          if (mapped.length > 0) {
-            setSelectedTable(mapped[0].name);
-            setSelectedTableData(mapped[0]);
-          }
-          setMetadata({ database_name: conn.dbName || conn.code, engine: conn.dbType || 'remote', version: 'remote', total_tables: mapped.length });
+          if (mapped.length > 0) setSelectedTable(mapped[0].name);
           setLoading(false);
         })
         .catch(err => {
@@ -235,4 +229,3 @@ export function SchemaPage() {
     </div>
   );
 }
-

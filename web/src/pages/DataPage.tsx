@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import {
-  Search, Filter, ArrowUpDown, Plus, Pencil, Trash2, X, ChevronLeft, ChevronRight,
-  Database, Table2, RefreshCw, Save, AlertCircle, Globe
+  Search, ArrowUpDown, Plus, Pencil, Trash2, X, ChevronLeft, ChevronRight,
+  Database, Table2, RefreshCw, Save, AlertCircle
 } from 'lucide-react';
 import { useDatabaseStore } from '../stores/databaseStore';
 import { useRemoteConnectionStore } from '../stores/remoteConnectionStore';
@@ -32,7 +32,6 @@ export function DataPage() {
     error,
     clearError,
     setError,
-    getRemoteDatabases,
   } = useDatabaseStore();
 
   const { connections: remoteConnections } = useRemoteConnectionStore();
@@ -134,7 +133,7 @@ export function DataPage() {
             name: t.name,
             columns: t.columns.map(c => ({
               name: c.name,
-              data_type: c.dataType,
+              data_type: (c as any).dataType || c.data_type,
               nullable: c.nullable,
             })),
           }));

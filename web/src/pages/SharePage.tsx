@@ -272,8 +272,8 @@ export function SharePage() {
                       <span className="text-xs px-2 py-1 rounded-full" style={{ backgroundColor: 'var(--bgTertiary)', color: 'var(--textSecondary)' }}>
                         {share.db_type || 'Unknown'}
                       </span>
-                      {/* Show P2P badge if ICE is embedded in the share */}
-                      {share.ice && (
+                      {/* P2P badge */}
+                      {(share as any).ice && (
                         <span className="text-xs px-2 py-1 rounded-full" style={{ backgroundColor: 'rgba(0,212,170,0.15)', color: 'var(--accentSuccess)' }}>
                           P2P Ready
                         </span>

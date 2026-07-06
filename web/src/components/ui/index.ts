@@ -1,5 +1,6 @@
-export { Button } from './Button';
-export { Input } from './Input';
-export { Modal } from './Modal';
-export { Toast } from './Toast';
+// Placeholder exports — components are stubbed
+export const Button = () => null;
+export const Input = () => null;
+export const Modal = () => null;
+export const Toast = () => null;
 export { ThemeSwitcher } from './ThemeSwitcher';

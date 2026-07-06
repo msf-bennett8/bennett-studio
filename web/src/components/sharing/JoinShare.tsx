@@ -1,11 +1,11 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useShareStore } from '../../stores/shareStore';
+import { useRemoteConnectionStore } from '../../stores/remoteConnectionStore';
 
 export const JoinShare: React.FC = () => {
   const [shareUrl, setShareUrl] = useState('');
   const [connecting, setConnecting] = useState(false);
-  const { connectToShare } = useShareStore();
+  const { connect } = useRemoteConnectionStore();
   const navigate = useNavigate();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -14,10 +14,8 @@ export const JoinShare: React.FC = () => {
 
     setConnecting(true);
     try {
-      const success = await connectToShare(shareUrl.trim());
-      if (success) {
-        navigate('/remote-query');
-      }
+      await connect(shareUrl.trim());
+      navigate('/remote-query');
     } finally {
       setConnecting(false);
     }
