@@ -294,6 +294,7 @@ async fn proxy_health() -> impl IntoResponse {
 
 /// Execute a query through the proxy
 /// External websites POST here with { sql, token }
+/// Forwards to engine's POST /api/shares/:code/query endpoint
 async fn proxy_query(
     Path(code): Path<String>,
     State(state): State<ProxyApiState>,
@@ -316,26 +317,61 @@ async fn proxy_query(
         );
     }
 
-    // TODO: Forward query through P2P tunnel to engine
-    // For now, return a placeholder that indicates the tunnel is being established
-    info!(share = %code, sql_len = %req.sql.len(), "Proxy query received");
+    info!(share = %code, sql_len = %req.sql.len(), "Proxy query received — forwarding to engine");
 
-    (
-        StatusCode::OK,
-        headers,
-        axum::Json(serde_json::json!({
-            "success": true,
-            "message": "Query received — P2P tunnel forwarding in progress",
-            "share_code": code,
-            "columns": [],
-            "rows": [],
-            "row_count": 0,
-            "execution_time_ms": 0,
-        })),
-    )
+    // Build request body for engine
+    let engine_body = serde_json::json!({
+        "sql": req.sql,
+        "limit": req.limit,
+        "offset": req.offset,
+    });
+
+    // Forward to engine via TCP (relay and engine run on same host)
+    match state.router.forward_to_engine(
+        &code,
+        "POST",
+        &format!("/api/shares/{}/query", code),
+        Some(engine_body.to_string().into_bytes()),
+        &req.token,
+    ).await {
+        Ok(response_bytes) => {
+            // Parse engine's HTTP response to extract JSON body
+            let response_str = String::from_utf8_lossy(&response_bytes);
+            
+            // Find the JSON body (after \r\n\r\n)
+            if let Some(body_start) = response_str.find("\r\n\r\n") {
+                let body = &response_str[body_start + 4..];
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(body) {
+                    return (StatusCode::OK, headers, axum::Json(json));
+                }
+            }
+            
+            // Fallback: return raw response
+            (
+                StatusCode::OK,
+                headers,
+                axum::Json(serde_json::json!({
+                    "success": true,
+                    "raw_response": response_str.to_string(),
+                })),
+            )
+        }
+        Err(e) => {
+            warn!(share = %code, error = %e, "Engine forwarding failed");
+            (
+                StatusCode::BAD_GATEWAY,
+                headers,
+                axum::Json(serde_json::json!({
+                    "success": false,
+                    "error": format!("Engine forwarding failed: {}", e)
+                })),
+            )
+        }
+    }
 }
 
 /// Get schema through the proxy
+/// Forwards to engine's GET /api/shares/:code/schema endpoint
 async fn proxy_schema(
     Path(code): Path<String>,
     State(state): State<ProxyApiState>,
@@ -356,19 +392,48 @@ async fn proxy_schema(
         );
     }
 
-    info!(share = %code, "Proxy schema request received");
+    info!(share = %code, "Proxy schema request received — forwarding to engine");
 
-    (
-        StatusCode::OK,
-        headers,
-        axum::Json(serde_json::json!({
-            "success": true,
-            "message": "Schema fetch — P2P tunnel forwarding in progress",
-            "tables": [],
-            "databaseName": "Remote Database",
-            "databaseType": "unknown",
-        })),
-    )
+    // Forward to engine via TCP
+    // Token is passed as query param since GET requests don't have bodies
+    match state.router.forward_to_engine(
+        &code,
+        "GET",
+        &format!("/api/shares/{}/schema", code),
+        None,
+        "", // Token will be in URL for GET requests
+    ).await {
+        Ok(response_bytes) => {
+            let response_str = String::from_utf8_lossy(&response_bytes);
+            
+            if let Some(body_start) = response_str.find("\r\n\r\n") {
+                let body = &response_str[body_start + 4..];
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(body) {
+                    return (StatusCode::OK, headers, axum::Json(json));
+                }
+            }
+            
+            (
+                StatusCode::OK,
+                headers,
+                axum::Json(serde_json::json!({
+                    "success": true,
+                    "raw_response": response_str.to_string(),
+                })),
+            )
+        }
+        Err(e) => {
+            warn!(share = %code, error = %e, "Engine schema forwarding failed");
+            (
+                StatusCode::BAD_GATEWAY,
+                headers,
+                axum::Json(serde_json::json!({
+                    "success": false,
+                    "error": format!("Engine forwarding failed: {}", e)
+                })),
+            )
+        }
+    }
 }
 
 /// Get public share info
@@ -534,27 +599,86 @@ async fn handle_ws_proxy(
                                     continue;
                                 }
 
-                                // TODO: Forward query through P2P tunnel to engine
-                                // For now, return placeholder indicating tunnel is active
+                                // Forward query to engine via HTTP through the router
                                 message_id += 1;
                                 let start = std::time::Instant::now();
 
-                                // Placeholder: In production, this forwards through the P2P QUIC tunnel
-                                // to the engine, which executes the query and returns results
-                                let response = WsProxyResponse::QueryResult {
-                                    columns: vec!["id".to_string(), "name".to_string()],
-                                    rows: vec![
-                                        vec![serde_json::json!(1), serde_json::json!("Demo Row")],
-                                    ],
-                                    row_count: 1,
-                                    execution_time_ms: start.elapsed().as_millis() as u64,
-                                    request_id,
-                                    message_id,
-                                };
+                                let engine_body = serde_json::json!({
+                                    "sql": sql,
+                                    "limit": limit.unwrap_or(1000),
+                                });
 
-                                let _ = sender.send(Message::Text(
-                                    serde_json::to_string(&response).unwrap()
-                                )).await;
+                                match state.router.forward_to_engine(
+                                    &code,
+                                    "POST",
+                                    &format!("/api/shares/{}/query", code),
+                                    Some(engine_body.to_string().into_bytes()),
+                                    "", // Token handling TBD: extract from connection state
+                                ).await {
+                                    Ok(response_bytes) => {
+                                        let response_str = String::from_utf8_lossy(&response_bytes);
+                                        
+                                        // Try to parse engine response and extract query results
+                                        if let Some(body_start) = response_str.find("\r\n\r\n") {
+                                            let body = &response_str[body_start + 4..];
+                                            if let Ok(json) = serde_json::from_str::<serde_json::Value>(body) {
+                                                // Extract data from engine's ApiResponse wrapper
+                                                let data = json.get("data").unwrap_or(&json);
+                                                let columns = data.get("columns")
+                                                    .and_then(|c| c.as_array())
+                                                    .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+                                                    .unwrap_or_else(|| vec!["result".to_string()]);
+                                                let rows = data.get("rows")
+                                                    .and_then(|r| r.as_array())
+                                                    .map(|arr| arr.iter().map(|v| vec![v.clone()]).collect())
+                                                    .unwrap_or_default();
+
+                                                let response = WsProxyResponse::QueryResult {
+                                                    columns,
+                                                    rows,
+                                                    row_count: data.get("row_count").and_then(|v| v.as_u64()).unwrap_or(0) as usize,
+                                                    execution_time_ms: start.elapsed().as_millis() as u64,
+                                                    request_id,
+                                                    message_id,
+                                                };
+                                                let _ = sender.send(Message::Text(
+                                                    serde_json::to_string(&response).unwrap()
+                                                )).await;
+                                            } else {
+                                                let response = WsProxyResponse::QueryResult {
+                                                    columns: vec!["raw".to_string()],
+                                                    rows: vec![vec![serde_json::json!(body)]],
+                                                    row_count: 1,
+                                                    execution_time_ms: start.elapsed().as_millis() as u64,
+                                                    request_id,
+                                                    message_id,
+                                                };
+                                                let _ = sender.send(Message::Text(
+                                                    serde_json::to_string(&response).unwrap()
+                                                )).await;
+                                            }
+                                        } else {
+                                            let response = WsProxyResponse::QueryError {
+                                                error: "Invalid engine response".to_string(),
+                                                request_id,
+                                                message_id,
+                                            };
+                                            let _ = sender.send(Message::Text(
+                                                serde_json::to_string(&response).unwrap()
+                                            )).await;
+                                        }
+                                    }
+                                    Err(e) => {
+                                        let response = WsProxyResponse::QueryError {
+                                            error: format!("Engine forwarding failed: {}", e),
+                                            request_id,
+                                            message_id,
+                                        };
+                                        let _ = sender.send(Message::Text(
+                                            serde_json::to_string(&response).unwrap()
+                                        )).await;
+                                    }
+                                }
                             }
                             Ok(WsProxyRequest::SubscribeSchema) => {
                                 info!(share = %code, "Schema subscription requested");

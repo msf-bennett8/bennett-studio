@@ -155,6 +155,65 @@ impl ShareRouter {
             }
         })
     }
+
+    /// Forward an HTTP request to the engine via TCP
+    /// Returns the raw HTTP response body as bytes
+    pub async fn forward_to_engine(
+        &self,
+        share_id: &str,
+        method: &str,
+        path: &str,
+        body: Option<Vec<u8>>,
+        token: &str,
+    ) -> anyhow::Result<Vec<u8>> {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        // Get the engine endpoint for this share
+        let route = self.lookup(share_id)
+            .or_else(|| self.lookup(&format!("{}:http", share_id)))
+            .ok_or_else(|| anyhow::anyhow!("Share {} not found in route cache", share_id))?;
+
+        // Connect to engine HTTP port via TCP (relay and engine run on same host)
+        let engine_addr = format!("127.0.0.1:{}", route.engine_port);
+        let mut stream = tokio::net::TcpStream::connect(&engine_addr).await
+            .map_err(|e| anyhow::anyhow!("Failed to connect to engine at {}: {}", engine_addr, e))?;
+
+        // Build HTTP request
+        let body_len = body.as_ref().map(|b| b.len()).unwrap_or(0);
+        let request = format!(
+            "{} {} HTTP/1.1\r\n\
+             Host: localhost:{}\r\n\
+             Content-Type: application/json\r\n\
+             Content-Length: {}\r\n\
+             X-Share-Token: {}\r\n\
+             Connection: close\r\n\
+             \r\n",
+            method,
+            path,
+            route.engine_port,
+            body_len,
+            token
+        );
+
+        stream.write_all(request.as_bytes()).await?;
+        if let Some(body) = body {
+            stream.write_all(&body).await?;
+        }
+        stream.flush().await?;
+
+        // Read response
+        let mut response = Vec::new();
+        let mut buf = [0u8; 8192];
+        loop {
+            match stream.read(&mut buf).await {
+                Ok(0) => break,
+                Ok(n) => response.extend_from_slice(&buf[..n]),
+                Err(e) => return Err(anyhow::anyhow!("Read error: {}", e)),
+            }
+        }
+
+        Ok(response)
+    }
 }
 
 impl Clone for ShareRouter {
