@@ -1,62 +1,63 @@
-//! Unified Token Vault — Auto-detects platform and uses appropriate backend
+//! Unified Token Vault — Platform-aware with lazy loading
 //! Desktop: Tauri OS keychain via invoke
 //! Web: Encrypted IndexedDB via Web Crypto
+//!
+//! NOTE: This SDK module provides the vault INTERFACE only.
+//! The actual implementation is injected by the consuming app (desktop or web).
+//! Use setVaultImpl() to provide the platform-specific backend.
 
 import type { StoredToken, TokenVault, VaultStatus } from '@bennett/shared';
 
-// Platform detection
-const isTauri = () => {
-  return typeof window !== 'undefined' && 
-    (window as any).__TAURI__ !== undefined;
-};
+let vaultImpl: TokenVault | null = null;
 
-// Lazy-loaded vault implementation
-let vaultInstance: TokenVault | null = null;
-
-async function getVault(): Promise<TokenVault> {
-  if (vaultInstance) return vaultInstance;
-  
-  if (isTauri()) {
-    // Desktop — use Tauri secure storage
-    const { vaultService } = await import('../../../../desktop/src/services/vaultService');
-    vaultInstance = vaultService;
-  } else {
-    // Web — use encrypted IndexedDB
-    const { tokenVault } = await import('../../../../web/src/services/tokenVault');
-    vaultInstance = tokenVault;
-  }
-  
-  return vaultInstance;
+/**
+ * Inject the platform-specific vault implementation.
+ * Call this once at app startup:
+ *   - Desktop: setVaultImpl(vaultService)
+ *   - Web: setVaultImpl(tokenVault)
+ */
+export function setVaultImpl(impl: TokenVault): void {
+  vaultImpl = impl;
 }
 
-// Unified vault API
+function getVault(): TokenVault {
+  if (!vaultImpl) {
+    throw new Error(
+      'Vault not initialized. Call setVaultImpl() with a platform-specific vault ' +
+      '(desktop: vaultService, web: tokenVault) before using the SDK.'
+    );
+  }
+  return vaultImpl;
+}
+
+// Unified vault API — delegates to injected implementation
 export const vault: TokenVault = {
   async getToken(code: string): Promise<string | null> {
-    return (await getVault()).getToken(code);
+    return getVault().getToken(code);
   },
-  
+
   async setToken(token: StoredToken): Promise<void> {
-    return (await getVault()).setToken(token);
+    return getVault().setToken(token);
   },
-  
+
   async removeToken(code: string): Promise<void> {
-    return (await getVault()).removeToken(code);
+    return getVault().removeToken(code);
   },
-  
+
   async listTokens(): Promise<StoredToken[]> {
-    return (await getVault()).listTokens();
+    return getVault().listTokens();
   },
-  
+
   async clear(): Promise<void> {
-    return (await getVault()).clear();
+    return getVault().clear();
   },
 };
 
 export async function getVaultStatus(): Promise<VaultStatus> {
-  const v = await getVault();
+  const v = getVault();
   return v.status?.() ?? {
     available: true,
-    type: isTauri() ? 'tauri_secure' : 'indexeddb_encrypted',
+    type: 'memory',
     initialized: true,
   };
 }

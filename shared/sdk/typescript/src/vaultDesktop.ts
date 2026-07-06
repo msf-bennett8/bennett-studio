@@ -1,5 +1,5 @@
-//! Desktop vault stub — re-exported from desktop app
-//! This is a placeholder; the actual implementation is in desktop/src/services/vaultService.ts
-//! The SDK uses dynamic import to avoid bundling Tauri APIs in web builds
+//! Desktop vault helper
+//! Usage: import { setVaultImpl } from '@bennett/sdk'; setVaultImpl(vaultService);
 
-export { vaultService as vaultDesktop } from '../../../desktop/src/services/vaultService';
+import { setVaultImpl } from './vault';
+export { setVaultImpl };

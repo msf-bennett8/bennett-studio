@@ -275,7 +275,8 @@ export const vaultService: TokenVault = {
 
   async status(): Promise<VaultStatus> {
     try {
-      return await getVault().status();
+      const v = getVault();
+      return v.status ? await v.status() : { available: true, type: isTauri() ? 'tauri_secure' : 'indexeddb_encrypted', initialized: true };
     } catch {
       return { available: false, type: isTauri() ? 'tauri_secure' : 'indexeddb_encrypted', initialized: false };
     }
@@ -283,5 +284,5 @@ export const vaultService: TokenVault = {
 };
 
 export async function getVaultStatus(): Promise<VaultStatus> {
-  return vaultService.status();
+  return vaultService.status ? await vaultService.status() : { available: true, type: isTauri() ? 'tauri_secure' : 'indexeddb_encrypted', initialized: true };
 }

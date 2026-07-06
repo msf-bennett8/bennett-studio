@@ -313,7 +313,7 @@ export class BennettShareClient {
 /**
  * Decode JWT payload without verification (for extracting connection info)
  */
-function decodeJwtPayload(token) {
+export function decodeJwtPayload(token) {
     try {
         const parts = token.split('.');
         if (parts.length !== 3)

@@ -143,6 +143,11 @@ export interface StoredToken {
 }
 
 export const tokenVault = {
+  // Alias for TokenVault interface compatibility
+  async setToken(entry: StoredToken): Promise<void> {
+    return this.storeToken(entry);
+  },
+
   async storeToken(entry: StoredToken): Promise<void> {
     const db = await openDB();
     const key = await getMasterKey();

@@ -7,6 +7,7 @@ export {
   BennettShareClient,
   clientFromUrl,
   createClient,
+  extractConnectionInfo,
 } from './client';
 
 export {
@@ -37,17 +38,6 @@ export type {
   ExportResult,
   ConnectionMode,
   ConnectionInfo,
-} from './client';
-
-// WebSocket streaming
-export {
-  // createStream and queryStream are instance methods on BennettShareClient
-} from './client';
-
-export {
-  clientFromUrl,
-  extractConnectionInfo,
-  decodeJwtPayload,
 } from './client';
 
 export type {
