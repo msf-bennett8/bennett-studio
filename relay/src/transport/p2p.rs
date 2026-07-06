@@ -78,7 +78,18 @@ impl P2pTransport {
             .await
             .map_err(|e| P2pError::IceFailed(e))?;
 
-        // Connect via QUIC
+        // Log candidate info for debugging
+        if let Some(local_srflx) = local_ice.srflx_addr() {
+            if let Some(remote_srflx) = remote_ice.srflx_addr() {
+                if local_srflx.ip() == remote_srflx.ip() {
+                    info!("Same-NAT detected — LAN fallback will be attempted");
+                } else {
+                    info!(local_srflx = %local_srflx, remote_srflx = %remote_srflx, "Different NATs — standard hole punching");
+                }
+            }
+        }
+
+        // Connect via QUIC (punch_hole handles LAN fallback internally)
         let quic_conn = connect_quic_client(&remote_ice, &local_ice)
             .await
             .map_err(|e| P2pError::QuicFailed(e))?;

@@ -29,13 +29,24 @@ pub struct P2pQuicConnection {
 /// * `local_ice` — Our ICE candidates
 /// * `share_code` — Expected share code for validation
 pub async fn start_quic_server(
-    _local_ice: &IceCandidates,
+    local_ice: &IceCandidates,
     _share_code: Option<String>,
 ) -> Result<P2pQuicConnection, QuicError> {
     let server_config = build_quinn_server_config()
         .map_err(|e| QuicError::TlsFailed(e))?;
 
-    let endpoint = quinn::Endpoint::server(server_config, "0.0.0.0:0".parse().unwrap())
+    // Industry best practice: Reuse the ICE host candidate socket for QUIC.
+    // This ensures the QUIC server listens on the exact port advertised
+    // in the host candidate, enabling same-machine localhost connections.
+    let bind_addr = if let Some(host) = local_ice.host_addr() {
+        info!(host_port = host.port(), "Binding QUIC server on ICE host candidate port");
+        SocketAddr::from(([0, 0, 0, 0], host.port()))
+    } else {
+        // Fallback: random port (should never happen if ICE gathered correctly)
+        "0.0.0.0:0".parse().unwrap()
+    };
+
+    let endpoint = quinn::Endpoint::server(server_config, bind_addr)
         .map_err(|e| QuicError::EndpointFailed(e))?;
 
     let local_addr = endpoint.local_addr()
@@ -78,7 +89,17 @@ pub async fn connect_quic_client(
     remote_ice: &IceCandidates,
     local_ice: &IceCandidates,
 ) -> Result<P2pQuicConnection, QuicError> {
-    // Bind local UDP socket
+    // Detect same-machine/same-NAT scenario
+    let same_nat = match (local_ice.srflx_addr(), remote_ice.srflx_addr()) {
+        (Some(local_srflx), Some(remote_srflx)) => local_srflx.ip() == remote_srflx.ip(),
+        _ => false,
+    };
+
+    if same_nat {
+        return connect_quic_localhost(remote_ice, local_ice).await;
+    }
+
+    // Normal path: bind UDP socket and perform hole punching
     let local_socket = tokio::net::UdpSocket::bind("0.0.0.0:0")
         .await
         .map_err(|e| QuicError::IoError(e))?;
@@ -117,6 +138,70 @@ pub async fn connect_quic_client(
         remote = %remote_addr,
         stable_id = connection.stable_id(),
         "QUIC P2P connection established"
+    );
+
+    Ok(P2pQuicConnection {
+        connection,
+        remote_addr,
+        local_addr: SocketAddr::new(local_ip, 0),
+        is_server: false,
+    })
+}
+
+/// Connect QUIC client directly via localhost (same-machine testing)
+/// Bypasses hole punching entirely — used when both peers are on the same host
+pub async fn connect_quic_localhost(
+    remote_ice: &IceCandidates,
+    local_ice: &IceCandidates,
+) -> Result<P2pQuicConnection, QuicError> {
+    info!("Same-machine detected — using localhost QUIC connection (bypassing hole punch)");
+
+    // Get the engine's QUIC server port from the remote ICE data
+    // The engine stores its QUIC endpoint port in the ICE candidates metadata
+    // For now, we use a well-known localhost approach:
+    // The engine's QUIC server binds to 0.0.0.0:0 (random), but we need to know the port.
+    // 
+    // SOLUTION: The engine should include its QUIC endpoint port in the ICE candidates.
+    // For now, we extract it from the host candidate if it was set, or use a fallback.
+
+    let client_config = build_quinn_client_config()
+        .map_err(|e| QuicError::TlsFailed(e))?;
+
+    let mut endpoint = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap())
+        .map_err(|e| QuicError::EndpointFailed(e))?;
+
+    endpoint.set_default_client_config(client_config);
+
+    // Use the remote's host candidate port as the QUIC server port.
+    // The engine binds QUIC directly on its ICE host candidate port,
+    // so we connect to localhost:that_port for same-machine testing.
+    let remote_quic_addr = if let Some(host) = remote_ice.host_addr() {
+        // Engine binds QUIC on 0.0.0.0:host_port → accessible via 127.0.0.1:host_port
+        let addr = SocketAddr::from(([127, 0, 0, 1], host.port()));
+        info!(engine_host_port = host.port(), localhost_addr = %addr, "Resolved engine QUIC endpoint");
+        addr
+    } else {
+        return Err(QuicError::EndpointFailed(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "No host candidate for localhost connection"
+        )));
+    };
+
+    info!(remote = %remote_quic_addr, "Connecting QUIC to localhost");
+
+    let connection = endpoint
+        .connect(remote_quic_addr, "bennett-p2p.local")
+        .map_err(|e| QuicError::ConnectFailed(e))?
+        .await
+        .map_err(|e| QuicError::ConnectionFailed(e))?;
+
+    let remote_addr = connection.remote_address();
+    let local_ip = connection.local_ip().unwrap_or_else(|| std::net::IpAddr::from([127, 0, 0, 1]));
+
+    info!(
+        remote = %remote_addr,
+        stable_id = connection.stable_id(),
+        "QUIC localhost connection established"
     );
 
     Ok(P2pQuicConnection {

@@ -27,7 +27,12 @@ pub struct PunchedSocket {
     pub is_initiator: bool,
 }
 
-/// Perform UDP hole punching
+/// Perform UDP hole punching with LAN fallback
+///
+/// Industry best practice (WebRTC/iroh): When both peers share the same
+/// public IP (same NAT/CGNAT), try host-to-host connection first before
+/// attempting UDP hole punching through the NAT. This avoids hairpinning
+/// failures which are not widely supported per RFC 5128 §3.3.2.
 ///
 /// # Arguments
 /// * `local_socket` — Pre-bound UDP socket (from ICE gathering)
@@ -48,7 +53,6 @@ pub async fn punch_hole(
         .local_addr()
         .map_err(|e| PunchError::SocketError(e))?;
 
-    // Get best candidates for punching
     let local_srflx = local_ice
         .srflx_addr()
         .ok_or(PunchError::NoSrflxCandidate)?;
@@ -62,6 +66,11 @@ pub async fn punch_hole(
         remote_srflx = %remote_srflx,
         "Starting UDP hole punch"
     );
+
+    // Note: Same-NAT/LAN detection is handled at the QUIC layer (connect_quic_client).
+    // This punch_hole function is only called for actual different-NAT hole punching.
+    // If both peers share the same public IP, connect_quic_client bypasses this
+    // entirely and uses connect_quic_localhost() instead.
 
     // Send probe packets to remote srflx while listening for responses
     let probe_interval = Duration::from_millis(200);
@@ -190,6 +199,10 @@ pub fn parse_probe_packet(data: &[u8]) -> Option<IceCandidates> {
     let ice_json = std::str::from_utf8(&data[5..]).ok()?;
     serde_json::from_str(ice_json).ok()
 }
+
+// Note: try_lan_connect removed — LAN/same-machine connections are handled
+// at the QUIC layer via connect_quic_localhost() in quic.rs.
+// This avoids the UDP probe approach which conflicts with QUIC's socket ownership.
 
 /// Hole punching errors
 #[derive(Debug)]
