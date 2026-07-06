@@ -1,4 +1,4 @@
-import { AlertTriangle, Trash2, X, ShieldAlert } from 'lucide-react';
+import { AlertTriangle, Trash2, ShieldAlert } from 'lucide-react';
 
 interface ConfirmModalProps {
   open: boolean;

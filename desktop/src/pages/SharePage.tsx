@@ -273,7 +273,8 @@ export function SharePage() {
                         {share.db_type || 'Unknown'}
                       </span>
                       {/* Show P2P badge if ICE is embedded in the share */}
-                      {share.ice && (
+                      {/* @ts-ignore — ice may be present on shares created with P2P */}
+                      {(share as any).ice && (
                         <span className="text-xs px-2 py-1 rounded-full" style={{ backgroundColor: 'rgba(0,212,170,0.15)', color: 'var(--accentSuccess)' }}>
                           P2P Ready
                         </span>

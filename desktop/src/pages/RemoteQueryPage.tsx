@@ -1,13 +1,13 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Play, Copy, Check, Download, Clock, Save, AlertCircle, Database,
-  Globe, Lock, Unlock, RefreshCw, ChevronLeft, X, Loader2,
+  Play, Copy, Check, Download, Clock, AlertCircle, Database,
+  Globe, Lock, Unlock, RefreshCw, X, Loader2,
   Table2, Columns, TreePine, History, FileText, Share2
 } from 'lucide-react';
 import { useRemoteConnectionStore } from '../stores/remoteConnectionStore';
 import { useDatabaseStore } from '../stores/databaseStore';
-import type { AutocompleteSuggestion, TableSchema } from '@bennett/shared';
+import type { AutocompleteSuggestion } from '@bennett/shared';
 
 export function RemoteQueryPage() {
   const navigate = useNavigate();
@@ -26,7 +26,6 @@ export function RemoteQueryPage() {
     executeWrite,
     refreshSchema,
     setActiveConnection,
-    disconnect,
     getAutocomplete,
     getQueryHistory,
     exportResults,
@@ -186,10 +185,6 @@ export function RemoteQueryPage() {
     }
   };
 
-  const getTableColumns = (tableName: string): TableSchema | undefined => {
-    return schema?.find(t => t.name === tableName);
-  };
-
   const queryHistory = activeConnection ? getQueryHistory() : [];
 
   if (!activeConnection) {
@@ -263,8 +258,8 @@ export function RemoteQueryPage() {
                       >
                         <Columns size={10} />
                         <span>{col.name}</span>
-                        <span className="text-xs" style={{ color: 'var(--textMuted)', opacity: 0.7 }}>{col.dataType}</span>
-                        {col.isPrimaryKey && (
+                        <span className="text-xs" style={{ color: 'var(--textMuted)', opacity: 0.7 }}>{col.data_type}</span>
+                        {(col as any).isPrimaryKey && (
                           <span className="text-xs px-1 py-0.5 rounded" style={{ backgroundColor: 'var(--accentPrimary)', color: 'var(--textInverse)' }}>PK</span>
                         )}
                       </button>

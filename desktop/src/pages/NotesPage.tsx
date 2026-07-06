@@ -1,14 +1,14 @@
 import { useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { StickyNote, Plus, ArrowLeft } from 'lucide-react';
-import { useNotesStore } from '../stores/notesStore';
+import { useNotesStore, type Note } from '../stores/notesStore';
 import { NoteEditor } from '../components/notes/NoteEditor';
 import { NoteList } from '../components/notes/NoteList';
 import { NoteToolbar } from '../components/notes/NoteToolbar';
 
 export function NotesPage() {
   const navigate = useNavigate();
-  const { notes, selectedNoteId, isEditorOpen, setEditorOpen, selectNote, addNote } = useNotesStore();
+  const { notes, selectedNoteId, isEditorOpen, setEditorOpen, addNote } = useNotesStore();
 
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
     if (e.ctrlKey || e.metaKey) {
@@ -60,8 +60,8 @@ export function NotesPage() {
                 Notes
               </h1>
               <p className="text-xs" style={{ color: 'var(--textMuted)' }}>
-                {notes.filter(n => !n.archived).length} notes • {notes.reduce((s, n) => s + n.wordCount, 0)} words
-              </p>
+
+              </p>                {notes.filter((n: Note) => !n.archived).length} notes • {notes.reduce((s: number, n: Note) => s + n.wordCount, 0)} words
             </div>
           </div>
         </div>

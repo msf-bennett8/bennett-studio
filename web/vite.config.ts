@@ -33,7 +33,14 @@ export default defineConfig({
     host: true,
     proxy: {
       '/api': {
-        target: `http://localhost:${fs.readFileSync('/tmp/bennett-engine.port', 'utf8').trim() || 3001}`,
+        target: (() => {
+          try {
+            const port = fs.readFileSync('/tmp/bennett-engine.port', 'utf8').trim();
+            return `http://localhost:${port || 3001}`;
+          } catch {
+            return 'http://localhost:3001';
+          }
+        })(),
         changeOrigin: true,
       },
     },

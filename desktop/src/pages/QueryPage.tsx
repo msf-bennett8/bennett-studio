@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Play, Copy, Check, Download, Clock, Save, FileText, AlertCircle, Database, Globe } from 'lucide-react';
-import { api, DatabaseInstance } from '../services/api';
+import { Play, Copy, Check, Download, Clock, Save, FileText, AlertCircle } from 'lucide-react';
+import { api } from '../services/api';
 import { useDatabaseStore } from '../stores/databaseStore';
 import { useRemoteConnectionStore } from '../stores/remoteConnectionStore';
 import { remoteApi } from '../services/remoteApi';

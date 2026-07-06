@@ -111,7 +111,7 @@ async function encryptToken(token: string, key: CryptoKey): Promise<{ iv: string
   const encoder = new TextEncoder();
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, encoder.encode(token));
-  return { iv: arrayBufferToBase64(iv), ciphertext: arrayBufferToBase64(ciphertext) };
+  return { iv: arrayBufferToBase64(iv.buffer), ciphertext: arrayBufferToBase64(ciphertext) };
 }
 
 async function decryptToken(iv: string, ciphertext: string, key: CryptoKey): Promise<string> {

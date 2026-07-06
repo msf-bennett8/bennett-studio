@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState } from 'react';
 import { Pin, Archive, Clock, Hash, Search, StickyNote, X, Check, Trash2, Download } from 'lucide-react';
 import { useNotesStore } from '../../stores/notesStore';
 

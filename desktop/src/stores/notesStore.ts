@@ -56,6 +56,8 @@ interface NotesState {
   getAllTags: () => string[];
   getNoteStats: () => { total: number; pinned: number; archived: number; words: number };
   getSelectedCount: () => number;
+  syncToEngine: () => Promise<void>;
+  loadFromEngine: () => Promise<void>;
 }
 
 const COLORS = ['#00d4aa', '#6b8aff', '#ffaa00', '#ff4444', '#a855f7', '#f472b6', '#22d3ee'];
@@ -164,7 +166,7 @@ export const useNotesStore = create<NotesState>()(
             set((state) => {
               const localIds = new Set(state.notes.map(n => n.id));
               const merged = [
-                ...engineNotes.map(n => ({ ...n, createdAt: n.created_at, updatedAt: n.updated_at })),
+                ...engineNotes.map((n: any) => ({ ...n, createdAt: n.created_at || n.createdAt, updatedAt: n.updated_at || n.updatedAt })),
                 ...state.notes.filter(n => !localIds.has(n.id)),
               ];
               return { notes: merged };

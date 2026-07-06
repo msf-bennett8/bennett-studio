@@ -35,11 +35,11 @@ export function TitleBar() {
       style={{ 
         backgroundColor: 'var(--bgSecondary)', 
         borderBottom: '1px solid var(--borderDefault)',
-        WebkitAppRegion: 'drag' as any,
+        WebkitAppRegion: 'drag',
       }}
       data-tauri-drag-region
     >
-      <div className="flex items-center gap-2" style={{ WebkitAppRegion: 'no-drag' as any }}>
+      <div className="flex items-center gap-2" style={{ WebkitAppRegion: 'no-drag' }}>
         <Terminal size={16} style={{ color: 'var(--accentPrimary)' }} />
         <span className="text-sm font-medium" style={{ color: 'var(--textPrimary)' }}>
           Bennett Studio
@@ -49,7 +49,7 @@ export function TitleBar() {
         </span>
       </div>
 
-      <div className="flex items-center gap-2" style={{ WebkitAppRegion: 'no-drag' as any }}>
+      <div className="flex items-center gap-2" style={{ WebkitAppRegion: 'no-drag' }}>
         <button 
           onClick={handleMinimize}
           className="w-8 h-8 rounded-lg flex items-center justify-center transition-all hover:bg-white/10"
@@ -74,5 +74,11 @@ export function TitleBar() {
       </div>
     </div>
   );
+}
+
+declare module 'react' {
+  interface CSSProperties {
+    WebkitAppRegion?: 'drag' | 'no-drag';
+  }
 }
 

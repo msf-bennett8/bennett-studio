@@ -107,7 +107,7 @@ export const dataService = {
 
     const response = await fetch('/src/data/schemas/metadata.json');
     metadataCache = await response.json();
-    return metadataCache;
+    return metadataCache!;
   },
 
   getTableNames(): string[] {

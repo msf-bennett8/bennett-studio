@@ -7,7 +7,7 @@ import { GuestList } from './GuestList';
 
 export const SharePanel: React.FC = () => {
   const [selectedDb, setSelectedDb] = useState<string>('');
-  const { shares, fetchShares, createShare, revokeShare, loading } = useShareStore();
+  const { shares, createShare, revokeShare, loading } = useShareStore();
   const { databases } = useDatabaseStore();
 
   const handleCreateShare = async (settings: {
@@ -38,7 +38,7 @@ export const SharePanel: React.FC = () => {
           <option value="">Choose a database...</option>
           {databases.map((db) => (
             <option key={db.id} value={db.id}>
-              {db.name} ({db.db_type})
+              {db.name} ({db.type})
             </option>
           ))}
         </select>

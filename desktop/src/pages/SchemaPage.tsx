@@ -1,10 +1,56 @@
 import { useState, useMemo, useEffect } from 'react';
-import { Table2, Columns, Key, Link2, Search, Database, Hash, Filter, ArrowRight, AlertCircle, Globe } from 'lucide-react';
+import { Table2, Columns, Key, Link2, Search, Database, Hash, Filter, ArrowRight, AlertCircle } from 'lucide-react';
 import { api } from '../services/api';
 import { useDatabaseStore } from '../stores/databaseStore';
 import { useRemoteConnectionStore } from '../stores/remoteConnectionStore';
 import { remoteApi } from '../services/remoteApi';
-import type { ColumnSchema } from '../services/dataService';
+import type { DatabaseMetadata } from '../services/dataService';
+
+// Unified view type for SchemaPage — works with both local API and remote sharing data
+interface SchemaPageTable {
+  name: string;
+  engine: string;
+  version: string;
+  row_count: number;
+  size: string;
+  columns: SchemaPageColumn[];
+  indexes: SchemaPageIndex[];
+  constraints: SchemaPageConstraint[];
+  triggers: SchemaPageTrigger[];
+}
+
+interface SchemaPageColumn {
+  name: string;
+  type: string;
+  nullable: boolean;
+  is_primary: boolean;
+  is_foreign: boolean;
+  default: string | null;
+  constraints: string[];
+  description: string;
+}
+
+interface SchemaPageIndex {
+  name: string;
+  columns: string[];
+  type: string;
+  unique: boolean;
+}
+
+interface SchemaPageConstraint {
+  name: string;
+  type: string;
+  columns: string[];
+  references?: string;
+  definition?: string;
+}
+
+interface SchemaPageTrigger {
+  name: string;
+  event: string;
+  timing: string;
+  definition: string;
+}
 
 export function SchemaPage() {
   const { databases, selectedDatabase, selectDatabase, getRemoteDatabases } = useDatabaseStore();
@@ -23,11 +69,11 @@ export function SchemaPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [tables, setTables] = useState([]);
-  const [metadata, setMetadata] = useState(null);
-  const [selectedTableData, setSelectedTableData] = useState(null);
-  const [relatedTables, setRelatedTables] = useState({ hasMany: [], belongsTo: [] });
-  const [columnStats, setColumnStats] = useState(null);
+  const [tables, setTables] = useState<SchemaPageTable[]>([]);
+  const [metadata, setMetadata] = useState<DatabaseMetadata | null>(null);
+  const [selectedTableData, setSelectedTableData] = useState<SchemaPageTable | null>(null);
+  const [relatedTables, setRelatedTables] = useState<{ hasMany: SchemaPageTable[]; belongsTo: SchemaPageTable[] }>({ hasMany: [], belongsTo: [] });
+  const [columnStats, setColumnStats] = useState<{ total: number; nullable: number; primary: number; foreign: number; withDefault: number } | null>(null);
 
   useEffect(() => {
     if (runningDbs.length > 0 && !selectedDatabase) {
@@ -51,32 +97,32 @@ export function SchemaPage() {
       }
       remoteApi.fetchSchema(conn)
         .then(schema => {
-          const mapped = schema.map(t => ({
+          const mapped: SchemaPageTable[] = schema.map((t: any) => ({
             name: t.name,
             engine: conn.dbType || 'postgres',
             version: 'remote',
-            row_count: t.estimatedRowCount || 0,
-            size: t.tableSize || '-',
-            columns: t.columns.map(c => ({
+            row_count: t.estimatedRowCount || t.row_count || 0,
+            size: t.tableSize || t.size || '-',
+            columns: (t.columns || []).map((c: any) => ({
               name: c.name,
-              type: c.dataType || c.type || 'UNKNOWN',
-              nullable: c.nullable,
-              is_primary: c.isPrimaryKey,
-              is_foreign: c.isForeignKey,
-              default: c.defaultValue,
+              type: c.data_type || c.dataType || c.type || 'UNKNOWN',
+              nullable: c.nullable ?? true,
+              is_primary: c.is_primary || c.isPrimaryKey || false,
+              is_foreign: c.is_foreign || c.isForeignKey || false,
+              default: c.default ?? c.defaultValue ?? null,
               constraints: c.nullable ? [] : ['NOT NULL'],
               description: c.comment || '',
             })),
-            indexes: t.indexes.map(i => ({
+            indexes: (t.indexes || []).map((i: any) => ({
               name: i.name,
-              columns: i.columns,
-              type: i.indexType,
-              unique: i.isUnique,
+              columns: i.columns || [],
+              type: i.indexType || i.type || 'BTREE',
+              unique: i.isUnique ?? i.unique ?? false,
             })),
-            constraints: t.constraints.map(c => ({
+            constraints: (t.constraints || []).map((c: any) => ({
               name: c.name,
-              type: c.constraintType,
-              columns: c.columns,
+              type: c.constraintType || c.type || 'UNKNOWN',
+              columns: c.columns || [],
               definition: c.definition,
             })),
             triggers: [],
@@ -86,7 +132,7 @@ export function SchemaPage() {
             setSelectedTable(mapped[0].name);
             setSelectedTableData(mapped[0]);
           }
-          setMetadata({ database_name: conn.dbName || conn.code, engine: conn.dbType || 'remote', version: 'remote', total_tables: mapped.length });
+          setMetadata({ database_name: conn.dbName || conn.code, engine: conn.dbType || 'remote', version: 'remote', total_tables: mapped.length, host: '', port: 0, total_size: '', total_rows: 0, collation: '', timezone: '', created_at: '', last_backup: '', tables: mapped.map(t => t.name) });
           setLoading(false);
         })
         .catch(err => {
@@ -98,16 +144,16 @@ export function SchemaPage() {
 
     api.getSchema(selectedDb)
       .then(schema => {
-        const mapped = schema.map(t => ({
+        const mapped: SchemaPageTable[] = schema.map((t: any) => ({
           name: t.name,
           engine: 'postgres',
           version: '16',
           row_count: 0,
           size: '-',
-          columns: t.columns.map(c => ({
+          columns: (t.columns || []).map((c: any) => ({
             name: c.name,
-            type: c.data_type,
-            nullable: c.nullable,
+            type: c.data_type || 'UNKNOWN',
+            nullable: c.nullable ?? true,
             is_primary: false,
             is_foreign: false,
             default: null,
@@ -123,7 +169,7 @@ export function SchemaPage() {
           setSelectedTable(mapped[0].name);
           setSelectedTableData(mapped[0]);
         }
-        setMetadata({ database_name: 'connected', engine: 'postgres', version: '16', total_tables: mapped.length });
+        setMetadata({ database_name: 'connected', engine: 'postgres', version: '16', total_tables: mapped.length, host: '', port: 0, total_size: '', total_rows: 0, collation: '', timezone: '', created_at: '', last_backup: '', tables: mapped.map(t => t.name) });
         setLoading(false);
       })
       .catch(err => {
@@ -134,15 +180,15 @@ export function SchemaPage() {
 
   useEffect(() => {
     if (selectedTable && tables.length > 0) {
-      const table = tables.find((t: any) => t.name === selectedTable);
+      const table = tables.find((t) => t.name === selectedTable);
       setSelectedTableData(table || null);
       setRelatedTables({ hasMany: [], belongsTo: [] });
       setColumnStats(table ? {
         total: table.columns.length,
-        nullable: table.columns.filter((c: any) => c.nullable).length,
-        primary: table.columns.filter((c: any) => c.is_primary).length,
-        foreign: table.columns.filter((c: any) => c.is_foreign).length,
-        withDefault: table.columns.filter((c: any) => c.default).length,
+        nullable: table.columns.filter((c) => c.nullable).length,
+        primary: table.columns.filter((c) => c.is_primary).length,
+        foreign: table.columns.filter((c) => c.is_foreign).length,
+        withDefault: table.columns.filter((c) => c.default).length,
       } : null);
     }
   }, [selectedTable, tables]);
@@ -170,7 +216,7 @@ export function SchemaPage() {
     return 'var(--textMuted)';
   };
 
-  const getConstraintBadges = (column: ColumnSchema) => {
+  const getConstraintBadges = (column: SchemaPageColumn) => {
     const badges = [];
     if (column.is_primary) badges.push({ label: 'PK', color: 'var(--accentPrimary)', icon: Key });
     if (column.is_foreign) badges.push({ label: 'FK', color: 'var(--accentSecondary)', icon: Link2 });
@@ -221,7 +267,7 @@ export function SchemaPage() {
           </div>
         )}
         <div className="flex-1 overflow-auto px-2 pb-2 space-y-1">
-          {filteredTables.map((table: any) => (
+          {filteredTables.map((table) => (
             <button key={table.name} onClick={() => { setSelectedTable(table.name); setActiveTab('columns'); }}
               className="w-full text-left p-3 rounded-xl text-sm transition-all"
               style={{ backgroundColor: selectedTable === table.name ? 'var(--surfaceActive)' : 'transparent', color: selectedTable === table.name ? 'var(--accentPrimary)' : 'var(--textSecondary)', borderRight: selectedTable === table.name ? '3px solid var(--accentPrimary)' : '3px solid transparent' }}>

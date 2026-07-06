@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { useShareStore } from '../../stores/shareStore';
 
 export const GuestList: React.FC = () => {

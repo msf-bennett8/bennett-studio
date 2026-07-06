@@ -20,7 +20,7 @@ export function DatabasePage() {
     getRemoteDatabases,
   } = useDatabaseStore();
 
-  const { connections: remoteConnections, disconnect: disconnectRemote } = useRemoteConnectionStore();
+  const { disconnect: disconnectRemote } = useRemoteConnectionStore();
   const allDatabases = [...databases, ...getRemoteDatabases()];
 
   const [showAddModal, setShowAddModal] = useState(false);
@@ -56,10 +56,15 @@ export function DatabasePage() {
     await deleteDatabase(id);
   };
 
-  const handleUnlock = async (id: string, username: string, password: string, database: string) => {
-    const success = await unlockDatabase(id, username, password, database);
-    if (success) {
-      setShowUnlockModal(null);
+  const handleUnlock = async (id: string, username: string, password: string, database: string): Promise<boolean> => {
+    try {
+      const success = await unlockDatabase(id, username, password, database);
+      if (success) {
+        setShowUnlockModal(null);
+      }
+      return !!success;
+    } catch {
+      return false;
     }
   };
 

@@ -5,7 +5,7 @@ interface UnlockDatabaseModalProps {
   databaseId: string;
   databaseName: string;
   onClose: () => void;
-  onUnlock: (id: string, username: string, password: string, database: string) => void;
+  onUnlock: (id: string, username: string, password: string, database: string) => Promise<boolean>;
   envSuggestions?: Array<{
     source: string;
     username?: string;
@@ -46,9 +46,12 @@ export function UnlockDatabaseModal({
     setError(null);
     
     const dbName = database || databaseName;
-    const success = await onUnlock(databaseId, username, password, dbName);
-    
-    if (!success) {
+    try {
+      const success = await onUnlock(databaseId, username, password, dbName);
+      if (!success) {
+        setError('Authentication failed. Please check your credentials.');
+      }
+    } catch {
       setError('Authentication failed. Please check your credentials.');
     }
     setLoading(false);

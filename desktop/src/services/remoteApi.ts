@@ -131,6 +131,7 @@ class RemoteApiService {
       connectedAt: new Date().toISOString(),
       lastActivity: new Date().toISOString(),
       status: 'connecting',
+      shareUrl: url,
     };
 
     try {
@@ -178,7 +179,7 @@ class RemoteApiService {
    */
   disconnect(connectionId: string): void {
     // Find connection by ID and remove client
-    for (const [code, client] of this.clients) {
+    for (const [code, _client] of this.clients) {
       // Note: In real implementation, track connection ID to client mapping
       this.clients.delete(code);
     }
@@ -195,7 +196,7 @@ class RemoteApiService {
     if (!forceRefresh && cached) {
       const expiresAt = new Date(cached.expiresAt).getTime();
       if (Date.now() < expiresAt) {
-        return cached.schema;
+        return cached.schema as any;
       }
     }
     
@@ -206,15 +207,15 @@ class RemoteApiService {
       throw new Error(response.error || 'Failed to fetch schema');
     }
     
-    this.cacheSchema(connection.code, response.tables);
-    return response.tables;
+    this.cacheSchema(connection.code, response.tables as any);
+    return response.tables as any;
   }
 
   private cacheSchema(code: string, schema: TableSchema[]): void {
     const now = Date.now();
     this.schemaCache.set(code, {
       code,
-      schema,
+      schema: schema as any,
       fetchedAt: new Date(now).toISOString(),
       expiresAt: new Date(now + SCHEMA_TTL_MS).toISOString(),
       ttlSeconds: SCHEMA_TTL_MS / 1000,
@@ -356,11 +357,11 @@ class RemoteApiService {
 
     return tableSchema.columns.map(c => ({
       name: c.name,
-      data_type: c.dataType,
+      data_type: (c as any).data_type || (c as any).dataType,
       nullable: c.nullable,
-      has_default: !!c.defaultValue,
-      is_primary_key: c.isPrimaryKey,
-      column_default: c.defaultValue || null,
+      has_default: !!(c as any).defaultValue,
+      is_primary_key: (c as any).is_primary || (c as any).isPrimaryKey,
+      column_default: (c as any).defaultValue || null,
     }));
   }
 
