@@ -104,7 +104,7 @@ async fn main() -> anyhow::Result<()> {
                 info!("Client should run: --enable-p2p --use-firebase --share-code {} --firebase-url {}", room_code, config.firebase_url.as_ref().unwrap());
 
                 // Wait for client's ICE
-                let client_ice = signaling.poll_for_client(&room_code, 300).await
+                let _client_ice = signaling.poll_for_client(&room_code, 300).await
                     .map_err(|e| anyhow::anyhow!("Failed to get client ICE: {}", e))?;
 
                 signaling.mark_connected(&room_code).await.ok();

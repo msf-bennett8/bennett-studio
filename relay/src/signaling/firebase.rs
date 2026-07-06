@@ -67,11 +67,8 @@ impl FirebaseSignaling {
         if !status.is_success() {
             let body = resp.text().await.unwrap_or_default();
             tracing::error!(status = %status, body = %body, url = %url, "Firebase returned error");
-            return Err(SignalingError::Http(
-                reqwest::Error::from(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    format!("HTTP {}: {}", status, body)
-                ))
+            return Err(SignalingError::Parse(
+                format!("Firebase HTTP {}: {}", status, body)
             ));
         }
 
