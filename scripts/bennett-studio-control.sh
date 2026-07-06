@@ -24,6 +24,14 @@ if [ "$ACTION" = "start" ] && [ "$PROJECT" = "p2p-engine" ]; then
     exit 0
 fi
 
+# Handle "stop p2p-engine" — routed from ~/.bashrc, but handle direct calls too
+if [ "$ACTION" = "stop" ] && [ "$PROJECT" = "p2p-engine" ]; then
+    # Routed via ~/.bashrc msf function — this shouldn't be reached directly
+    # but handle it gracefully
+    echo -e "${C_YELLOW}Run via: msf bennett stop p2p-engine${C_RESET}"
+    exit 0
+fi
+
 # Color definitions
 C_RESET='\033[0m'
 C_RED='\033[0;31m'
@@ -81,6 +89,8 @@ show_help() {
     echo -e "  | ${C_MAGENTA}start p2p-engine${C_RESET}         Start P2P relay in tmux           |"
     echo -e "  |                          For P2P share hosting             |"
     echo -e "  |                                                              |"
+    echo -e "  | ${C_RED}stop p2p-engine${C_RESET}          Stop P2P relay engine             |"
+    echo -e "  |                                                              |"
     echo -e "  | ${C_RED}stop${C_RESET}                     Stop all servers + Docker (optional) |"
     echo -e "${C_BOLD}  +--------------------------------------------------------------+${C_RESET}"
     echo ""
@@ -119,6 +129,7 @@ show_help() {
     echo -e "  ${C_WHITE}msf bennett attach bennett-studio dev${C_RESET}"
     echo -e "  ${C_WHITE}msf bennett build bennett-engine${C_RESET}"
     echo -e "  ${C_WHITE}msf bennett start p2p-engine [SHARE_CODE]${C_RESET}"
+    echo -e "  ${C_WHITE}msf bennett stop p2p-engine${C_RESET}"
     echo ""
     echo -e "  ${C_WHITE}bennett start bennett-studio dev${C_RESET}"
     echo -e "  ${C_WHITE}bennett restart bennett-studio dev${C_RESET}"
