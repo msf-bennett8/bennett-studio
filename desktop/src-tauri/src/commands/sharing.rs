@@ -68,7 +68,7 @@ pub async fn create_share(req: CreateShareRequest) -> Result<CreateShareResponse
     let ice_b64 = match gather_ice_candidates().await {
         Ok(ice) => {
             tracing::info!("ICE candidates gathered for share {}", share_result.code);
-            Some(ice.to_base64())
+            Some(ice)
         }
         Err(e) => {
             tracing::warn!("Failed to gather ICE candidates: {}", e);
@@ -86,8 +86,8 @@ pub async fn create_share(req: CreateShareRequest) -> Result<CreateShareResponse
 }
 
 /// Gather ICE candidates by calling relay binary
-async fn gather_ice_candidates() -> Result<bennett_relay::transport::ice::IceCandidates, String> {
-    // Run relay binary with --gather-ice flag
+/// Returns URL-safe base64-encoded ICE string directly
+async fn gather_ice_candidates() -> Result<String, String> {
     let output = tokio::process::Command::new("bennett-relay")
         .arg("--gather-ice")
         .output()
@@ -98,9 +98,8 @@ async fn gather_ice_candidates() -> Result<bennett_relay::transport::ice::IceCan
         return Err(format!("Relay failed: {}", String::from_utf8_lossy(&output.stderr)));
     }
 
-    let json = String::from_utf8_lossy(&output.stdout);
-    serde_json::from_str(&json)
-        .map_err(|e| format!("Failed to parse ICE: {}", e))
+    // Relay outputs base64 directly — trim whitespace/newlines
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
 #[command]
