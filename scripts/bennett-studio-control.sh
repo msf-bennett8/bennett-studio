@@ -8,6 +8,22 @@ ACTION="$2"
 PROJECT="$3"
 ENV="$4"
 
+# Handle standalone build command: msf bennett build bennett-engine
+if [ "$ACTION" = "build" ] && [ "$PROJECT" = "bennett-engine" ]; then
+    # This is handled by ~/.bashrc build_bennett_engine function
+    # But if called directly, show help
+    echo -e "${C_YELLOW}Run via: msf bennett build bennett-engine${C_RESET}"
+    exit 0
+fi
+
+# Handle "start p2p-engine" — routed from ~/.bashrc, but handle direct calls too
+if [ "$ACTION" = "start" ] && [ "$PROJECT" = "p2p-engine" ]; then
+    # Routed via ~/.bashrc msf function — this shouldn't be reached directly
+    # but handle it gracefully
+    echo -e "${C_YELLOW}Run via: msf bennett start p2p-engine [SHARE_CODE]${C_RESET}"
+    exit 0
+fi
+
 # Color definitions
 C_RESET='\033[0m'
 C_RED='\033[0;31m'
@@ -59,6 +75,12 @@ show_help() {
     echo -e "  | ${C_YELLOW}build${C_RESET}                    Compile engine only (~2-5min)      |"
     echo -e "  |                          Does not start servers              |"
     echo -e "  |                                                              |"
+    echo -e "  | ${C_YELLOW}build bennett-engine${C_RESET}     Build engine + relay binaries     |"
+    echo -e "  |                          With post-build start menu          |"
+    echo -e "  |                                                              |"
+    echo -e "  | ${C_MAGENTA}start p2p-engine${C_RESET}         Start P2P relay in tmux           |"
+    echo -e "  |                          For P2P share hosting             |"
+    echo -e "  |                                                              |"
     echo -e "  | ${C_RED}stop${C_RESET}                     Stop all servers + Docker (optional) |"
     echo -e "${C_BOLD}  +--------------------------------------------------------------+${C_RESET}"
     echo ""
@@ -95,6 +117,8 @@ show_help() {
     echo -e "  ${C_WHITE}msf bennett status bennett-studio dev${C_RESET}"
     echo -e "  ${C_WHITE}msf bennett logs bennett-studio dev engine${C_RESET}"
     echo -e "  ${C_WHITE}msf bennett attach bennett-studio dev${C_RESET}"
+    echo -e "  ${C_WHITE}msf bennett build bennett-engine${C_RESET}"
+    echo -e "  ${C_WHITE}msf bennett start p2p-engine [SHARE_CODE]${C_RESET}"
     echo ""
     echo -e "  ${C_WHITE}bennett start bennett-studio dev${C_RESET}"
     echo -e "  ${C_WHITE}bennett restart bennett-studio dev${C_RESET}"
@@ -479,6 +503,44 @@ case "$PROJECT" in
             # Start fresh
             echo -e "[${C_GREEN}START${C_RESET}] Starting servers..."
             "$0" bennett start bennett-studio dev
+            ;;
+
+          # ------------------------------------------------------------------
+          # START-P2P-ENGINE: Start P2P relay engine in tmux
+          # ------------------------------------------------------------------
+          start-p2p-engine)
+            echo -e "${C_BOLD}+--------------------------------------------------------------+${C_RESET}"
+            echo -e "${C_BOLD}|  ${C_MAGENTA}STARTING P2P Relay Engine${C_RESET}${C_BOLD}                                    |${C_RESET}"
+            echo -e "${C_BOLD}+--------------------------------------------------------------+${C_RESET}"
+            echo ""
+
+            local RELAY_BINARY="$PROJECT_DIR/target/release/bennett-relay"
+            local TMUX_SESSION="bennett-p2p-engine"
+            local P2P_PORT="8443"
+            local FIREBASE_URL="https://bennett-p2p-signaling-default-rtdb.europe-west1.firebasedatabase.app/"
+            local SHARE_CODE="${5:-$(cat /dev/urandom | tr -dc 'A-Z0-9' | fold -w 7 | head -n 1)}"
+
+            if [ ! -x "$RELAY_BINARY" ]; then
+                echo -e "[${C_RED}ERROR${C_RESET}] ${C_RED}Relay binary not found${C_RESET}"
+                echo -e "   ${C_DIM}Build first: msf bennett build bennett-engine${C_RESET}"
+                exit 1
+            fi
+
+            if tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
+                echo -e "[${C_YELLOW}WARN${C_RESET}] ${C_YELLOW}Session '$TMUX_SESSION' already exists${C_RESET}"
+                echo -e "   ${C_CYAN}Attach:${C_RESET} tmux attach -t $TMUX_SESSION"
+                exit 1
+            fi
+
+            tmux new-session -d -s "$TMUX_SESSION" -n p2p-engine
+            tmux send-keys -t "$TMUX_SESSION":0 "cd \"$PROJECT_DIR\" && \"$RELAY_BINARY\" --enable-p2p --use-firebase --bind 0.0.0.0:$P2P_PORT --firebase-url \"$FIREBASE_URL\" --share-code $SHARE_CODE --p2p-mode engine" C-m
+
+            echo -e "[${C_GREEN}OK${C_RESET}] ${C_GREEN}P2P engine started${C_RESET}"
+            echo ""
+            echo -e "  ${C_DIM}Share code:${C_RESET} ${C_WHITE}$SHARE_CODE${C_RESET}"
+            echo -e "  ${C_DIM}Attach:${C_RESET}   ${C_CYAN}tmux attach -t $TMUX_SESSION${C_RESET}"
+            echo -e "  ${C_DIM}Kill:${C_RESET}     ${C_CYAN}tmux kill-session -t $TMUX_SESSION${C_RESET}"
+            echo ""
             ;;
 
           # ------------------------------------------------------------------
