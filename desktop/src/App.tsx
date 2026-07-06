@@ -13,6 +13,7 @@ import { JoinSharePage } from './pages/JoinSharePage';
 import { RemoteQueryPage } from './pages/RemoteQueryPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { NotesPage } from './pages/NotesPage';
+import { ShareLandingPage } from './pages/ShareLandingPage';
 import './index.css';
 
 function App() {
@@ -54,6 +55,7 @@ function App() {
           <Route path="/remote-query" element={<RemoteQueryPage />} />
           <Route path="/notes" element={<NotesPage />} />
           <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/db/:code" element={<ShareLandingPage />} />
         </Routes>
       </Layout>
     </HashRouter>

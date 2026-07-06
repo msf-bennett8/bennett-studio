@@ -24,6 +24,7 @@ export default defineConfig({
     alias: {
       '@': path.resolve(__dirname, './src'),
       '@bennett/shared': path.resolve(__dirname, '../shared/dist'),
+      '@bennett/sdk': path.resolve(__dirname, '../shared/sdk/typescript/dist'),
     },
   },
   server: {
