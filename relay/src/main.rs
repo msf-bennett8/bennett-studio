@@ -168,14 +168,14 @@ async fn main() -> anyhow::Result<()> {
         )
     };
 
-    // Start HTTP proxy API for external websites (always — independent of P2P mode)
-    // Uses a separate port from the TLS relay to avoid bind conflicts
+    // Start HTTP proxy API for external websites (ALWAYS — independent of P2P mode)
+    // This is the base API endpoint that external websites use
     let _api_handle = {
         let router_clone = router.clone();
         let _transport_clone = transport.clone();
         let bind_addr = config.proxy_api_bind.to_string();
 
-        println!("DEBUG: About to spawn HTTP proxy API on {}", bind_addr);
+        println!("DEBUG MAIN: bind_addr={}", bind_addr);
         info!(addr = %bind_addr, "Starting HTTP proxy API for external website access");
 
         Some(tokio::spawn(async move {
@@ -252,6 +252,7 @@ async fn start_http_proxy_api(
     router: Arc<router::ShareRouter>,
     _transport: Arc<dyn transport::Transport>,
 ) -> anyhow::Result<()> {
+    println!("DEBUG PROXY: bind_addr={}", bind_addr);
     let app_state = ProxyApiState { router };
 
     let app = Router::new()
