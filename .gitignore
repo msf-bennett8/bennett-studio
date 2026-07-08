@@ -89,3 +89,5 @@ web/src/services/*.d.ts
 web/src/services/*.d.ts.map**/dist/
 shared/sdk/typescript/dist/
 web/src/services/*.d.ts.map
+*/.vite_cache
+*/.vite
