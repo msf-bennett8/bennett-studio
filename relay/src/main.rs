@@ -95,62 +95,70 @@ async fn main() -> anyhow::Result<()> {
     let transport: Arc<dyn transport::Transport> = if config.enable_p2p {
         info!("P2P transport enabled");
 
-        // Firebase signaling mode (best UX)
-        let p2p_transport = if config.use_firebase {
-            let firebase_url = config.firebase_url.clone()
-                .ok_or_else(|| anyhow::anyhow!("--firebase-url required for Firebase signaling"))?;
-            let signaling = signaling::firebase::FirebaseSignaling::new(firebase_url);
+        // Try P2P first, fall back to pooled TCP on any failure
+        let p2p_result: anyhow::Result<Arc<dyn transport::Transport>> = async {
+            if config.use_firebase {
+                let firebase_url = config.firebase_url.clone()
+                    .ok_or_else(|| anyhow::anyhow!("--firebase-url required for Firebase signaling"))?;
+                let signaling = signaling::firebase::FirebaseSignaling::new(firebase_url);
 
-            if config.p2p_mode == "engine" {
-                // Engine mode: create room, upload ICE, wait for client
-                let room_code = config.share_code.clone()
-                    .unwrap_or_else(signaling::firebase::generate_room_code);
+                if config.p2p_mode == "engine" {
+                    let room_code = config.share_code.clone()
+                        .unwrap_or_else(signaling::firebase::generate_room_code);
 
-                let local_ice = transport::ice::gather_ice_candidates().await
-                    .map_err(|e| anyhow::anyhow!("ICE gathering failed: {}", e))?;
+                    let local_ice = transport::ice::gather_ice_candidates().await
+                        .map_err(|e| anyhow::anyhow!("ICE gathering failed: {}", e))?;
 
-                signaling.create_room(&room_code, &local_ice).await
-                    .map_err(|e| anyhow::anyhow!("Failed to create signaling room: {}", e))?;
+                    match signaling.create_room(&room_code, &local_ice).await {
+                        Ok(_) => info!(room = %room_code, "Firebase room created."),
+                        Err(e) => warn!("Firebase signaling failed: {}. Continuing with P2P server.", e),
+                    }
 
-                info!(room = %room_code, "Firebase room created. Share code with client.");
-                info!("Client should run: --enable-p2p --use-firebase --share-code {} --firebase-url {}", room_code, config.firebase_url.as_ref().unwrap());
+                    transport::TransportFactory::create_p2p_server(local_ice, Some(room_code)).await
+                        .map_err(|e| anyhow::anyhow!("P2P server init failed: {}", e))
+                } else if config.p2p_mode == "client" {
+                    let room_code = config.share_code.clone()
+                        .ok_or_else(|| anyhow::anyhow!("--share-code required for Firebase client mode"))?;
 
-                // Wait for client's ICE
-                let _client_ice = signaling.poll_for_client(&room_code, 300).await
-                    .map_err(|e| anyhow::anyhow!("Failed to get client ICE: {}", e))?;
+                    let local_ice = transport::ice::gather_ice_candidates().await
+                        .map_err(|e| anyhow::anyhow!("ICE gathering failed: {}", e))?;
 
-                signaling.mark_connected(&room_code).await.ok();
+                    let engine_ice = signaling.join_room(&room_code, &local_ice).await
+                        .map_err(|e| anyhow::anyhow!("Failed to join room: {}", e))?;
 
-                transport::TransportFactory::create_p2p_server(local_ice, Some(room_code)).await
-            } else if config.p2p_mode == "client" {
-                // Client mode: join room by code, upload our ICE, get engine's ICE
-                let room_code = config.share_code.clone()
-                    .ok_or_else(|| anyhow::anyhow!("--share-code required for Firebase client mode"))?;
-
-                let local_ice = transport::ice::gather_ice_candidates().await
-                    .map_err(|e| anyhow::anyhow!("ICE gathering failed: {}", e))?;
-
-                let engine_ice = signaling.join_room(&room_code, &local_ice).await
-                    .map_err(|e| anyhow::anyhow!("Failed to join room: {}", e))?;
-
-                transport::TransportFactory::create_p2p_client(engine_ice, Some(room_code)).await
+                    transport::TransportFactory::create_p2p_client(engine_ice, Some(room_code)).await
+                        .map_err(|e| anyhow::anyhow!("P2P client init failed: {}", e))
+                } else {
+                    Err(anyhow::anyhow!("--p2p-mode must be 'engine' or 'client'"))
+                }
+            } else if let Some(remote_ice_b64) = &config.remote_ice {
+                let remote_ice = transport::ice::IceCandidates::from_base64(remote_ice_b64)
+                    .map_err(|e| anyhow::anyhow!("Invalid remote ICE: {}", e))?;
+                transport::TransportFactory::create_p2p_client(remote_ice, config.share_code.clone()).await
+                    .map_err(|e| anyhow::anyhow!("P2P client init failed: {}", e))
             } else {
-                return Err(anyhow::anyhow!("--p2p-mode must be 'engine' or 'client'"));
+                let local_ice = transport::ice::gather_ice_candidates().await
+                    .map_err(|e| anyhow::anyhow!("ICE gathering failed: {}", e))?;
+                info!("P2P server ICE: {}", serde_json::to_string_pretty(&local_ice).unwrap());
+                transport::TransportFactory::create_p2p_server(local_ice, config.share_code.clone()).await
+                    .map_err(|e| anyhow::anyhow!("P2P server init failed: {}", e))
             }
-        } else if let Some(remote_ice_b64) = &config.remote_ice {
-            // Manual ICE mode (fallback, no server)
-            let remote_ice = transport::ice::IceCandidates::from_base64(remote_ice_b64)
-                .map_err(|e| anyhow::anyhow!("Invalid remote ICE: {}", e))?;
-            transport::TransportFactory::create_p2p_client(remote_ice, config.share_code.clone()).await
-        } else {
-            // Server mode: gather our ICE and wait for connections
-            let local_ice = transport::ice::gather_ice_candidates().await
-                .map_err(|e| anyhow::anyhow!("ICE gathering failed: {}", e))?;
-            info!("P2P server ICE: {}", serde_json::to_string_pretty(&local_ice).unwrap());
-            transport::TransportFactory::create_p2p_server(local_ice, config.share_code.clone()).await
-        };
+        }.await;
 
-        p2p_transport.map_err(|e| anyhow::anyhow!("P2P transport init failed: {}", e))?
+        match p2p_result {
+            Ok(transport) => {
+                info!("P2P transport initialized successfully");
+                transport
+            }
+            Err(e) => {
+                warn!("P2P transport failed: {}. Falling back to pooled TCP.", e);
+                transport::TransportFactory::create_pooled_tcp(
+                    config.engine_http,
+                    config.engine_mysql,
+                    config.max_conn_per_share,
+                )
+            }
+        }
     } else {
         info!("Pooled TCP transport active (connection pooling + splice)");
         transport::TransportFactory::create_pooled_tcp(
@@ -160,21 +168,21 @@ async fn main() -> anyhow::Result<()> {
         )
     };
 
-    // Start HTTP proxy API for external websites (runs alongside P2P transport)
-    let _api_handle = if config.enable_p2p && config.p2p_mode == "engine" {
+    // Start HTTP proxy API for external websites (always — independent of P2P mode)
+    // Uses a separate port from the TLS relay to avoid bind conflicts
+    let _api_handle = {
         let router_clone = router.clone();
-        let transport_clone = transport.clone();
-        let bind_addr = format!("0.0.0.0:{}", config.bind.port());
-        
+        let _transport_clone = transport.clone();
+        let bind_addr = config.proxy_api_bind.to_string();
+
+        println!("DEBUG: About to spawn HTTP proxy API on {}", bind_addr);
         info!(addr = %bind_addr, "Starting HTTP proxy API for external website access");
-        
+
         Some(tokio::spawn(async move {
-            if let Err(e) = start_http_proxy_api(bind_addr, router_clone, transport_clone).await {
+            if let Err(e) = start_http_proxy_api(bind_addr, router_clone, _transport_clone).await {
                 error!("HTTP proxy API error: {}", e);
             }
         }))
-    } else {
-        None
     };
 
     // Start health monitor
@@ -288,6 +296,7 @@ async fn cors_preflight() -> impl IntoResponse {
 
 /// Health check for proxy API
 async fn proxy_health() -> impl IntoResponse {
+    info!("Proxy health check received");
     let body = serde_json::json!({ "status": "ok", "service": "bennett-proxy" });
     (StatusCode::OK, axum::Json(body))
 }

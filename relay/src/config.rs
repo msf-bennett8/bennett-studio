@@ -78,6 +78,11 @@ pub struct RelayConfig {
     /// Log level
     #[arg(long, default_value = "info", env = "RUST_LOG")]
     pub log_level: String,
+
+    /// Bind address for HTTP proxy API (external website access)
+    /// Separate from TLS relay port to avoid conflict
+    #[arg(long, default_value = "0.0.0.0:8081", env = "BENNETT_PROXY_API_BIND")]
+    pub proxy_api_bind: SocketAddr,
 }
 
 impl RelayConfig {
