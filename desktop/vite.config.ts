@@ -19,6 +19,9 @@ const bennettBranding = () => ({
 });
 
 export default defineConfig({
+  optimizeDeps: {
+    force: true, // Always re-bundle workspace dependencies
+  },
   plugins: [react(), bennettBranding()],
   resolve: {
     alias: {

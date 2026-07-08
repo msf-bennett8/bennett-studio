@@ -24,6 +24,7 @@ pub fn run() {
             commands::vault::vault_remove_token,
             commands::vault::vault_status,
             commands::system::get_system_info,
+            commands::system::get_device_id,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

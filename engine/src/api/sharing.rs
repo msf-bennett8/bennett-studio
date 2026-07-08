@@ -193,9 +193,12 @@ pub async fn list_shares(
                         .unwrap_or_else(|_| vec!["*".to_string()]);
                     
                     let code = record.code.clone();
+                    // Use stored token if available, otherwise placeholder
+                    let token = record.token.as_deref().unwrap_or("...");
+                    let url = build_share_url(&get_share_base_url(), &code, token);
                     all_shares.push(ShareLink {
                         code: record.code,
-                        url: build_share_url(&get_share_base_url(), &code, "..."),
+                        url,
                         db_id: record.db_id,
                         db_name: db.name.clone(),
                         db_type: db.db_type.clone(),
