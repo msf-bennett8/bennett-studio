@@ -270,14 +270,30 @@ impl RelayServer {
     ) -> anyhow::Result<()> {
         info!("Relay running in P2P mode");
 
-        // Downcast to P2pTransport to access accept_stream()
+        // Downcast to P2pTransport to access P2P-specific methods
         let p2p_transport = self.transport.as_any()
             .downcast_ref::<crate::transport::p2p::P2pTransport>()
             .ok_or_else(|| anyhow::anyhow!("P2P mode requires P2pTransport"))?;
 
+        // In server mode: accept the initial QUIC connection first
+        if p2p_transport.is_server() {
+            info!("P2P server mode — waiting for client connection...");
+            tokio::select! {
+                _ = shutdown_rx.changed() => {
+                    info!("P2P shutdown before client connected");
+                    return Ok(());
+                }
+                result = p2p_transport.accept_connection() => {
+                    result.map_err(|e| anyhow::anyhow!("Failed to accept P2P connection: {}", e))?;
+                }
+            }
+        }
+
+        info!("P2P connection established — accepting streams");
+
         loop {
             tokio::select! {
-                biased; // Check shutdown first to avoid starving it
+                biased;
 
                 _ = shutdown_rx.changed() => {
                     if *shutdown_rx.borrow() {
@@ -305,7 +321,7 @@ impl RelayServer {
                     }
                 }
 
-                // Periodic health check (less frequent since we have real work now)
+                // Periodic health check
                 _ = tokio::time::sleep(tokio::time::Duration::from_secs(5)) => {
                     if !self.transport.health_check().await {
                         warn!("P2P transport unhealthy");

@@ -23,6 +23,42 @@ pub struct P2pQuicConnection {
     pub is_server: bool,
 }
 
+/// QUIC server endpoint wrapper — holds the endpoint so it stays alive
+/// while we accept connections in the background
+#[derive(Clone)]
+pub struct P2pQuicServer {
+    pub endpoint: quinn::Endpoint,
+    pub local_addr: SocketAddr,
+}
+
+impl P2pQuicServer {
+    /// Accept the next incoming QUIC connection
+    pub async fn accept(&self) -> Result<P2pQuicConnection, QuicError> {
+        let incoming = self.endpoint.accept()
+            .await
+            .ok_or(QuicError::NoIncomingConnection)?;
+
+        let connection = incoming.await
+            .map_err(|e| QuicError::ConnectionFailed(e))?;
+
+        let remote_addr = connection.remote_address();
+        let local_ip = connection.local_ip().unwrap_or_else(|| std::net::IpAddr::from([0,0,0,0]));
+
+        info!(
+            remote = %remote_addr,
+            stable_id = connection.stable_id(),
+            "QUIC P2P client connected"
+        );
+
+        Ok(P2pQuicConnection {
+            connection,
+            remote_addr,
+            local_addr: SocketAddr::new(local_ip, 0),
+            is_server: true,
+        })
+    }
+}
+
 /// Start QUIC server on a punched UDP socket
 ///
 /// # Arguments
@@ -31,7 +67,7 @@ pub struct P2pQuicConnection {
 pub async fn start_quic_server(
     local_ice: &IceCandidates,
     _share_code: Option<String>,
-) -> Result<P2pQuicConnection, QuicError> {
+) -> Result<P2pQuicServer, QuicError> {
     let server_config = build_quinn_server_config()
         .map_err(|e| QuicError::TlsFailed(e))?;
 
@@ -52,31 +88,11 @@ pub async fn start_quic_server(
     let local_addr = endpoint.local_addr()
         .map_err(|e| QuicError::EndpointFailed(e))?;
 
-    info!(local_addr = %local_addr, "QUIC server endpoint bound");
+    info!(local_addr = %local_addr, "QUIC server endpoint bound — waiting for connections");
 
-    // Wait for incoming connection
-    // In P2P, the client will connect after hole punching
-    let incoming = endpoint.accept()
-        .await
-        .ok_or(QuicError::NoIncomingConnection)?;
-
-    let connection = incoming.await
-        .map_err(|e| QuicError::ConnectionFailed(e))?;
-
-    let remote_addr = connection.remote_address();
-    let local_ip = connection.local_ip().unwrap_or_else(|| std::net::IpAddr::from([0,0,0,0]));
-
-    info!(
-        remote = %remote_addr,
-        stable_id = connection.stable_id(),
-        "QUIC P2P client connected"
-    );
-
-    Ok(P2pQuicConnection {
-        connection,
-        remote_addr,
-        local_addr: SocketAddr::new(local_ip, 0),
-        is_server: true,
+    Ok(P2pQuicServer {
+        endpoint,
+        local_addr,
     })
 }
 

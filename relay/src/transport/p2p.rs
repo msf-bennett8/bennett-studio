@@ -27,6 +27,8 @@ pub struct P2pTransport {
     share_code: Option<String>,
     connection: Arc<RwLock<Option<P2pQuicConnection>>>,
     stream_pool: Arc<Mutex<VecDeque<PooledStream>>>,
+    /// Server endpoint — only set in server mode, used to accept new connections
+    server: Option<super::quic::P2pQuicServer>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,8 +53,8 @@ impl P2pTransport {
     ) -> Result<Self, P2pError> {
         info!(mode = "server", "Creating P2P transport");
 
-        // Start QUIC server
-        let quic_conn = start_quic_server(&local_ice, share_code.clone())
+        // Start QUIC server endpoint (does NOT block on accept)
+        let server = start_quic_server(&local_ice, share_code.clone())
             .await
             .map_err(|e| P2pError::QuicFailed(e))?;
 
@@ -61,8 +63,9 @@ impl P2pTransport {
             local_ice,
             remote_ice: None,
             share_code,
-            connection: Arc::new(RwLock::new(Some(quic_conn))),
+            connection: Arc::new(RwLock::new(None)), // No connection yet — accepted in run_p2p()
             stream_pool: Arc::new(Mutex::new(VecDeque::new())),
+            server: Some(server),
         })
     }
 
@@ -101,7 +104,33 @@ impl P2pTransport {
             share_code,
             connection: Arc::new(RwLock::new(Some(quic_conn))),
             stream_pool: Arc::new(Mutex::new(VecDeque::new())),
+            server: None,
         })
+    }
+
+    /// Check if this transport is in server mode
+    pub fn is_server(&self) -> bool {
+        self.mode == P2pMode::Server
+    }
+
+    /// Accept an incoming QUIC connection (server mode only)
+    /// Blocks until a client connects
+    pub async fn accept_connection(&self) -> Result<(), P2pError> {
+        if self.mode != P2pMode::Server {
+            return Err(P2pError::NotConnected);
+        }
+
+        let server = self.server.as_ref()
+            .ok_or(P2pError::NotConnected)?;
+
+        let conn = server.accept().await
+            .map_err(|e| P2pError::QuicFailed(e))?;
+
+        let mut guard = self.connection.write().await;
+        *guard = Some(conn);
+
+        info!("P2P server accepted client connection");
+        Ok(())
     }
 
     /// Accept an incoming bidirectional stream from the P2P connection
@@ -111,7 +140,7 @@ impl P2pTransport {
             .map_err(|e| P2pError::QuicFailed(e))
     }
 
-    /// Get the connection (reconnect if lost)
+    /// Get the connection (reconnect if lost — client mode only)
     async fn get_connection(&self) -> Result<P2pQuicConnection, P2pError> {
         let conn = self.connection.read().await;
         if let Some(ref c) = *conn {
@@ -145,6 +174,7 @@ impl P2pTransport {
             }
         }
 
+        // Server mode: connection should have been accepted by run_p2p()
         Err(P2pError::NotConnected)
     }
 }
@@ -205,6 +235,12 @@ impl Transport for P2pTransport {
 
     fn health_check(&self) -> Pin<Box<dyn Future<Output = bool> + Send + '_>> {
         Box::pin(async move {
+            // Server mode before first connection: check if endpoint is alive
+            if self.mode == P2pMode::Server && self.server.is_some() {
+                // Server endpoint is bound and ready
+                return true;
+            }
+            // Otherwise check active connection
             match self.get_connection().await {
                 Ok(conn) => conn.connection.close_reason().is_none(),
                 Err(_) => false,
