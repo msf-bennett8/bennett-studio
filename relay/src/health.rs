@@ -1,13 +1,25 @@
 //! Health check service
-//! Polls engine endpoints and reports status
+//! Polls engine heartbeats and marks routes online/offline
 
 use crate::router::ShareRouter;
 use std::sync::Arc;
 use tokio::time::{interval, Duration};
-use tracing::{error, info, warn};
+use tracing::{error, info, warn, debug};
+use chrono::Utc;
 
-/// Health monitor — periodically checks engine and updates route cache
+/// Health monitor — periodically checks engine heartbeats and updates route availability
 pub struct HealthMonitor;
+
+/// Heartbeat status for a host
+#[derive(Debug, Clone)]
+pub struct HostStatus {
+    pub host_id: String,
+    pub last_beat: chrono::DateTime<Utc>,
+    pub ip_address: Option<String>,
+    pub port: Option<u16>,
+    pub version: Option<String>,
+    pub online: bool,
+}
 
 impl HealthMonitor {
     pub fn start(
@@ -30,13 +42,18 @@ impl HealthMonitor {
                     );
                 }
 
-                // Refresh routes (also validates DB connectivity)
+                // PHASE F: Check engine heartbeats and mark stale routes offline
+                if let Err(e) = router.check_host_heartbeats().await {
+                    error!("Host heartbeat check failed: {}", e);
+                }
+
+                // Refresh local routes from SQLite (if available)
                 if let Err(e) = router.refresh_routes().await {
                     error!("Route refresh failed during health check: {}", e);
                 }
 
                 if transport_ok {
-                    info!("Health check: OK");
+                    debug!("Health check: OK");
                 }
             }
         })

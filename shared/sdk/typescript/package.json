@@ -1,20 +1,27 @@
 {
   "name": "@bennett/sdk",
-  "version": "0.2.0",
-  "description": "Bennett Studio Connect-RPC TypeScript SDK",
+  "version": "0.3.0",
+  "description": "Bennett Studio SDK — query shared databases via P2P or relay",
   "type": "module",
-  "main": "./dist/index.js",
+  "main": "./dist/index.cjs.js",
+  "module": "./dist/index.esm.js",
   "types": "./dist/index.d.ts",
+  "unpkg": "./dist/index.umd.js",
+  "jsdelivr": "./dist/index.umd.js",
   "exports": {
     ".": {
-      "import": "./dist/index.js",
+      "import": "./dist/index.esm.js",
+      "require": "./dist/index.cjs.js",
       "types": "./dist/index.d.ts"
     }
   },
   "scripts": {
-    "build": "tsc",
+    "build": "rollup -c",
+    "build:watch": "rollup -c -w",
     "dev": "tsc --watch",
-    "test": "vitest run"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
     "@bufbuild/protobuf": "^1.10.0",
@@ -25,13 +32,40 @@
   "devDependencies": {
     "@bufbuild/protoc-gen-es": "^1.10.0",
     "@connectrpc/protoc-gen-connect-es": "^1.4.0",
+    "@rollup/plugin-commonjs": "^25.0.7",
+    "@rollup/plugin-node-resolve": "^15.2.3",
+    "@rollup/plugin-terser": "^0.4.4",
+    "@rollup/plugin-typescript": "^11.1.6",
+    "rollup": "^4.17.0",
     "typescript": "^5.4.5",
     "vitest": "^1.6.0"
   },
   "peerDependencies": {},
   "files": [
     "dist",
-    "src"
+    "src",
+    "README.md"
   ],
-  "license": "MIT"
+  "keywords": [
+    "database",
+    "sql",
+    "p2p",
+    "webrtc",
+    "share",
+    "bennett"
+  ],
+  "author": "Bennett Studio",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-org/bennett-studio.git",
+    "directory": "shared/sdk/typescript"
+  },
+  "bugs": {
+    "url": "https://github.com/your-org/bennett-studio/issues"
+  },
+  "homepage": "https://bennett.studio",
+  "publishConfig": {
+    "access": "public"
+  }
 }

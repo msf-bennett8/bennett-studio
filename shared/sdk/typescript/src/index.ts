@@ -11,6 +11,10 @@ export {
 } from './client';
 
 export {
+  P2PConnection,
+} from './p2p';
+
+export {
   BennettGrpcWebClient,
   createGrpcWebClient,
 } from './grpcClient';

@@ -18,10 +18,17 @@ path = "src/sidecar/main.rs"
 default = ["p2p"]
 p2p = ["quinn", "tokio-tungstenite"]
 
+[features]
+default = []
+webrtc = ["dep:webrtc"]
+
 [dependencies]
 # Async runtime
 tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.7", features = ["codec"] }
+
+# PHASE 5: WebRTC support for browser P2P (optional feature)
+webrtc = { version = "0.12", optional = true }
 
 # P2P transport dependencies
 rand = "0.8"

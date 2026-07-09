@@ -2,6 +2,8 @@ use axum::Router;
 use std::net::SocketAddr;
 use tower_http::cors::CorsLayer;
 use tracing::info;
+use engine::sharing::share_store::ShareStore;
+use engine::sharing::p2p_listener::start_p2p_listener;
 
 use bennett_engine::{
     api::routes,
@@ -44,7 +46,7 @@ async fn main() {
         let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(30));
         loop {
             interval.tick().await;
-            
+
             // Get all active shares and send heartbeat for each unique host_id
             // This ensures heartbeats match the host_id stored in share records
             match heartbeat_store.get_all_active_host_ids().await {
@@ -64,6 +66,60 @@ async fn main() {
                     tracing::warn!("Failed to get active host IDs for heartbeat: {}", e);
                 }
             }
+        }
+    });
+
+    // PHASE 6: Start relay tunnel for remote engine → relay communication
+    // This allows the Render relay to forward traffic when P2P fails
+    let relay_url = std::env::var("BENNETT_RELAY_URL")
+        .unwrap_or_else(|_| "wss://bennett-relay.onrender.com".to_string());
+    let host_id = format!("host-{}", uuid::Uuid::new_v4().to_string().split('-').next().unwrap_or("unknown"));
+    let token_manager_clone = state.token_manager.clone();
+    let share_store_clone = state.share_store.clone();
+    let connection_manager_clone = state.connections.clone();
+
+    tokio::spawn(async move {
+        use engine::sharing::relay::start_relay_tunnel;
+
+        match start_relay_tunnel(
+            relay_url,
+            host_id,
+            token_manager_clone,
+            share_store_clone,
+            Some(connection_manager_clone),
+        ).await {
+            Ok(tx) => {
+                tracing::info!("Relay tunnel established — engine reachable via relay fallback");
+                // Keep tx alive so tunnel stays open
+                let _ = tx;
+                loop {
+                    tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
+                }
+            }
+            Err(e) => {
+                tracing::warn!("Relay tunnel failed (expected if no relay configured): {}", e);
+            }
+        }
+    });
+
+    // PHASE 6: Start P2P listener for direct browser connections via Firebase signaling
+    let p2p_db_path = std::env::var("BENNETT_DATA_DIR")
+        .map(|d| std::path::PathBuf::from(d).join("shares.db"))
+        .unwrap_or_else(|_| std::path::PathBuf::from("./data/shares.db"));
+    let p2p_token_manager = state.token_manager.clone();
+    let p2p_share_store = state.share_store.clone();
+    let p2p_conn_manager = state.connections.clone();
+
+    tokio::spawn(async move {
+        use engine::sharing::p2p_listener::start_p2p_listener;
+        
+        if let Err(e) = start_p2p_listener(
+            p2p_db_path,
+            p2p_token_manager,
+            p2p_share_store,
+            p2p_conn_manager,
+        ).await {
+            tracing::error!("P2P listener error: {}", e);
         }
     });
 

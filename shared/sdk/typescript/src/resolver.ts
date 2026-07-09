@@ -102,6 +102,37 @@ export function preloadHosts(hosts: Record<string, string>): void {
 }
 
 /**
+ * Resolve relay URL for fallback connections
+ * Tries well-known relay endpoints
+ */
+export async function resolveRelayUrl(code: string): Promise<string> {
+  const relays = [
+    'https://bennett-relay.onrender.com',
+    'https://relay.bennett.studio',
+    'https://bennett-relay.fly.dev',
+  ];
+
+  for (const relay of relays) {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5000);
+      const resp = await fetch(`${relay}/api/share/${code}`, { 
+        method: 'HEAD',
+        signal: controller.signal 
+      });
+      clearTimeout(timeout);
+      if (resp.ok || resp.status === 405) { // 405 = HEAD not allowed but endpoint exists
+        return relay;
+      }
+    } catch {
+      // Try next relay
+    }
+  }
+
+  throw new Error(`No relay available for share ${code}`);
+}
+
+/**
  * Clear resolver cache
  */
 export function clearResolverCache(): void {

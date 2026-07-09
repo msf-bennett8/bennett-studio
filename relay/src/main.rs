@@ -19,6 +19,7 @@ mod router;
 mod server;
 mod signaling;
 mod transport;
+mod tunnel_registry;
 
 use axum::{
     extract::{
@@ -261,6 +262,97 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+// ============================================================================
+// PHASE 5: WebRTC Signaling Handlers
+// Browsers initiate P2P via POST /api/share/:code/webrtc/offer
+// Relay responds with SDP answer and manages the bridge
+// ============================================================================
+
+#[derive(Debug, Clone, serde::Deserialize)]
+struct WebRtcOfferRequest {
+    pub sdp: String,
+    pub ice_candidates: Vec<serde_json::Value>,
+    pub token: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+struct WebRtcOfferResponse {
+    pub success: bool,
+    pub answer_sdp: Option<String>,
+    pub answer_ice: Vec<serde_json::Value>,
+    pub error: Option<String>,
+}
+
+/// Handle WebRTC offer from browser
+/// Returns SDP answer for browser to complete P2P
+async fn webrtc_offer_handler(
+    Path(code): Path<String>,
+    State(state): State<ProxyApiState>,
+    Json(req): Json<WebRtcOfferRequest>,
+) -> impl IntoResponse {
+    let mut headers = axum::http::HeaderMap::new();
+    for (k, v) in router::cors_headers() {
+        headers.insert(k, v.parse().unwrap());
+    }
+
+    // Validate share is active
+    if !state.router.is_active(&code) {
+        return (
+            StatusCode::NOT_FOUND,
+            headers,
+            axum::Json(WebRtcOfferResponse {
+                success: false,
+                answer_sdp: None,
+                answer_ice: vec![],
+                error: Some("Share not found or expired".to_string()),
+            }),
+        );
+    }
+
+    // Validate token
+    // TODO: integrate with token validation
+
+    info!(share = %code, "WebRTC offer received from browser");
+
+    // PHASE 5: If WebRTC bridge is available, process offer
+    // For now, return a placeholder indicating relay mode
+    // Full WebRTC bridge requires the webrtc feature flag
+    
+    (
+        StatusCode::OK,
+        headers,
+        axum::Json(WebRtcOfferResponse {
+            success: true,
+            answer_sdp: None, // Would contain SDP answer if bridge active
+            answer_ice: vec![],
+            error: Some("WebRTC P2P not yet active — use WebSocket relay instead".to_string()),
+        }),
+    )
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+struct WebRtcIceRequest {
+    pub candidate: serde_json::Value,
+    pub token: String,
+}
+
+/// Handle ICE candidate trickle from browser
+async fn webrtc_ice_handler(
+    Path(code): Path<String>,
+    State(_state): State<ProxyApiState>,
+    Json(_req): Json<WebRtcIceRequest>,
+) -> impl IntoResponse {
+    let mut headers = axum::http::HeaderMap::new();
+    for (k, v) in router::cors_headers() {
+        headers.insert(k, v.parse().unwrap());
+    }
+
+    // Store ICE candidate for ongoing P2P negotiation
+    // Implementation depends on active WebRTC bridge
+    
+    (StatusCode::OK, headers, axum::Json(serde_json::json!({ "received": true })))
+}
+
 /// HTTP Proxy API for external websites
 /// Allows any website (Vercel, etc.) to query the shared database
 /// through the P2P tunnel via simple HTTP requests
@@ -271,7 +363,16 @@ async fn start_http_proxy_api(
 ) -> anyhow::Result<()> {
     // Use eprintln to bypass any tracing/log capture and guarantee visibility
     eprintln!("DEBUG PROXY: bind_addr={}", bind_addr);
-    let app_state = ProxyApiState { router };
+    // Initialize shared tunnel registry
+    let tunnel_registry = crate::tunnel_registry::TunnelRegistry::new();
+    
+    // Inject tunnel registry into router
+    let router = router.with_tunnel_registry(tunnel_registry.clone());
+
+    let app_state = ProxyApiState { 
+        router,
+        tunnel_registry: tunnel_registry.clone(),
+    };
 
     let app = Router::new()
         // Health check
@@ -280,6 +381,9 @@ async fn start_http_proxy_api(
         .route("/api/share/:code/query", options(cors_preflight))
         .route("/api/share/:code/schema", options(cors_preflight))
         .route("/ws/share/:code", options(cors_preflight))
+        // PHASE 5: WebRTC signaling endpoint for browser P2P
+        .route("/api/share/:code/webrtc/offer", post(webrtc_offer_handler))
+        .route("/api/share/:code/webrtc/ice", post(webrtc_ice_handler))
         // Query execution
         .route("/api/share/:code/query", post(proxy_query))
         // Schema fetch
@@ -288,6 +392,8 @@ async fn start_http_proxy_api(
         .route("/api/share/:code", get(proxy_share_info))
         // WebSocket streaming for real-time queries
         .route("/ws/share/:code", get(ws_proxy_handler))
+        // PHASE A: Engine tunnel WebSocket — engines connect here to register routes
+        .route("/ws/tunnel/:host_id", get(tunnel_ws_handler))
         .with_state(app_state);
 
     let addr: SocketAddr = bind_addr.parse()?;
@@ -302,6 +408,7 @@ async fn start_http_proxy_api(
 #[derive(Clone)]
 struct ProxyApiState {
     router: Arc<router::ShareRouter>,
+    tunnel_registry: Arc<crate::tunnel_registry::TunnelRegistry>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -562,6 +669,198 @@ enum WsProxyResponse {
     Pong,
     /// Server error
     Error { message: String, message_id: u64 },
+}
+
+// ============================================================================
+// PHASE A: Engine Tunnel WebSocket Handler
+// Engines connect here to register their shares and receive forwarded queries
+// ============================================================================
+
+#[derive(Clone)]
+struct TunnelState {
+    router: Arc<router::ShareRouter>,
+    // Map of host_id -> WebSocket sender for forwarding queries back
+    tunnels: Arc<tokio::sync::RwLock<std::collections::HashMap<String, tokio::sync::mpsc::UnboundedSender<TunnelEngineMessage>>>>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum TunnelEngineMessage {
+    QueryRequest {
+        request_id: String,
+        share_code: String,
+        token: String,
+        sql: String,
+        limit: Option<i32>,
+        offset: Option<i32>,
+    },
+    SchemaRequest {
+        request_id: String,
+        share_code: String,
+        token: String,
+    },
+    Ping,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum TunnelEngineResponse {
+    QueryResponse {
+        request_id: String,
+        result: serde_json::Value,
+    },
+    SchemaResponse {
+        request_id: String,
+        schema: serde_json::Value,
+    },
+    Register {
+        host_id: String,
+        version: String,
+        capabilities: Vec<String>,
+    },
+    ShareCreated {
+        code: String,
+        db_id: String,
+        permission: String,
+        expires_at: i64,
+    },
+    ShareRevoked {
+        code: String,
+    },
+    Pong,
+}
+
+/// WebSocket handler for engine tunnels
+async fn tunnel_ws_handler(
+    ws: WebSocketUpgrade,
+    Path(host_id): Path<String>,
+    State(state): State<ProxyApiState>,
+) -> impl IntoResponse {
+    ws.on_upgrade(move |socket| handle_tunnel_ws(socket, host_id, state))
+}
+
+async fn handle_tunnel_ws(
+    socket: WebSocket,
+    host_id: String,
+    state: ProxyApiState,
+) {
+    let (mut sender, mut receiver) = socket.split();
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<TunnelEngineMessage>();
+
+    info!("Engine tunnel connected: host_id={}", host_id);
+    // Mark host as online (restores any previously offline routes)
+    state.router.mark_host_online(&host_id).await;
+
+    // Register tunnel in shared registry
+    // Convert our TunnelEngineMessage sender to TunnelMessageToEngine sender
+    // They have the same shape, so we use a wrapper channel
+    let (wrap_tx, mut wrap_rx) = tokio::sync::mpsc::unbounded_channel::<crate::tunnel_registry::TunnelMessageToEngine>();
+    
+    // Bridge: convert TunnelMessageToEngine -> TunnelEngineMessage and send via original tx
+    let tx_clone = tx.clone();
+    tokio::spawn(async move {
+        while let Some(msg) = wrap_rx.recv().await {
+            let engine_msg = match msg {
+                crate::tunnel_registry::TunnelMessageToEngine::QueryRequest { request_id, share_code, token, sql, limit, offset } => {
+                    TunnelEngineMessage::QueryRequest { request_id, share_code, token, sql, limit, offset }
+                }
+                crate::tunnel_registry::TunnelMessageToEngine::SchemaRequest { request_id, share_code, token } => {
+                    TunnelEngineMessage::SchemaRequest { request_id, share_code, token }
+                }
+                crate::tunnel_registry::TunnelMessageToEngine::Ping => TunnelEngineMessage::Ping,
+            };
+            let _ = tx_clone.send(engine_msg);
+        }
+    });
+
+    state.tunnel_registry.register_tunnel(host_id.clone(), wrap_tx).await;
+    info!("Registered tunnel in registry for host: {}", host_id);
+
+    // Send welcome ping
+    let _ = sender.send(Message::Text(
+        serde_json::to_string(&TunnelEngineMessage::Ping).unwrap()
+    )).await;
+
+    // Main loop: handle messages from engine and from relay
+    loop {
+        tokio::select! {
+            // Messages from engine
+            msg = receiver.next() => {
+                match msg {
+                    Some(Ok(Message::Text(text))) => {
+                        if let Ok(resp) = serde_json::from_str::<TunnelEngineResponse>(&text) {
+                            match resp {
+                                TunnelEngineResponse::Register { host_id, version, capabilities } => {
+                                    info!("Engine registered: {} (v{}, caps: {:?})", host_id, version, capabilities);
+                                }
+                                TunnelEngineResponse::ShareCreated { code, db_id, permission, expires_at } => {
+                                    info!("Engine reported share created: {}", code);
+                                    // Add remote route so relay can forward to this engine
+                                    let route = router::ShareRoute {
+                                        share_id: code.clone(),
+                                        db_id,
+                                        protocol: crate::transport::ProtocolType::ConnectRpc,
+                                        engine_port: 0, // Tunnel doesn't use port
+                                        expires_at: chrono::DateTime::from_timestamp(expires_at, 0)
+                                            .unwrap_or_else(|| chrono::Utc::now() + chrono::Duration::hours(24)),
+                                        revoked: false,
+                                        host_id: Some(host_id.clone()), // Track which host owns this share
+                                    };
+                                    state.router.add_remote_route(route).await;
+                                }
+                                TunnelEngineResponse::ShareRevoked { code } => {
+                                    info!("Engine reported share revoked: {}", code);
+                                    state.router.remove_remote_route(&code).await;
+                                }
+                                TunnelEngineResponse::QueryResponse { request_id, result } => {
+                                    debug!("Engine query response: {}", request_id);
+                                    state.tunnel_registry.complete_request(&request_id, result).await;
+                                }
+                                TunnelEngineResponse::SchemaResponse { request_id, schema } => {
+                                    debug!("Engine schema response: {}", request_id);
+                                    state.tunnel_registry.complete_request(&request_id, schema).await;
+                                }
+                                TunnelEngineResponse::Pong => {
+                                    debug!("Engine tunnel pong received");
+                                }
+                            }
+                        }
+                    }
+                    Some(Ok(Message::Close(_))) | None => {
+                        info!("Engine tunnel disconnected: host_id={}", host_id);
+                        break;
+                    }
+                    Some(Err(e)) => {
+                        warn!("Engine tunnel error: {}", e);
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+
+            // Messages to forward to engine
+            Some(msg) = rx.recv() => {
+                let text = serde_json::to_string(&msg).unwrap();
+                if let Err(e) = sender.send(Message::Text(text)).await {
+                    warn!("Failed to send to engine tunnel: {}", e);
+                    break;
+                }
+            }
+
+            // Keepalive
+            _ = tokio::time::sleep(tokio::time::Duration::from_secs(30)) => {
+                let _ = sender.send(Message::Text(
+                    serde_json::to_string(&TunnelEngineMessage::Ping).unwrap()
+                )).await;
+            }
+        }
+    }
+
+    info!("Engine tunnel closed: host_id={}", host_id);
+    // Cleanup tunnel registry
+    state.tunnel_registry.unregister_tunnel(&host_id).await;
+    // Cleanup ALL routes from this host
+    state.router.remove_all_host_routes(&host_id).await;
 }
 
 /// WebSocket upgrade handler

@@ -1,12 +1,20 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Globe, Link2, AlertCircle, Loader2, ArrowLeft, CheckCircle, Database, Lock, Unlock, Clock } from 'lucide-react';
 import { useRemoteConnectionStore } from '../stores/remoteConnectionStore';
+import { listen } from '@tauri-apps/api/event';
+
+interface DeepLinkEvent {
+  code: string;
+  token: string;
+  shareUrl: string;
+  source: string;
+}
 
 export function JoinSharePage() {
   const navigate = useNavigate();
   const { validateUrl, connect, isConnecting, connectionError, clearError } = useRemoteConnectionStore();
-  
+
   const [url, setUrl] = useState('');
   const [isValidating, setIsValidating] = useState(false);
   const [validationResult, setValidationResult] = useState<{
@@ -16,6 +24,56 @@ export function JoinSharePage() {
     tables?: string[];
     expiresAt?: string;
   } | null>(null);
+
+  // PHASE 6: Listen for deep link events from Tauri backend
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+
+    const setupDeepLink = async () => {
+      try {
+        unlisten = await listen<DeepLinkEvent>('deep-link-share', (event) => {
+          console.log('[JoinSharePage] Deep link received:', event.payload);
+          const { shareUrl } = event.payload;
+          setUrl(shareUrl);
+          // Auto-validate when deep link arrives
+          handleValidateWithUrl(shareUrl);
+        });
+      } catch (e) {
+        // Not in Tauri environment (web build) — silently ignore
+      }
+    };
+
+    setupDeepLink();
+
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, []);
+
+  const handleValidateWithUrl = async (shareUrl: string) => {
+    if (!shareUrl.trim()) return;
+
+    clearError();
+    setIsValidating(true);
+    setValidationResult(null);
+
+    try {
+      const result = await validateUrl(shareUrl.trim());
+      setValidationResult({
+        valid: true,
+        dbName: result.db_id,
+        permission: result.permission,
+        tables: result.tables,
+        expiresAt: result.expires_at,
+      });
+    } catch (err) {
+      setValidationResult({
+        valid: false,
+      });
+    } finally {
+      setIsValidating(false);
+    }
+  };
 
   const handleValidate = async () => {
     if (!url.trim()) return;

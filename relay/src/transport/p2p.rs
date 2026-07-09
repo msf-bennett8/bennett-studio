@@ -16,10 +16,24 @@ use std::io;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
-use tokio::sync::RwLock;
-use tracing::{debug, info, warn};
+use tokio::sync::{RwLock, mpsc};
+use tracing::{debug, info, warn, error};
+use serde::{Deserialize, Serialize};
+
+// WebRTC bridge for browser compatibility
+// Browsers speak WebRTC data channels, not raw QUIC
+// This bridge accepts WebRTC and forwards to QUIC
+#[cfg(feature = "webrtc")]
+use webrtc::api::APIBuilder;
+#[cfg(feature = "webrtc")]
+use webrtc::peer_connection::configuration::RTCConfiguration;
+#[cfg(feature = "webrtc")]
+use webrtc::peer_connection::RTCPeerConnection;
+#[cfg(feature = "webrtc")]
+use webrtc::data_channel::RTCDataChannel;
 
 /// P2P transport — can operate as server or client
+/// PHASE 5: Added WebRTC bridge for browser-to-relay connections
 pub struct P2pTransport {
     mode: P2pMode,
     local_ice: IceCandidates,
@@ -29,6 +43,19 @@ pub struct P2pTransport {
     stream_pool: Arc<Mutex<VecDeque<PooledStream>>>,
     /// Server endpoint — only set in server mode, used to accept new connections
     server: Option<super::quic::P2pQuicServer>,
+    /// WebRTC bridge for browser connections (optional, server mode only)
+    #[cfg(feature = "webrtc")]
+    webrtc_bridge: Option<Arc<WebRtcBridge>>,
+    /// Channel for WebRTC-to-QUIC message forwarding
+    webrtc_tx: Option<mpsc::UnboundedSender<WebRtcMessage>>,
+}
+
+/// Message from WebRTC data channel to be forwarded to QUIC
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct WebRtcMessage {
+    pub share_code: String,
+    pub payload: Vec<u8>,
+    pub response_tx: Option<String>, // channel ID for response routing
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,9 +74,11 @@ struct PooledStream {
 
 impl P2pTransport {
     /// Create P2P transport in server mode
+    /// PHASE 5: Optionally initializes WebRTC bridge for browser clients
     pub async fn new_server(
         local_ice: IceCandidates,
         share_code: Option<String>,
+        enable_webrtc: bool,
     ) -> Result<Self, P2pError> {
         info!(mode = "server", "Creating P2P transport");
 
@@ -58,14 +87,40 @@ impl P2pTransport {
             .await
             .map_err(|e| P2pError::QuicFailed(e))?;
 
+        // PHASE 5: Initialize WebRTC bridge if requested
+        #[cfg(feature = "webrtc")]
+        let (webrtc_bridge, webrtc_tx) = if enable_webrtc {
+            let (tx, mut rx) = mpsc::unbounded_channel::<WebRtcMessage>();
+            let bridge = Arc::new(WebRtcBridge::new(tx.clone()).await?);
+            
+            // Spawn bridge message handler
+            let bridge_clone = bridge.clone();
+            tokio::spawn(async move {
+                while let Some(msg) = rx.recv().await {
+                    if let Err(e) = bridge_clone.handle_message(msg).await {
+                        error!("WebRTC bridge message error: {}", e);
+                    }
+                }
+            });
+            
+            (Some(bridge), Some(tx))
+        } else {
+            (None, None)
+        };
+
+        #[cfg(not(feature = "webrtc"))]
+        let (webrtc_bridge, webrtc_tx) = (None, None);
+
         Ok(Self {
             mode: P2pMode::Server,
             local_ice,
             remote_ice: None,
             share_code,
-            connection: Arc::new(RwLock::new(None)), // No connection yet — accepted in run_p2p()
+            connection: Arc::new(RwLock::new(None)),
             stream_pool: Arc::new(Mutex::new(VecDeque::new())),
             server: Some(server),
+            webrtc_bridge,
+            webrtc_tx,
         })
     }
 
@@ -105,6 +160,11 @@ impl P2pTransport {
             connection: Arc::new(RwLock::new(Some(quic_conn))),
             stream_pool: Arc::new(Mutex::new(VecDeque::new())),
             server: None,
+            #[cfg(feature = "webrtc")]
+            webrtc_bridge: None,
+            #[cfg(not(feature = "webrtc"))]
+            webrtc_bridge: (),
+            webrtc_tx: None,
         })
     }
 
@@ -264,6 +324,8 @@ pub enum P2pError {
     IceFailed(super::ice::IceError),
     QuicFailed(QuicError),
     NotConnected,
+    #[cfg(feature = "webrtc")]
+    WebRtcFailed(String),
 }
 
 impl std::fmt::Display for P2pError {
@@ -272,6 +334,8 @@ impl std::fmt::Display for P2pError {
             P2pError::IceFailed(e) => write!(f, "ICE failed: {}", e),
             P2pError::QuicFailed(e) => write!(f, "QUIC failed: {}", e),
             P2pError::NotConnected => write!(f, "P2P not connected"),
+            #[cfg(feature = "webrtc")]
+            P2pError::WebRtcFailed(e) => write!(f, "WebRTC failed: {}", e),
         }
     }
 }
@@ -284,6 +348,141 @@ impl std::error::Error for P2pError {
             _ => None,
         }
     }
+}
+
+// ============================================================================
+// PHASE 5: WebRTC Bridge for Browser Compatibility
+// ============================================================================
+
+#[cfg(feature = "webrtc")]
+pub struct WebRtcBridge {
+    /// Active peer connections by share code
+    peer_connections: Arc<RwLock<std::collections::HashMap<String, Arc<RTCPeerConnection>>>>,
+    /// Data channels by share code
+    data_channels: Arc<RwLock<std::collections::HashMap<String, Arc<RTCDataChannel>>>>,
+    /// Message sender to QUIC forwarder
+    msg_tx: mpsc::UnboundedSender<WebRtcMessage>,
+}
+
+#[cfg(feature = "webrtc")]
+impl WebRtcBridge {
+    pub async fn new(msg_tx: mpsc::UnboundedSender<WebRtcMessage>) -> Result<Self, P2pError> {
+        info!("Initializing WebRTC bridge for browser connections");
+        
+        Ok(Self {
+            peer_connections: Arc::new(RwLock::new(std::collections::HashMap::new())),
+            data_channels: Arc::new(RwLock::new(std::collections::HashMap::new())),
+            msg_tx,
+        })
+    }
+
+    /// Handle incoming WebRTC offer from browser
+    pub async fn handle_browser_offer(
+        &self,
+        share_code: String,
+        offer_sdp: String,
+        browser_ice_candidates: Vec<serde_json::Value>,
+    ) -> Result<serde_json::Value, P2pError> {
+        let config = RTCConfiguration {
+            ice_servers: vec![webrtc::ice::mdns::MulticastDnsMode::Disabled.into()],
+            ..Default::default()
+        };
+
+        let api = APIBuilder::new().build();
+        let pc = Arc::new(api.new_peer_connection(config).await
+            .map_err(|e| P2pError::WebRtcFailed(e.to_string()))?);
+
+        // Set remote description (browser's offer)
+        let offer = webrtc::peer_connection::sdp::session_description::RTCSessionDescription::offer(offer_sdp)
+            .map_err(|e| P2pError::WebRtcFailed(e.to_string()))?;
+        
+        pc.set_remote_description(offer).await
+            .map_err(|e| P2pError::WebRtcFailed(e.to_string()))?;
+
+        // Create answer
+        let answer = pc.create_answer(None).await
+            .map_err(|e| P2pError::WebRtcFailed(e.to_string()))?;
+        
+        pc.set_local_description(answer.clone()).await
+            .map_err(|e| P2pError::WebRtcFailed(e.to_string()))?;
+
+        // Handle data channel from browser
+        let pc_clone = pc.clone();
+        let share_code_clone = share_code.clone();
+        let msg_tx = self.msg_tx.clone();
+        
+        pc.on_data_channel(Box::new(move |dc: Arc<RTCDataChannel>| {
+            let share_code = share_code_clone.clone();
+            let msg_tx = msg_tx.clone();
+            
+            Box::pin(async move {
+                info!("Browser opened data channel for share {}", share_code);
+                
+                dc.on_message(Box::new(move |msg: webrtc::data_channel::data_channel_message::DataChannelMessage| {
+                    let share_code = share_code.clone();
+                    let msg_tx = msg_tx.clone();
+                    
+                    Box::pin(async move {
+                        let payload = msg.data.to_vec();
+                        let _ = msg_tx.send(WebRtcMessage {
+                            share_code,
+                            payload,
+                            response_tx: None,
+                        });
+                    })
+                })).await;
+            })
+        })).await;
+
+        // Store peer connection
+        {
+            let mut pcs = self.peer_connections.write().await;
+            pcs.insert(share_code.clone(), pc.clone());
+        }
+
+        // Wait for ICE gathering
+        let mut gather_complete = pc.ice_gathering_state();
+        // ... (simplified, would need proper ICE gathering wait)
+
+        // Return answer SDP
+        let local_desc = pc.local_description().await;
+        let answer_sdp = local_desc.map(|d| d.sdp).unwrap_or_default();
+
+        Ok(serde_json::json!({
+            "type": "answer",
+            "sdp": answer_sdp,
+        }))
+    }
+
+    /// Forward message from WebRTC to QUIC stream
+    async fn handle_message(&self, msg: WebRtcMessage) -> Result<(), Box<dyn std::error::Error>> {
+        debug!("Forwarding WebRTC message for share {}", msg.share_code);
+        
+        // This would forward to the QUIC connection to the engine
+        // Implementation depends on how the relay routes to engine
+        // For now, log and store for later routing integration
+        
+        Ok(())
+    }
+
+    /// Close and cleanup a browser connection
+    pub async fn close_connection(&self, share_code: &str) {
+        let mut pcs = self.peer_connections.write().await;
+        if let Some(pc) = pcs.remove(share_code) {
+            let _ = pc.close().await;
+        }
+        
+        let mut dcs = self.data_channels.write().await;
+        dcs.remove(share_code);
+    }
+}
+
+/// WebRTC-specific errors
+#[derive(Debug)]
+pub enum WebRtcError {
+    ConnectionFailed(String),
+    SdpExchangeFailed(String),
+    DataChannelFailed(String),
 }
 
 // Keep the stub for backward compatibility during transition

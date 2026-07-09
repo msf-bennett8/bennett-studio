@@ -78,10 +78,20 @@ export function ShareLandingPage() {
     }
   }, [code, token, shareUrl]);
 
+  const [deepLinkStatus, setDeepLinkStatus] = useState<'idle' | 'opening' | 'unavailable'>('idle');
+
   const handleDeepLink = () => {
     // Open in Bennett Studio desktop app
     const deepLink = `bennett://share/${code}?t=${encodeURIComponent(token || '')}`;
+    setDeepLinkStatus('opening');
+    
+    // Try to open the app
     window.location.href = deepLink;
+    
+    // If app doesn't open within 2s, show fallback
+    setTimeout(() => {
+      setDeepLinkStatus('unavailable');
+    }, 2000);
   };
 
   const handleQueryInBrowser = async () => {
