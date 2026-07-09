@@ -304,6 +304,11 @@ struct ProxyApiState {
     router: Arc<router::ShareRouter>,
 }
 
+#[derive(Debug, serde::Deserialize)]
+struct SchemaQueryParams {
+    token: String,
+}
+
 /// CORS preflight response
 async fn cors_preflight() -> impl IntoResponse {
     let mut headers = axum::http::HeaderMap::new();
@@ -403,7 +408,13 @@ async fn proxy_query(
 async fn proxy_schema(
     Path(code): Path<String>,
     State(state): State<ProxyApiState>,
+    axum::extract::Query(params): axum::extract::Query<SchemaQueryParams>,
 ) -> impl IntoResponse {
+    let token = params.token;
+    eprintln!("DEBUG SCHEMA PROXY: code={}, token_len={}, token_prefix={}", 
+        code, token.len(), &token[..token.len().min(20)]);
+    eprintln!("DEBUG SCHEMA PROXY: code={}, token_len={}, token_empty={}, token_prefix={}", 
+        code, token.len(), token.is_empty(), &token[..token.len().min(20)]);
     let mut headers = axum::http::HeaderMap::new();
     for (k, v) in router::cors_headers() {
         headers.insert(k, v.parse().unwrap());
@@ -423,13 +434,12 @@ async fn proxy_schema(
     info!(share = %code, "Proxy schema request received — forwarding to engine");
 
     // Forward to engine via TCP
-    // Token is passed as query param since GET requests don't have bodies
     match state.router.forward_to_engine(
         &code,
         "GET",
         &format!("/api/shares/{}/schema", code),
         None,
-        "", // Token will be in URL for GET requests
+        &token,
     ).await {
         Ok(response_bytes) => {
             let response_str = String::from_utf8_lossy(&response_bytes);

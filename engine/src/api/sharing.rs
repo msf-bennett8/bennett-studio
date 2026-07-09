@@ -628,6 +628,124 @@ pub async fn get_share_info(
     })) ))
 }
 
+/// POST /api/shares/:code/query — Execute a query on a shared database (guest)
+pub async fn execute_share_query(
+    Path(code): Path<String>,
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+    Json(req): Json<crate::api::http::ExecuteQueryRequest>,
+) -> Result<Json<crate::models::database::ApiResponse<crate::control_plane::connection::manager::QueryResult>>, StatusCode> {
+    // Extract token from header
+    let token = headers
+        .get("x-share-token")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+
+    if token.is_empty() {
+        return Ok(Json(crate::models::database::ApiResponse::error(
+            "Missing X-Share-Token header".to_string()
+        )));
+    }
+
+    // Get share record
+    let record = match state.share_store.get_share(&code).await {
+        Ok(Some(r)) => r,
+        Ok(None) => {
+            return Ok(Json(crate::models::database::ApiResponse::error(
+                "Share not found".to_string()
+            )));
+        }
+        Err(e) => {
+            warn!("Failed to get share {}: {}", code, e);
+            return Ok(Json(crate::models::database::ApiResponse::error(
+                "Internal error".to_string()
+            )));
+        }
+    };
+
+    // Check if revoked
+    if record.revoked {
+        return Ok(Json(crate::models::database::ApiResponse::error(
+            "Share has been revoked".to_string()
+        )));
+    }
+
+    // Check expiration
+    if record.expires_at < Utc::now() {
+        return Ok(Json(crate::models::database::ApiResponse::error(
+            "Share has expired".to_string()
+        )));
+    }
+
+    // Validate JWT token
+    let token_manager = state.token_manager.read().await;
+    let validated = match token_manager.validate_token(token) {
+        Ok(v) => v,
+        Err(e) => {
+            return Ok(Json(crate::models::database::ApiResponse::error(
+                format!("Invalid token: {}", e)
+            )));
+        }
+    };
+
+    // Verify token matches code
+    if validated.code != code {
+        return Ok(Json(crate::models::database::ApiResponse::error(
+            "Token does not match share code".to_string()
+        )));
+    }
+
+    // Check if token JTI is revoked
+    if state.share_store.is_revoked(&validated.jti).await {
+        return Ok(Json(crate::models::database::ApiResponse::error(
+            "Token has been revoked".to_string()
+        )));
+    }
+
+    // Validate SQL (same rules as internal query)
+    if let Err(e) = crate::api::http::validate_sql(&req.sql) {
+        return Ok(Json(crate::models::database::ApiResponse::error(e)));
+    }
+
+    // Get database instance
+    let instance = {
+        let db = state.databases.lock().unwrap();
+        match db.iter().find(|d| d.id == record.db_id).cloned() {
+            Some(i) => i,
+            None => {
+                return Ok(Json(crate::models::database::ApiResponse::error(
+                    "Database not found".to_string()
+                )));
+            }
+        }
+    };
+
+    // Auto-connect if not connected
+    {
+        let mut conn = state.connections.lock().await;
+        if !conn.is_connected(&record.db_id) {
+            if let Err(e) = conn.connect(&instance).await {
+                return Ok(Json(crate::models::database::ApiResponse::error(
+                    format!("Connection failed: {}", e)
+                )));
+            }
+        }
+    }
+
+    // Execute query
+    let result = {
+        let conn = state.connections.lock().await;
+        match conn.execute(&record.db_id, &req.sql).await {
+            Ok(r) => Json(crate::models::database::ApiResponse::success(r)),
+            Err(e) => Json(crate::models::database::ApiResponse::error(
+                format!("Query failed: {}", e)
+            )),
+        }
+    };
+
+    Ok(result)
+}
+
 /// GET /api/shares/:code/resolve — Resolve share code to host endpoint (guest)
 /// Returns the host IP and port so the guest can connect directly
 pub async fn resolve_share(

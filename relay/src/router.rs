@@ -180,6 +180,8 @@ impl ShareRouter {
 
         // Build HTTP request
         let body_len = body.as_ref().map(|b| b.len()).unwrap_or(0);
+        eprintln!("DEBUG FORWARD: method={}, path={}, token_len={}, token_empty={}", 
+            method, path, token.len(), token.is_empty());
         let request = format!(
             "{} {} HTTP/1.1\r\n\
              Host: localhost:{}\r\n\
@@ -194,6 +196,7 @@ impl ShareRouter {
             body_len,
             token
         );
+        eprintln!("DEBUG FORWARD: request={:?}", request);
 
         stream.write_all(request.as_bytes()).await?;
         if let Some(body) = body {

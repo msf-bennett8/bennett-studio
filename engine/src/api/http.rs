@@ -46,7 +46,7 @@ fn validate_filter(filter: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn validate_sql(sql: &str) -> Result<(), String> {
+pub fn validate_sql(sql: &str) -> Result<(), String> {
     // Block multi-statement queries
     if sql.contains(';') {
         return Err("Multiple statements are not allowed".to_string());
