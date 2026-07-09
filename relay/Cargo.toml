@@ -17,9 +17,6 @@ path = "src/sidecar/main.rs"
 [features]
 default = ["p2p"]
 p2p = ["quinn", "tokio-tungstenite"]
-
-[features]
-default = []
 webrtc = ["dep:webrtc"]
 
 [dependencies]
