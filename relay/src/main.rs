@@ -151,12 +151,7 @@ async fn main() -> anyhow::Result<()> {
                 transport
             }
             Err(e) => {
-                warn!("P2P transport failed: {}. Falling back to pooled TCP.", e);
-                transport::TransportFactory::create_pooled_tcp(
-                    config.engine_http,
-                    config.engine_mysql,
-                    config.max_conn_per_share,
-                )
+                return Err(anyhow::anyhow!("P2P transport failed: {}. Use --enable-p2p=false for TCP mode.", e));
             }
         }
     } else {
@@ -167,6 +162,17 @@ async fn main() -> anyhow::Result<()> {
             config.max_conn_per_share,
         )
     };
+
+    // In P2P server mode, print the base64 ICE for client connection
+    if config.enable_p2p && config.p2p_mode == "engine" {
+        if let Some(p2p) = transport.as_any().downcast_ref::<transport::p2p::P2pTransport>() {
+            let ice_b64 = p2p.local_ice().to_base64();
+            info!("P2P server ICE (base64): {}", ice_b64);
+            println!("=== SHARE THIS ICE WITH CLIENTS ===");
+            println!("{}", ice_b64);
+            println!("===================================");
+        }
+    }
 
     // Start HTTP proxy API for external websites (ALWAYS — independent of P2P mode)
     // This is the base API endpoint that external websites use

@@ -113,6 +113,11 @@ impl P2pTransport {
         self.mode == P2pMode::Server
     }
 
+    /// Get the local ICE candidates (for sharing with remote peers)
+    pub fn local_ice(&self) -> &super::ice::IceCandidates {
+        &self.local_ice
+    }
+
     /// Accept an incoming QUIC connection (server mode only)
     /// Blocks until a client connects
     pub async fn accept_connection(&self) -> Result<(), P2pError> {
