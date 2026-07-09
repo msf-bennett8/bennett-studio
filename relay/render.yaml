@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: bennett-relay
+    runtime: docker
+    plan: free
+    rootDir: relay
+    envVars:
+      - key: BENNETT_TCP_ONLY
+        value: "1"
+      - key: BENNETT_BIND
+        value: "0.0.0.0:8443"
+      - key: BENNETT_PROXY_API_BIND
+        value: "0.0.0.0:8444"
+      - key: BENNETT_ENGINE_HTTP_PORT
+        value: "3001"
+      - key: BENNETT_ENGINE_MYSQL_PORT
+        value: "3306"
+      - key: BENNETT_MAX_CONN_PER_SHARE
+        value: "100"
+      - key: BENNETT_ROUTE_REFRESH
+        value: "5"
+      - key: BENNETT_FIREBASE_URL
+        generateValue: false  # Set this manually in Render dashboard
+    healthCheckPath: /health
+    disk:
+      name: relay-data
+      mountPath: /data
+      sizeGB: 1
+      
