@@ -6,7 +6,7 @@
 //! The actual implementation is injected by the consuming app (desktop or web).
 //! Use setVaultImpl() to provide the platform-specific backend.
 
-import type { StoredToken, TokenVault, VaultStatus } from '@bennett/shared';
+import type { StoredToken, TokenVault, VaultStatus } from '@bennettstudio/shared';
 
 let vaultImpl: TokenVault | null = null;
 

@@ -1,0 +1,37 @@
+{
+  "name": "@bennettstudio/shared",
+  "version": "0.3.0",
+  "description": "Bennett Studio shared types",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.esm.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.esm.js",
+      "require": "./dist/index.cjs.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build"
+  },
+  "files": [
+    "dist",
+    "*.ts"
+  ],
+  "keywords": [
+    "bennett",
+    "types",
+    "database"
+  ],
+  "author": "Bennett Studio",
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2"
+  }
+}

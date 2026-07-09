@@ -1,5 +1,5 @@
 {
-  "name": "@bennett/sdk",
+  "name": "@bennettstudio/sdk",
   "version": "0.3.0",
   "description": "Bennett Studio SDK — query shared databases via P2P or relay",
   "type": "module",
@@ -24,10 +24,11 @@
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
+    "@bennettstudio/shared": "^0.3.0",
     "@bufbuild/protobuf": "^1.10.0",
     "@connectrpc/connect": "^1.4.0",
-    "@connectrpc/connect-web": "^1.4.0",
-    "@connectrpc/connect-node": "^1.4.0"
+    "@connectrpc/connect-node": "^1.4.0",
+    "@connectrpc/connect-web": "^1.4.0"
   },
   "devDependencies": {
     "@bufbuild/protoc-gen-es": "^1.10.0",
@@ -36,11 +37,11 @@
     "@rollup/plugin-node-resolve": "^15.2.3",
     "@rollup/plugin-terser": "^0.4.4",
     "@rollup/plugin-typescript": "^11.1.6",
+    "@types/node": "^26.1.1",
     "rollup": "^4.17.0",
     "typescript": "^5.4.5",
     "vitest": "^1.6.0"
   },
-  "peerDependencies": {},
   "files": [
     "dist",
     "src",

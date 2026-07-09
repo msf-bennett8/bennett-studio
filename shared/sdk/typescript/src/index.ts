@@ -48,7 +48,7 @@ export type {
   StoredToken,
   TokenVault,
   VaultStatus,
-} from '@bennett/shared';
+} from '@bennettstudio/shared';
 
 // Vault crypto (shared between desktop and web)
 export {
