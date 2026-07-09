@@ -170,7 +170,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Start HTTP proxy API for external websites (ALWAYS — independent of P2P mode)
     // This is the base API endpoint that external websites use
-    let _api_handle = {
+    let api_handle = {
         let router_clone = router.clone();
         let _transport_clone = transport.clone();
         let bind_addr = config.proxy_api_bind.to_string();
@@ -178,12 +178,18 @@ async fn main() -> anyhow::Result<()> {
         println!("DEBUG MAIN: bind_addr={}", bind_addr);
         info!(addr = %bind_addr, "Starting HTTP proxy API for external website access");
 
-        Some(tokio::spawn(async move {
+        tokio::spawn(async move {
+            println!("DEBUG PROXY: Starting HTTP proxy API task on {}", bind_addr);
             if let Err(e) = start_http_proxy_api(bind_addr, router_clone, _transport_clone).await {
                 error!("HTTP proxy API error: {}", e);
             }
-        }))
+            println!("DEBUG PROXY: HTTP proxy API task ended");
+        })
     };
+
+    // Yield to ensure the spawned task gets a chance to start before we block on relay.run()
+    tokio::task::yield_now().await;
+    tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
     // Start health monitor
     let _health_handle = health::HealthMonitor::start(
@@ -236,11 +242,16 @@ async fn main() -> anyhow::Result<()> {
     let relay = server::RelayServer::new(config, router, transport).await?;
 
     info!("Relay server ready — waiting for connections");
-    
+
     // Run server with shutdown support
+    // The api_handle must stay alive across this await so the task isn't cancelled
     relay.run(shutdown_rx).await?;
 
     info!("Relay server shutdown complete");
+
+    // Explicitly keep the handle alive until shutdown (prevents premature drop)
+    drop(api_handle);
+
     Ok(())
 }
 
@@ -252,7 +263,8 @@ async fn start_http_proxy_api(
     router: Arc<router::ShareRouter>,
     _transport: Arc<dyn transport::Transport>,
 ) -> anyhow::Result<()> {
-    println!("DEBUG PROXY: bind_addr={}", bind_addr);
+    // Use eprintln to bypass any tracing/log capture and guarantee visibility
+    eprintln!("DEBUG PROXY: bind_addr={}", bind_addr);
     let app_state = ProxyApiState { router };
 
     let app = Router::new()

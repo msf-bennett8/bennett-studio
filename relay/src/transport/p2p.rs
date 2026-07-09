@@ -104,6 +104,13 @@ impl P2pTransport {
         })
     }
 
+    /// Accept an incoming bidirectional stream from the P2P connection
+    pub async fn accept_stream(&self) -> Result<(super::ProtocolType, quinn::SendStream, quinn::RecvStream), P2pError> {
+        let conn = self.get_connection().await?;
+        super::quic::accept_stream(&conn).await
+            .map_err(|e| P2pError::QuicFailed(e))
+    }
+
     /// Get the connection (reconnect if lost)
     async fn get_connection(&self) -> Result<P2pQuicConnection, P2pError> {
         let conn = self.connection.read().await;
@@ -204,6 +211,10 @@ impl Transport for P2pTransport {
             }
         })
     }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 /// P2P transport errors
@@ -259,5 +270,9 @@ impl Transport for P2pTransportStub {
 
     fn health_check(&self) -> Pin<Box<dyn Future<Output = bool> + Send + '_>> {
         Box::pin(async move { false })
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 }

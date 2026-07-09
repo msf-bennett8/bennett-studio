@@ -20,6 +20,7 @@ use crate::multiplexer::{
 };
 use crate::router::ShareRouter;
 use crate::transport::{ProtocolType, Transport, ALPN_HTTP1, ALPN_HTTP2, ALPN_MYSQL};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 // Note: splice() zero-copy only works on plain TcpStream pairs.
 // TLS-terminated traffic uses tokio::io::copy_bidirectional.
 
@@ -269,18 +270,43 @@ impl RelayServer {
     ) -> anyhow::Result<()> {
         info!("Relay running in P2P mode");
 
+        // Downcast to P2pTransport to access accept_stream()
+        let p2p_transport = self.transport.as_any()
+            .downcast_ref::<crate::transport::p2p::P2pTransport>()
+            .ok_or_else(|| anyhow::anyhow!("P2P mode requires P2pTransport"))?;
+
         loop {
             tokio::select! {
+                biased; // Check shutdown first to avoid starving it
+
                 _ = shutdown_rx.changed() => {
                     if *shutdown_rx.borrow() {
                         info!("P2P shutdown signal received");
                         break;
                     }
                 }
-                // The P2P transport handles connections internally
-                // We just need to proxy between QUIC streams and engine
-                _ = tokio::time::sleep(tokio::time::Duration::from_secs(1)) => {
-                    // Health check
+
+                // Accept incoming QUIC bidirectional streams from remote peer
+                stream_result = p2p_transport.accept_stream() => {
+                    match stream_result {
+                        Ok((protocol, send, recv)) => {
+                            let srv = self.clone();
+                            tokio::spawn(async move {
+                                if let Err(e) = srv.handle_p2p_stream(protocol, send, recv).await {
+                                    warn!("P2P stream handler error: {}", e);
+                                }
+                            });
+                        }
+                        Err(e) => {
+                            warn!("P2P stream accept failed: {}", e);
+                            // Brief backoff to avoid tight spin on persistent errors
+                            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                        }
+                    }
+                }
+
+                // Periodic health check (less frequent since we have real work now)
+                _ = tokio::time::sleep(tokio::time::Duration::from_secs(5)) => {
                     if !self.transport.health_check().await {
                         warn!("P2P transport unhealthy");
                     }
@@ -289,6 +315,93 @@ impl RelayServer {
         }
 
         info!("P2P relay stopped");
+        Ok(())
+    }
+
+    /// Handle a single P2P QUIC stream — proxy between remote peer and local engine
+    async fn handle_p2p_stream(
+        self: &Arc<Self>,
+        protocol: ProtocolType,
+        mut client_send: quinn::SendStream,
+        mut client_recv: quinn::RecvStream,
+    ) -> anyhow::Result<()> {
+        info!(protocol = ?protocol, "Handling P2P stream");
+
+        // Acquire connection to local engine via TCP
+        let mut engine_conn = match self.transport.acquire(protocol).await {
+            Ok(conn) => conn,
+            Err(e) => {
+                warn!(protocol = ?protocol, error = %e, "Engine connection failed");
+                return Ok(());
+            }
+        };
+
+        // Bridge the P2P QUIC stream to the local engine TCP connection
+        match &mut engine_conn.stream {
+            crate::transport::ByteStream::Tcp(tcp_stream) => {
+                let (mut engine_read, mut engine_write) = tokio::io::split(tcp_stream);
+
+                // Client (P2P remote) → Engine (local TCP)
+                let client_to_engine = async {
+                    let mut buf = [0u8; 8192];
+                    loop {
+                        match client_recv.read(&mut buf).await {
+                            Ok(Some(n)) => {
+                                if n == 0 {
+                                    break;
+                                }
+                                if let Err(e) = engine_write.write_all(&buf[..n]).await {
+                                    debug!("P2P→Engine write error: {}", e);
+                                    break;
+                                }
+                            }
+                            Ok(None) => break,
+                            Err(e) => {
+                                debug!("P2P recv error: {}", e);
+                                break;
+                            }
+                        }
+                    }
+                };
+
+                // Engine (local TCP) → Client (P2P remote)
+                let engine_to_client = async {
+                    let mut buf = [0u8; 8192];
+                    loop {
+                        match engine_read.read(&mut buf).await {
+                            Ok(n) => {
+                                if n == 0 {
+                                    break;
+                                }
+                                if let Err(e) = client_send.write_all(&buf[..n]).await {
+                                    debug!("Engine→P2P write error: {}", e);
+                                    break;
+                                }
+                            }
+                            Err(e) => {
+                                debug!("Engine read error: {}", e);
+                                break;
+                            }
+                        }
+                    }
+                };
+
+                tokio::select! {
+                    _ = client_to_engine => {},
+                    _ = engine_to_client => {},
+                }
+
+                // Gracefully close the QUIC send stream
+                let _ = client_send.finish();
+            }
+            #[cfg(feature = "p2p")]
+            crate::transport::ByteStream::Quic(_, _, _) => {
+                warn!("P2P-to-P2P stream bridging not yet implemented");
+            }
+        }
+
+        self.transport.release(engine_conn);
+        debug!(protocol = ?protocol, "P2P stream handler complete");
         Ok(())
     }
 }

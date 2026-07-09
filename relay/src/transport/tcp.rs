@@ -167,6 +167,10 @@ impl Transport for PooledTcpTransport {
             http_ok && mysql_ok
         })
     }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 /// Cleanup stale connections from pool

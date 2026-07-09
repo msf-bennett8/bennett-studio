@@ -152,7 +152,7 @@ pub async fn connect_quic_client(
 /// Bypasses hole punching entirely — used when both peers are on the same host
 pub async fn connect_quic_localhost(
     remote_ice: &IceCandidates,
-    local_ice: &IceCandidates,
+    _local_ice: &IceCandidates,
 ) -> Result<P2pQuicConnection, QuicError> {
     info!("Same-machine detected — using localhost QUIC connection (bypassing hole punch)");
 

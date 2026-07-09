@@ -148,6 +148,9 @@ pub trait Transport: Send + Sync {
     fn health_check(
         &self,
     ) -> Pin<Box<dyn Future<Output = bool> + Send + '_>>;
+
+    /// Downcast to Any for transport-specific operations (e.g., P2P stream accept)
+    fn as_any(&self) -> &dyn std::any::Any;
 }
 
 /// Protocol types that the engine supports
