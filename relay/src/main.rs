@@ -374,7 +374,37 @@ async fn start_http_proxy_api(
         tunnel_registry: tunnel_registry.clone(),
     };
 
+    // CORS middleware for external web app access
+    use tower_http::cors::{CorsLayer, Any};
+    use axum::http::{HeaderValue, Method};
+
+    let cors = CorsLayer::new()
+        .allow_origin([
+            "https://share-bennett-studio.vercel.app".parse::<HeaderValue>().unwrap(),
+            "http://localhost:5173".parse::<HeaderValue>().unwrap(),
+            "http://localhost:5174".parse::<HeaderValue>().unwrap(),
+            "http://localhost:3000".parse::<HeaderValue>().unwrap(),
+            "http://localhost:3001".parse::<HeaderValue>().unwrap(),
+            "tauri://localhost".parse::<HeaderValue>().unwrap(),
+        ])
+        .allow_methods([
+            Method::GET,
+            Method::POST,
+            Method::PUT,
+            Method::DELETE,
+            Method::OPTIONS,
+        ])
+        .allow_headers([
+            axum::http::header::CONTENT_TYPE,
+            axum::http::header::AUTHORIZATION,
+            axum::http::header::HeaderName::from_static("x-share-code"),
+            axum::http::header::HeaderName::from_static("x-share-token"),
+            axum::http::header::HeaderName::from_static("x-requested-with"),
+        ])
+        .allow_credentials(true);
+
     let app = Router::new()
+        .layer(cors)
         // Health check
         .route("/health", get(proxy_health))
         // CORS preflight

@@ -1,3 +1,9 @@
+// Detect if we're on the web app (remote) vs local engine
+const isRemoteMode = () => {
+  const url = (import.meta as any).env?.VITE_API_URL || '';
+  return url.includes('onrender.com') || url.includes('vercel.app') || window.location.hostname.includes('vercel.app');
+};
+
 export const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:3001';
 
 import { DatabaseInstance, CreateDatabaseRequest, DatabaseSource, DatabaseStatusResponse, EnvFileSuggestion } from '@bennettstudio/shared';
@@ -181,15 +187,36 @@ export const api = {
   scanEnvFiles: (id: string) =>
     fetchApi<EnvFileSuggestion[]>(`/api/databases/${id}/env-scan`),
 
-  // Notes API
-  listNotes: () => fetchApi<Note[]>('/api/notes'),
-  getNote: (id: string) => fetchApi<Note>(`/api/notes/${id}`),
-  createNote: (req: CreateNoteRequest) => fetchApi<Note>('/api/notes', { method: 'POST', body: JSON.stringify(req) }),
-  updateNote: (id: string, req: UpdateNoteRequest) => fetchApi<Note>(`/api/notes/${id}`, { method: 'PUT', body: JSON.stringify(req) }),
-  deleteNote: (id: string) => fetchApi<boolean>(`/api/notes/${id}`, { method: 'DELETE' }),
-  searchNotes: (query: string) => fetchApi<Note[]>(`/api/notes/search?q=${encodeURIComponent(query)}`),
-  syncNotes: (notes: Note[], deviceId: string) => fetchApi<Note[]>('/api/notes/sync', {
-    method: 'POST',
-    body: JSON.stringify({ notes, device_id: deviceId, last_sync: null }),
-  }),
+  // Notes API — local engine only, skip in remote share mode
+  listNotes: () => {
+    if (isRemoteMode()) return Promise.resolve([]);
+    return fetchApi<Note[]>('/api/notes');
+  },
+  getNote: (id: string) => {
+    if (isRemoteMode()) return Promise.resolve({} as Note);
+    return fetchApi<Note>(`/api/notes/${id}`);
+  },
+  createNote: (req: CreateNoteRequest) => {
+    if (isRemoteMode()) return Promise.resolve({} as Note);
+    return fetchApi<Note>('/api/notes', { method: 'POST', body: JSON.stringify(req) });
+  },
+  updateNote: (id: string, req: UpdateNoteRequest) => {
+    if (isRemoteMode()) return Promise.resolve({} as Note);
+    return fetchApi<Note>(`/api/notes/${id}`, { method: 'PUT', body: JSON.stringify(req) });
+  },
+  deleteNote: (id: string) => {
+    if (isRemoteMode()) return Promise.resolve(false);
+    return fetchApi<boolean>(`/api/notes/${id}`, { method: 'DELETE' });
+  },
+  searchNotes: (query: string) => {
+    if (isRemoteMode()) return Promise.resolve([]);
+    return fetchApi<Note[]>(`/api/notes/search?q=${encodeURIComponent(query)}`);
+  },
+  syncNotes: (notes: Note[], deviceId: string) => {
+    if (isRemoteMode()) return Promise.resolve([]);
+    return fetchApi<Note[]>('/api/notes/sync', {
+      method: 'POST',
+      body: JSON.stringify({ notes, device_id: deviceId, last_sync: null }),
+    });
+  },
 };

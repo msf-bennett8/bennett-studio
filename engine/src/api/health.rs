@@ -94,11 +94,12 @@ pub async fn comprehensive_health_check(
 
     // Relay tunnel check
     let tunnel_start = std::time::Instant::now();
-    let tunnel_ok = std::env::var("BENNETT_RELAY_URL").is_ok();
+    let tunnel_url = std::env::var("BENNETT_RELAY_URL").unwrap_or_default();
+    let tunnel_ok = !tunnel_url.is_empty();
     checks.insert("relay_tunnel".to_string(), ComponentHealth {
         status: if tunnel_ok { "ok".to_string() } else { "disabled".to_string() },
         message: if tunnel_ok {
-            Some("Relay tunnel configured".to_string())
+            Some(format!("Relay tunnel configured: {}", tunnel_url))
         } else {
             Some("Relay tunnel not configured — P2P only mode".to_string())
         },

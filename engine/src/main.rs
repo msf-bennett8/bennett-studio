@@ -12,6 +12,14 @@ use bennett_engine::{
 
 #[tokio::main]
 async fn main() {
+    // Load .env file if present (for local development)
+    // Production uses actual environment variables
+    if let Err(e) = dotenvy::dotenv() {
+        tracing::debug!(".env file not found or invalid: {}", e);
+    } else {
+        tracing::info!("Loaded environment from .env file");
+    }
+
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env().add_directive("bennett_engine=debug".parse().unwrap()))
         .init();
@@ -72,35 +80,43 @@ async fn main() {
     // PHASE 6: Start relay tunnel for remote engine → relay communication
     // This allows the Render relay to forward traffic when P2P fails
     let relay_url = std::env::var("BENNETT_RELAY_URL")
-        .unwrap_or_else(|_| "wss://bennett-relay.onrender.com/ws/tunnel".to_string());
-    let host_id = format!("host-{}", uuid::Uuid::new_v4().to_string().split('-').next().unwrap_or("unknown"));
-    let token_manager_clone = state.token_manager.clone();
-    let share_store_clone = state.share_store.clone();
-    let connection_manager_clone = state.connections.clone();
+        .unwrap_or_else(|_| {
+            tracing::warn!("BENNETT_RELAY_URL not set — tunnel disabled, P2P only mode");
+            String::new()
+        });
 
-    tokio::spawn(async move {
-        use bennett_engine::sharing::relay::start_relay_tunnel;
+    if !relay_url.is_empty() {
+        let host_id = format!("host-{}", uuid::Uuid::new_v4().to_string().split('-').next().unwrap_or("unknown"));
+        let token_manager_clone = state.token_manager.clone();
+        let share_store_clone = state.share_store.clone();
+        let connection_manager_clone = state.connections.clone();
 
-        match start_relay_tunnel(
-            relay_url,
-            host_id,
-            token_manager_clone,
-            share_store_clone,
-            Some(connection_manager_clone),
-        ).await {
-            Ok(tx) => {
-                tracing::info!("Relay tunnel established — engine reachable via relay fallback");
-                // Keep tx alive so tunnel stays open
-                let _ = tx;
-                loop {
-                    tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
+        tokio::spawn(async move {
+            use bennett_engine::sharing::relay::start_relay_tunnel;
+
+            match start_relay_tunnel(
+                relay_url,
+                host_id,
+                token_manager_clone,
+                share_store_clone,
+                Some(connection_manager_clone),
+            ).await {
+                Ok(tx) => {
+                    tracing::info!("Relay tunnel established — engine reachable via relay fallback");
+                    // Keep tx alive so tunnel stays open
+                    let _ = tx;
+                    loop {
+                        tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("Relay tunnel failed: {}", e);
                 }
             }
-            Err(e) => {
-                tracing::warn!("Relay tunnel failed (expected if no relay configured): {}", e);
-            }
-        }
-    });
+        });
+    } else {
+        tracing::info!("Relay tunnel not configured — running in P2P-only mode");
+    }
 
     // PHASE 6: Start P2P listener for direct browser connections via Firebase signaling
     let p2p_db_path = std::env::var("BENNETT_DATA_DIR")

@@ -22,3 +22,8 @@
 # --- Profiling ---
 *.prof
 /flamegraph.svg
+
+# Environment variables (secrets)
+.env
+**/.env
+!.env.example

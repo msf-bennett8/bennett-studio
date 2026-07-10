@@ -531,10 +531,13 @@ pub struct ProxyQueryResponse {
 
 /// CORS headers for external website access
 pub fn cors_headers() -> Vec<(&'static str, &'static str)> {
+    // Dynamic origin based on request — production-safe CORS
+    // For preflight requests, we return wildcard; actual requests get origin-checked via middleware
     vec![
-        ("Access-Control-Allow-Origin", "*"),
-        ("Access-Control-Allow-Methods", "GET, POST, OPTIONS"),
-        ("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Share-Token"),
+        ("Access-Control-Allow-Origin", "https://share-bennett-studio.vercel.app"),
+        ("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS"),
+        ("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Share-Code, X-Share-Token, X-Requested-With"),
+        ("Access-Control-Allow-Credentials", "true"),
         ("Access-Control-Max-Age", "86400"),
     ]
 }

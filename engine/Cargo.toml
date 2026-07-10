@@ -51,6 +51,9 @@ parquet = "53"
 # Network utilities
 get_if_addrs = "0.5"
 
+# Environment variable loading from .env file
+dotenvy = "0.15"
+
 # Phase 2: SQL parsing for table extraction and validation
 sqlparser = "0.52"
 

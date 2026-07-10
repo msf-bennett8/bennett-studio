@@ -156,8 +156,16 @@ export const useNotesStore = create<NotesState>()(
         }
       },
 
-      // Load from engine on startup
+      // Load from engine on startup (skip if viewing a remote share)
       loadFromEngine: async () => {
+        // Don't try to load notes from engine when viewing a remote share
+        const isRemoteShare = window.location.pathname.includes('/join-share') ||
+          window.location.search.includes('shareUrl') ||
+          window.location.search.includes('t=');
+        if (isRemoteShare) {
+          console.log('Remote share mode: skipping local notes load');
+          return;
+        }
         try {
           const engineNotes = await api.listNotes();
           if (engineNotes.length > 0) {
