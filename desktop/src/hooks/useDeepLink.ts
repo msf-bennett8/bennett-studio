@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { listen } from '@tauri-apps/api/event';
 import { useNavigate } from 'react-router-dom';
 
 interface DeepLinkEvent {
@@ -16,7 +15,15 @@ export function useDeepLink() {
     let unlisten: (() => void) | null = null;
 
     const setupListener = async () => {
-      unlisten = await listen<DeepLinkEvent>('deep-link-share', (event) => {
+      let listen: typeof import('@tauri-apps/api/event').listen | undefined;
+      try {
+        const tauri = await import('@tauri-apps/api/event');
+        listen = tauri.listen;
+      } catch {
+        // Not in Tauri environment
+        return;
+      }
+      unlisten = await listen<DeepLinkEvent>('deep-link-share', (event: { payload: DeepLinkEvent }) => {
         console.log('[DeepLink] Received:', event.payload);
         setPendingShare(event.payload);
         // Auto-navigate to join share page

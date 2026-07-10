@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Globe, Link2, AlertCircle, Loader2, ArrowLeft, CheckCircle, Database, Lock, Unlock, Clock } from 'lucide-react';
 import { useRemoteConnectionStore } from '../stores/remoteConnectionStore';
-import { listen } from '@tauri-apps/api/event';
 
 interface DeepLinkEvent {
   code: string;
@@ -30,8 +29,16 @@ export function JoinSharePage() {
     let unlisten: (() => void) | null = null;
 
     const setupDeepLink = async () => {
+      let listen: typeof import('@tauri-apps/api/event').listen | undefined;
       try {
-        unlisten = await listen<DeepLinkEvent>('deep-link-share', (event) => {
+        const tauri = await import('@tauri-apps/api/event');
+        listen = tauri.listen;
+      } catch {
+        // Not in Tauri environment
+        return;
+      }
+      try {
+        unlisten = await listen<DeepLinkEvent>('deep-link-share', (event: { payload: DeepLinkEvent }) => {
           console.log('[JoinSharePage] Deep link received:', event.payload);
           const { shareUrl } = event.payload;
           setUrl(shareUrl);
@@ -39,7 +46,7 @@ export function JoinSharePage() {
           handleValidateWithUrl(shareUrl);
         });
       } catch (e) {
-        // Not in Tauri environment (web build) — silently ignore
+        // Failed to set up listener — silently ignore
       }
     };
 
