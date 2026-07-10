@@ -343,7 +343,7 @@ async fn read_mysql_auth_response(
     
     // Auth response: for mysql_native_password, client sends 20-byte scramble
     // or length-encoded for other plugins
-    let auth_response = if capability_flags & 0x00080000 != 0 && capability_flags & 0x00200000 != 0 {
+    let _auth_response = if capability_flags & 0x00080000 != 0 && capability_flags & 0x00200000 != 0 {
         // CLIENT_PLUGIN_AUTH_LENENC_CLIENT_DATA — length-encoded
         let auth_len = payload[pos] as usize;
         pos += 1;

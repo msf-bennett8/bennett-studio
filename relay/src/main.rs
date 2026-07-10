@@ -115,7 +115,7 @@ async fn main() -> anyhow::Result<()> {
                         Err(e) => warn!("Firebase signaling failed: {}. Continuing with P2P server.", e),
                     }
 
-                    transport::TransportFactory::create_p2p_server(local_ice, Some(room_code)).await
+                    transport::TransportFactory::create_p2p_server(local_ice, Some(room_code), false).await
                         .map_err(|e| anyhow::anyhow!("P2P server init failed: {}", e))
                 } else if config.p2p_mode == "client" {
                     let room_code = config.share_code.clone()
@@ -141,7 +141,7 @@ async fn main() -> anyhow::Result<()> {
                 let local_ice = transport::ice::gather_ice_candidates().await
                     .map_err(|e| anyhow::anyhow!("ICE gathering failed: {}", e))?;
                 info!("P2P server ICE: {}", serde_json::to_string_pretty(&local_ice).unwrap());
-                transport::TransportFactory::create_p2p_server(local_ice, config.share_code.clone()).await
+                transport::TransportFactory::create_p2p_server(local_ice, config.share_code.clone(), false).await
                     .map_err(|e| anyhow::anyhow!("P2P server init failed: {}", e))
             }
         }.await;
@@ -288,7 +288,7 @@ struct WebRtcOfferResponse {
 async fn webrtc_offer_handler(
     Path(code): Path<String>,
     State(state): State<ProxyApiState>,
-    Json(req): Json<WebRtcOfferRequest>,
+    Json(_req): Json<WebRtcOfferRequest>,
 ) -> impl IntoResponse {
     let mut headers = axum::http::HeaderMap::new();
     for (k, v) in router::cors_headers() {
@@ -793,7 +793,7 @@ async fn handle_tunnel_ws(
                                 TunnelEngineResponse::Register { host_id, version, capabilities } => {
                                     info!("Engine registered: {} (v{}, caps: {:?})", host_id, version, capabilities);
                                 }
-                                TunnelEngineResponse::ShareCreated { code, db_id, permission, expires_at } => {
+                                TunnelEngineResponse::ShareCreated { code, db_id, permission: _, expires_at } => {
                                     info!("Engine reported share created: {}", code);
                                     // Add remote route so relay can forward to this engine
                                     let route = router::ShareRoute {

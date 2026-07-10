@@ -91,11 +91,11 @@ impl ProtocolPool {
         }
     }
 
-    fn in_use(&self) -> usize {
+    fn _in_use(&self) -> usize {
         self.in_use.load(Ordering::Relaxed)
     }
 
-    fn available(&self) -> usize {
+    fn _available(&self) -> usize {
         self.available.lock().unwrap().len()
     }
 }

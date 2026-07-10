@@ -17,7 +17,7 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use tokio::sync::{RwLock, mpsc};
-use tracing::{debug, info, warn, error};
+use tracing::{debug, info, warn};
 use serde::{Deserialize, Serialize};
 
 // WebRTC bridge for browser compatibility
@@ -78,7 +78,7 @@ impl P2pTransport {
     pub async fn new_server(
         local_ice: IceCandidates,
         share_code: Option<String>,
-        enable_webrtc: bool,
+        _enable_webrtc: bool,
     ) -> Result<Self, P2pError> {
         info!(mode = "server", "Creating P2P transport");
 
@@ -109,7 +109,7 @@ impl P2pTransport {
         };
 
         #[cfg(not(feature = "webrtc"))]
-        let (webrtc_bridge, webrtc_tx) = (None, None);
+        let webrtc_tx = None;
 
         Ok(Self {
             mode: P2pMode::Server,
@@ -119,7 +119,6 @@ impl P2pTransport {
             connection: Arc::new(RwLock::new(None)),
             stream_pool: Arc::new(Mutex::new(VecDeque::new())),
             server: Some(server),
-            webrtc_bridge,
             webrtc_tx,
         })
     }
@@ -162,8 +161,6 @@ impl P2pTransport {
             server: None,
             #[cfg(feature = "webrtc")]
             webrtc_bridge: None,
-            #[cfg(not(feature = "webrtc"))]
-            webrtc_bridge: (),
             webrtc_tx: None,
         })
     }

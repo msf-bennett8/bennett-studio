@@ -473,6 +473,20 @@ impl ShareStore {
         Ok(result.rows_affected())
     }
     
+    /// List all active (non-revoked, non-expired) shares
+    pub async fn list_all_active(&self) -> anyhow::Result<Vec<ShareRecord>> {
+        let now = Utc::now().to_rfc3339();
+
+        let rows = sqlx::query(
+            "SELECT * FROM shares WHERE revoked = 0 AND expires_at > ? ORDER BY created_at DESC"
+        )
+        .bind(&now)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows.into_iter().map(Self::row_to_share).collect())
+    }
+
     /// Hard delete a share from the database (permanent removal)
     pub async fn hard_delete_share(&self, code: &str) -> anyhow::Result<bool> {
         let result = sqlx::query("DELETE FROM shares WHERE code = ?")

@@ -8,5 +8,4 @@ pub mod share_store;
 pub mod manager;
 pub mod state;
 pub mod uuid;
-pub mod session;
 pub mod p2p_listener;

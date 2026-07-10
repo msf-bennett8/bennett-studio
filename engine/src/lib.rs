@@ -86,7 +86,7 @@ impl AppState {
                 .map_err(|e| crate::runtime::container::docker::DockerError::Other(format!("Notes store init failed: {}", e)))?
         ));
 
-        let query_cache = Arc::new(QueryCache::new());
+        let _query_cache = Arc::new(QueryCache::new());
         
         Ok(Self {
             databases: Arc::new(Mutex::new(Vec::new())),

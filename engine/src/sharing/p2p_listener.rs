@@ -7,7 +7,7 @@
 
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{info, warn, error, debug};
+use tracing::{info, warn, debug};
 
 use crate::auth::share_token::ShareTokenManager;
 use crate::sharing::share_store::ShareStore;
@@ -26,7 +26,7 @@ pub async fn start_p2p_listener(
     db_path: std::path::PathBuf,
     token_manager: Arc<RwLock<ShareTokenManager>>,
     share_store: Arc<ShareStore>,
-    connection_manager: Arc<RwLock<crate::control_plane::connection::manager::ConnectionManager>>,
+    connection_manager: Arc<tokio::sync::Mutex<crate::control_plane::connection::manager::ConnectionManager>>,
 ) -> anyhow::Result<()> {
     info!("PHASE 6: Starting P2P listener with Firebase signaling");
 
@@ -133,7 +133,7 @@ async fn poll_for_browser_offers(
     client: &reqwest::Client,
 ) -> anyhow::Result<Vec<(String, serde_json::Value)>> {
     // Get all active shares
-    let shares = share_store.list_all_active_shares().await
+    let shares = share_store.list_all_active().await
         .map_err(|e| anyhow::anyhow!("Failed to list shares: {}", e))?;
 
     let mut offers = Vec::new();
@@ -165,7 +165,7 @@ async fn handle_browser_offer(
     client: &reqwest::Client,
     token_manager: &Arc<RwLock<ShareTokenManager>>,
     share_store: &Arc<ShareStore>,
-    connection_manager: &Arc<RwLock<crate::control_plane::connection::manager::ConnectionManager>>,
+    connection_manager: &Arc<tokio::sync::Mutex<crate::control_plane::connection::manager::ConnectionManager>>,
 ) -> anyhow::Result<()> {
     info!("Handling browser offer for share {}", share_code);
 
@@ -247,7 +247,7 @@ async fn execute_query_via_manager(
     share_code: &str,
     token_manager: &Arc<RwLock<ShareTokenManager>>,
     share_store: &Arc<ShareStore>,
-    connection_manager: &Arc<RwLock<crate::control_plane::connection::manager::ConnectionManager>>,
+    connection_manager: &Arc<tokio::sync::Mutex<crate::control_plane::connection::manager::ConnectionManager>>,
 ) -> anyhow::Result<serde_json::Value> {
     // Validate token
     let validated = {
@@ -278,7 +278,7 @@ async fn execute_query_via_manager(
     }
 
     // Execute via ConnectionManager
-    let mut conn = connection_manager.lock().await;
+    let conn = connection_manager.lock().await;
     let result = conn.execute(&record.db_id, sql).await
         .map_err(|e| anyhow::anyhow!("Query execution failed: {}", e))?;
 
@@ -297,7 +297,7 @@ async fn get_schema_via_manager(
     share_code: &str,
     token_manager: &Arc<RwLock<ShareTokenManager>>,
     share_store: &Arc<ShareStore>,
-    connection_manager: &Arc<RwLock<crate::control_plane::connection::manager::ConnectionManager>>,
+    connection_manager: &Arc<tokio::sync::Mutex<crate::control_plane::connection::manager::ConnectionManager>>,
 ) -> anyhow::Result<serde_json::Value> {
     let validated = {
         let tm = token_manager.read().await;
@@ -320,7 +320,7 @@ async fn get_schema_via_manager(
         return Err(anyhow::anyhow!("Share expired"));
     }
 
-    let mut conn = connection_manager.lock().await;
+    let conn = connection_manager.lock().await;
     let tables = conn.get_schema(&record.db_id).await
         .map_err(|e| anyhow::anyhow!("Schema fetch failed: {}", e))?;
 

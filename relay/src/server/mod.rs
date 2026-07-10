@@ -445,7 +445,7 @@ pub struct HttpRequestLine {
     pub version: String,
 }
 
-fn parse_http_request_line(buf: &[u8]) -> anyhow::Result<HttpRequestLine> {
+fn _parse_http_request_line(buf: &[u8]) -> anyhow::Result<HttpRequestLine> {
     let line_end = buf.iter().position(|&b| b == b'\r').unwrap_or(buf.len());
     let line = std::str::from_utf8(&buf[..line_end])
         .map_err(|_| anyhow::anyhow!("Invalid UTF-8"))?;

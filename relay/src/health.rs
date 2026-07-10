@@ -4,7 +4,7 @@
 use crate::router::ShareRouter;
 use std::sync::Arc;
 use tokio::time::{interval, Duration};
-use tracing::{error, info, warn, debug};
+use tracing::{error, warn, debug};
 use chrono::Utc;
 
 /// Health monitor — periodically checks engine heartbeats and updates route availability

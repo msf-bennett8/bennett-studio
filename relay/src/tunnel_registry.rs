@@ -56,7 +56,7 @@ impl TunnelRegistry {
     /// Register a tunnel sender when engine WebSocket connects
     pub async fn register_tunnel(&self, host_id: String, tx: mpsc::UnboundedSender<TunnelMessageToEngine>) {
         let mut tunnels = self.tunnels.write().await;
-        tunnels.insert(host_id, tx);
+        tunnels.insert(host_id.clone(), tx);
         debug!("Registered tunnel for host: {}", host_id);
     }
 

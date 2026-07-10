@@ -242,8 +242,9 @@ impl TransportFactory {
     pub async fn create_p2p_server(
         local_ice: IceCandidates,
         share_code: Option<String>,
+        enable_webrtc: bool,
     ) -> Result<Arc<dyn Transport>, p2p::P2pError> {
-        let transport = p2p::P2pTransport::new_server(local_ice, share_code).await?;
+        let transport = p2p::P2pTransport::new_server(local_ice, share_code, enable_webrtc).await?;
         Ok(Arc::new(transport))
     }
 

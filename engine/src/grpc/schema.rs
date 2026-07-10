@@ -139,7 +139,7 @@ impl SchemaService for SchemaGrpcService {
         // Spawn polling task with proper cancellation and TTL
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
-            let mut last_schema_hash: Option<u64> = None;
+            let mut last_schema_hash: Option<u64>;
             let mut consecutive_errors = 0u8;
             const MAX_ERRORS: u8 = 5;
 

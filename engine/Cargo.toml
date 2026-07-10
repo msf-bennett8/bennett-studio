@@ -7,6 +7,9 @@ description = "Bennett Studio Control Plane"
 license = "MIT"
 
 [dependencies]
+tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
+reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
+fastrand = "2"
 tokio = { version = "1", features = ["full"] }
 axum = { version = "0.7", features = ["ws", "http2"] }
 tower = "0.4"
