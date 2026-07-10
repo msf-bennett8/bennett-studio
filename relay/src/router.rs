@@ -169,7 +169,7 @@ impl ShareRouter {
             WHERE revoked = 0 AND expires_at > datetime('now')
             "#
         )
-        .fetch_all(&self.db_pool)
+        .fetch_all(pool)
         .await;
 
         match rows {
