@@ -22,7 +22,7 @@ pub struct ShareRoute {
 
 /// In-memory route cache with SQLite backing
 pub struct ShareRouter {
-    db_pool: Pool<Sqlite>,
+    db_pool: Option<Pool<Sqlite>>,
     cache: Arc<DashMap<String, ShareRoute>>,
     engine_http_port: u16,
     engine_mysql_port: u16,
@@ -38,12 +38,18 @@ impl ShareRouter {
         engine_http_port: u16,
         engine_mysql_port: u16,
     ) -> anyhow::Result<Arc<Self>> {
-        // Open SQLite in read-only mode (we don't own it, engine does)
+        // Try to open SQLite in read-only mode (we don't own it, engine does)
+        // On Render, the engine runs separately — no local DB expected
         let db_url = format!("sqlite:{}?mode=ro", db_path.display());
         let pool = sqlx::sqlite::SqlitePoolOptions::new()
             .max_connections(2)
             .connect(&db_url)
-            .await?;
+            .await
+            .ok(); // <-- Make it optional
+
+        if pool.is_none() {
+            tracing::warn!("Local SQLite not available — relying on remote routes via tunnel. This is expected on Render.");
+        }
 
         let router = Arc::new(Self {
             db_pool: pool,
@@ -54,8 +60,8 @@ impl ShareRouter {
             host_routes: Arc::new(DashMap::new()),
         });
 
-        // Initial load
-        router.refresh_routes().await?;
+        // Initial load (no-op if no local DB)
+        let _ = router.refresh_routes().await;
 
         Ok(router)
     }
@@ -145,6 +151,15 @@ impl ShareRouter {
     /// Refresh routes from database (local) or accept remote updates
     pub async fn refresh_routes(&self) -> anyhow::Result<()> {
         debug!("Refreshing share routes from database");
+
+        // No local DB — skip (Render mode, remote routes only)
+        let pool = match &self.db_pool {
+            Some(p) => p,
+            None => {
+                debug!("No local SQLite pool — skipping local route refresh");
+                return Ok(());
+            }
+        };
 
         // Try local SQLite first (for same-host deployment)
         let rows = sqlx::query(
