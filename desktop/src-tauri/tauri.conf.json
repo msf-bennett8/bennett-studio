@@ -47,7 +47,6 @@
   },
   "plugins": {
     "deep-link": {
-      "mobile": false,
       "desktop": {
         "schemes": ["bennett"]
       }

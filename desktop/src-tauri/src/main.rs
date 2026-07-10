@@ -2,8 +2,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::time::Duration;
-use tauri::Manager;
-//to start the window use use tauri::{Manager, Emitter};
+use tauri::{Manager, Emitter};
+use tauri_plugin_deep_link::DeepLinkExt;
 mod commands;
 
 #[tauri::command]
@@ -50,7 +50,8 @@ fn main() {
             // Register deep link handler for bennett://share/CODE?t=JWT
             let deep_link_handle = app_handle.clone();
             app_handle.deep_link().on_open_url(move |event| {
-                let url = event.url();
+                let urls = event.urls();
+                let url = urls.first().map(|u| u.as_str()).unwrap_or("");
                 tracing::info!("Deep link received: {}", url);
                 
                 // Parse bennett://share/CODE?t=JWT
