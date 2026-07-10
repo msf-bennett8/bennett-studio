@@ -5,7 +5,7 @@ use dashmap::DashMap;
 use sqlx::{Pool, Row, Sqlite};
 use std::sync::Arc;
 use tokio::time::{interval, Duration};
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 /// Route entry for a share
 #[derive(Debug, Clone)]
@@ -132,7 +132,7 @@ impl ShareRouter {
             return;
         };
         
-        for share_id in share_ids {
+        for share_id in &share_ids {
             self.cache.remove(&format!("{}:http", share_id));
             self.cache.remove(&format!("{}:mysql", share_id));
             info!("Cleaned up route {} for disconnected host {}", share_id, host_id);
@@ -300,7 +300,6 @@ impl ShareRouter {
 
         Ok(response)
     }
-}
 
     // ============================================================================
     // PHASE D: Tunnel Forwarding — Async request/response correlation
@@ -311,62 +310,22 @@ impl ShareRouter {
     async fn forward_via_tunnel(
         &self,
         share_id: &str,
-        method: &str,
+        _method: &str,
         path: &str,
         body: Option<Vec<u8>>,
         token: &str,
     ) -> anyhow::Result<Vec<u8>> {
-        use std::collections::HashMap;
-        use tokio::sync::{mpsc, oneshot};
-        use std::sync::Mutex;
-
-        // Global tunnel response registry (lazy_static or once_cell in production)
-        // For now, use a simple static — in production use a proper registry
-        lazy_static::lazy_static! {
-            static ref TUNNEL_RESPONSES: Mutex<HashMap<String, oneshot::Sender<serde_json::Value>>> = 
-                Mutex::new(HashMap::new());
-        }
-
         let request_id = uuid::Uuid::new_v4().to_string();
-        let (tx, rx) = oneshot::channel::<serde_json::Value>();
+        let (tx, _rx) = tokio::sync::oneshot::channel::<serde_json::Value>();
 
-        // Register response channel
-        {
-            let mut registry = TUNNEL_RESPONSES.lock().unwrap();
-            registry.insert(request_id.clone(), tx);
-        }
+        // Register response channel with tunnel registry (industry best: uses existing registry)
+        let registry = self.tunnel_registry.as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Tunnel registry not initialized"))?;
+        registry.register_pending(request_id.clone(), tx).await;
 
         // Determine if this is a query or schema request
         let is_query = path.contains("/query");
-        let is_schema = path.contains("/schema");
-
-        // Build tunnel message
-        let tunnel_msg = if is_query {
-            // Parse SQL from body
-            let sql = body.as_ref().and_then(|b| {
-                serde_json::from_slice::<serde_json::Value>(b).ok()
-                    .and_then(|v| v.get("sql").and_then(|s| s.as_str()).map(|s| s.to_string()))
-            }).unwrap_or_default();
-
-            serde_json::json!({
-                "type": "query_request",
-                "request_id": request_id,
-                "share_code": share_id,
-                "token": token,
-                "sql": sql,
-                "limit": null,
-                "offset": null,
-            })
-        } else if is_schema {
-            serde_json::json!({
-                "type": "schema_request",
-                "request_id": request_id,
-                "share_code": share_id,
-                "token": token,
-            })
-        } else {
-            return Err(anyhow::anyhow!("Tunnel forwarding only supports /query and /schema endpoints"));
-        };
+        let _is_schema = path.contains("/schema");
 
         // Send through tunnel registry
         let registry = self.tunnel_registry.as_ref()
@@ -382,6 +341,12 @@ impl ShareRouter {
             .ok_or_else(|| anyhow::anyhow!("Remote route missing host_id for share {}", share_id))?;
 
         let tunnel_msg = if is_query {
+            // Parse SQL from body for the tunnel message (industry best: parse once, use everywhere)
+            let sql = body.as_ref().and_then(|b| {
+                serde_json::from_slice::<serde_json::Value>(b).ok()
+                    .and_then(|v| v.get("sql").and_then(|s| s.as_str()).map(|s| s.to_string()))
+            }).unwrap_or_default();
+
             crate::tunnel_registry::TunnelMessageToEngine::QueryRequest {
                 request_id: request_id.clone(),
                 share_code: share_id.to_string(),
@@ -421,9 +386,7 @@ impl ShareRouter {
             Err(e) => Err(e)
         }
     }
-}
 
-impl ShareRouter {
     /// Attach tunnel registry (call once after construction)
     pub fn with_tunnel_registry(self: Arc<Self>, registry: Arc<crate::tunnel_registry::TunnelRegistry>) -> Arc<Self> {
         Arc::new(Self {
@@ -435,7 +398,6 @@ impl ShareRouter {
             host_routes: self.host_routes.clone(),
         })
     }
-}
 
     // ============================================================================
     // PHASE F: Host Heartbeat Monitoring
@@ -444,7 +406,7 @@ impl ShareRouter {
     /// Check all hosts with active remote routes and mark stale ones offline
     /// Stale threshold: 90 seconds (same as engine's is_host_alive)
     pub async fn check_host_heartbeats(&self) -> anyhow::Result<()> {
-        let stale_threshold = Utc::now() - chrono::Duration::seconds(90);
+        let _stale_threshold = chrono::Utc::now() - chrono::Duration::seconds(90);
         let mut offline_hosts = Vec::new();
 
         // Check each host in our reverse index
@@ -483,8 +445,9 @@ impl ShareRouter {
     pub async fn mark_host_offline(&self, host_id: &str) {
         if let Some(entry) = self.host_routes.get(host_id) {
             for share_id in entry.value().iter() {
-                let http_key = format!("{}:http", share_id);
-                let mysql_key = format!("{}:mysql", share_id);
+                let share_id_str = share_id.clone();
+                let http_key = format!("{}:http", share_id_str);
+                let mysql_key = format!("{}:mysql", share_id_str);
                 
                 if let Some(mut route) = self.cache.get_mut(&http_key) {
                     route.revoked = true;
@@ -501,8 +464,9 @@ impl ShareRouter {
     pub async fn mark_host_online(&self, host_id: &str) {
         if let Some(entry) = self.host_routes.get(host_id) {
             for share_id in entry.value().iter() {
-                let http_key = format!("{}:http", share_id);
-                let mysql_key = format!("{}:mysql", share_id);
+                let share_id_str = share_id.clone();
+                let http_key = format!("{}:http", share_id_str);
+                let mysql_key = format!("{}:mysql", share_id_str);
                 
                 if let Some(mut route) = self.cache.get_mut(&http_key) {
                     route.revoked = false;
