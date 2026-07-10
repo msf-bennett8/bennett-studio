@@ -2,6 +2,7 @@
 name = "bennett-relay"
 version = "0.1.0"
 edition = "2021"
+default-run = "bennett-relay"
 authors = ["Bennett Studio"]
 description = "Bennett Studio Public Relay Server — TLS-terminating TCP proxy with pluggable transport"
 license = "MIT"
