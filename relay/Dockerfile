@@ -32,7 +32,7 @@ ENV RUST_LOG=info
 
 EXPOSE 8443 8444
 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-  CMD curl -f http://localhost:8444/health || exit 1
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=5 \
+  CMD curl -fsS http://localhost:8444/health || exit 1
 
 CMD ["bennett-relay"]

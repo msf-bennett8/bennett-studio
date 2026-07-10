@@ -127,7 +127,15 @@ impl RelayTunnelClient {
     }
 
     async fn connect_and_maintain(&mut self) -> anyhow::Result<()> {
-        let ws_url = format!("{}/ws/tunnel/{}", self.relay_url, self.host_id);
+        // Support both URL formats: with or without /ws/tunnel prefix
+        let base = if self.relay_url.ends_with("/ws/tunnel") {
+            self.relay_url.clone()
+        } else if self.relay_url.ends_with("/tunnel") {
+            self.relay_url.replace("/tunnel", "/ws/tunnel")
+        } else {
+            format!("{}/ws/tunnel", self.relay_url.trim_end_matches('/'))
+        };
+        let ws_url = format!("{}/{}", base, self.host_id);
         info!("Connecting to relay tunnel: {}", ws_url);
 
         let (ws_stream, _) = tokio_tungstenite::connect_async(&ws_url).await

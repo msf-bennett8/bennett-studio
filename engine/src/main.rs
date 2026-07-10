@@ -72,7 +72,7 @@ async fn main() {
     // PHASE 6: Start relay tunnel for remote engine → relay communication
     // This allows the Render relay to forward traffic when P2P fails
     let relay_url = std::env::var("BENNETT_RELAY_URL")
-        .unwrap_or_else(|_| "wss://bennett-relay.onrender.com".to_string());
+        .unwrap_or_else(|_| "wss://bennett-relay.onrender.com/ws/tunnel".to_string());
     let host_id = format!("host-{}", uuid::Uuid::new_v4().to_string().split('-').next().unwrap_or("unknown"));
     let token_manager_clone = state.token_manager.clone();
     let share_store_clone = state.share_store.clone();
@@ -156,6 +156,8 @@ async fn main() {
                     "http://localhost:3001".parse().unwrap(),
                     "http://localhost:3002".parse().unwrap(),
                     "tauri://localhost".parse().unwrap(),
+                    "https://share-bennett-studio.vercel.app".parse().unwrap(),
+                    "https://bennett-relay.onrender.com".parse().unwrap(),
                 ])
                 .allow_methods([
                     axum::http::Method::GET,

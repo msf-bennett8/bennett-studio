@@ -91,8 +91,21 @@ pub async fn comprehensive_health_check(
         message: None,
         latency_ms: mem_start.elapsed().as_millis() as u64,
     });
-    
-    let all_ok = checks.values().all(|c| c.status == "ok");
+
+    // Relay tunnel check
+    let tunnel_start = std::time::Instant::now();
+    let tunnel_ok = std::env::var("BENNETT_RELAY_URL").is_ok();
+    checks.insert("relay_tunnel".to_string(), ComponentHealth {
+        status: if tunnel_ok { "ok".to_string() } else { "disabled".to_string() },
+        message: if tunnel_ok {
+            Some("Relay tunnel configured".to_string())
+        } else {
+            Some("Relay tunnel not configured — P2P only mode".to_string())
+        },
+        latency_ms: tunnel_start.elapsed().as_millis() as u64,
+    });
+
+    let all_ok = checks.values().all(|c| c.status == "ok" || c.status == "disabled");
     
     let uptime = START_TIME.get()
         .map(|t| t.elapsed().as_secs())
