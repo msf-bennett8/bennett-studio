@@ -9,7 +9,7 @@ import {
   openDB,
   deleteVaultEntry,
   type EncryptedToken,
-} from '@bennett/sdk';
+} from '@bennettstudio/sdk';
 
 const STORE_NAME = 'tokens';
 

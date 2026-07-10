@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import { useRemoteConnectionStore } from '../stores/remoteConnectionStore';
 import { useDatabaseStore } from '../stores/databaseStore';
-import type { AutocompleteSuggestion } from '@bennett/shared';
+import type { AutocompleteSuggestion } from '@bennettstudio/shared';
 
 export function RemoteQueryPage() {
   const navigate = useNavigate();

@@ -9,7 +9,7 @@ import type {
   TableSchema,
   AutocompleteSuggestion,
   ValidateShareResponse,
-} from '@bennett/shared';
+} from '@bennettstudio/shared';
 
 interface RemoteConnectionState {
   // Connection management

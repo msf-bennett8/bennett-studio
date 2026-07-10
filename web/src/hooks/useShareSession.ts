@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
-import { clientFromUrl } from '@bennett/sdk';
-import type { RemoteConnection } from '@bennett/shared';
+import { clientFromUrl } from '@bennettstudio/sdk';
+import type { RemoteConnection } from '@bennettstudio/shared';
 
 export function useShareSession() {
   const [connection, setConnection] = useState<RemoteConnection | null>(null);

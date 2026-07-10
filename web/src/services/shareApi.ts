@@ -5,7 +5,7 @@ import type {
   ListSharesResponse,
   ValidateShareResponse,
   RevokeShareRequest,
-} from '@bennett/shared';
+} from '@bennettstudio/shared';
 
 export const shareApi = {
   // Create a new share link

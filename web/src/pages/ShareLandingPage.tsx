@@ -6,7 +6,7 @@ import {
   Shield, Server, Wifi, WifiOff, ChevronDown, ChevronUp, Info,
   FileJson, Braces, Eye, EyeOff
 } from 'lucide-react';
-import { clientFromUrl, extractConnectionInfo, type ConnectionInfo } from '@bennett/sdk';
+import { clientFromUrl, extractConnectionInfo, type ConnectionInfo } from '@bennettstudio/sdk';
 
 export function ShareLandingPage() {
   const { code } = useParams<{ code: string }>();
@@ -78,7 +78,7 @@ export function ShareLandingPage() {
     }
   }, [code, token, shareUrl]);
 
-  const [deepLinkStatus, setDeepLinkStatus] = useState<'idle' | 'opening' | 'unavailable'>('idle');
+  const [, setDeepLinkStatus] = useState<'idle' | 'opening' | 'unavailable'>('idle');
 
   const handleDeepLink = () => {
     // Open in Bennett Studio desktop app
@@ -218,9 +218,9 @@ export function ShareLandingPage() {
     );
   }
 
-  const sdkInstallSnippet = `npm install @bennett/sdk`;
+  const sdkInstallSnippet = `npm install @bennettstudio/sdk`;
 
-  const sdkUsageSnippet = `import { BennettClient } from '@bennett/sdk';
+  const sdkUsageSnippet = `import { BennettClient } from '@bennettstudio/sdk';
 
 const db = await BennettClient.fromShareUrl(
   '${shareUrl}'
@@ -249,7 +249,10 @@ console.log(schema.tables);`;
           <span className="font-semibold text-sm" style={{ color: 'var(--textPrimary)' }}>Bennett Studio</span>
         </div>
         <div className="flex items-center gap-3">
-          {getModeBadge()}
+          <span className="inline-flex items-center gap-1">
+            {getConnectionIcon()}
+            {getModeBadge()}
+          </span>
           {connectionLatency !== null && (
             <span className="text-xs font-mono" style={{ color: 'var(--textMuted)' }}>
               {connectionLatency}ms
@@ -316,7 +319,7 @@ console.log(schema.tables);`;
             </div>
             <h3 className="font-semibold text-sm mb-1" style={{ color: 'var(--textPrimary)' }}>Use the SDK</h3>
             <p className="text-xs leading-relaxed" style={{ color: 'var(--textSecondary)' }}>
-              npm install @bennett/sdk — type-safe queries with auto-completion
+              npm install @bennettstudio/sdk — type-safe queries with auto-completion
             </p>
           </button>
 
@@ -622,7 +625,7 @@ console.log(schema.tables);`;
           </button>
           
           {showDiagnostics && (
-            <div className="mt-2 p-4 rounded-2xl font-mono text-xs space-y-1" 
+            <div className={`mt-2 p-4 rounded-2xl font-mono text-xs space-y-1 ${getModeColor()}`} 
               style={{ backgroundColor: 'var(--bgSecondary)', border: '1px solid var(--borderDefault)' }}>
               {connectionLog.map((log, i) => (
                 <div key={i} className="flex gap-2">

@@ -1,7 +1,7 @@
 //! Web Vault Service — Re-export from tokenVault with TokenVault interface
 
 import { tokenVault } from './tokenVault';
-import type { TokenVault, StoredToken, VaultStatus } from '@bennett/shared';
+import type { TokenVault, StoredToken, VaultStatus } from '@bennettstudio/shared';
 
 export const vaultService: TokenVault = {
   async getToken(code: string): Promise<string | null> {
