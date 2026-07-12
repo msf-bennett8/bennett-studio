@@ -71,7 +71,7 @@ class RemoteApiService {
       throw new Error('Invalid share URL format. Expected: https://host/db/CODE?t=TOKEN');
     }
 
-    // Use the local backend for validation (share.bennett.studio is not a real domain in dev)
+    // Use the local backend for validation (relay handles validation)
     const validateUrl = `${API_BASE_URL}/api/shares/${parsed.code}/validate`;
 
     const response = await fetch(validateUrl, {

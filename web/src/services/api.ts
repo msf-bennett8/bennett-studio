@@ -66,48 +66,68 @@ export const api = {
   // Health check
   health: () => fetchApi<Record<string, any>>('/api/health'),
 
-  // Databases
-  listDatabases: () => fetchApi<DatabaseInstance[]>('/api/databases'),
-  
-  getDatabase: (id: string) => fetchApi<DatabaseInstance>(`/api/databases/${id}`),
-  
-  createDatabase: (req: CreateDatabaseRequest) => 
-    fetchApi<DatabaseInstance>('/api/databases', {
+  // Databases — local engine only, skip in remote share mode
+  listDatabases: () => {
+    if (isRemoteMode()) return Promise.resolve([]);
+    return fetchApi<DatabaseInstance[]>('/api/databases');
+  },
+
+  getDatabase: (id: string) => {
+    if (isRemoteMode()) return Promise.resolve({} as DatabaseInstance);
+    return fetchApi<DatabaseInstance>(`/api/databases/${id}`);
+  },
+
+  createDatabase: (req: CreateDatabaseRequest) => {
+    if (isRemoteMode()) return Promise.resolve({} as DatabaseInstance);
+    return fetchApi<DatabaseInstance>('/api/databases', {
       method: 'POST',
       body: JSON.stringify(req),
-    }),
+    });
+  },
   
-  updateDatabase: (id: string, updates: Partial<DatabaseInstance>) =>
-    fetchApi<DatabaseInstance>(`/api/databases/${id}`, {
+  updateDatabase: (id: string, updates: Partial<DatabaseInstance>) => {
+    if (isRemoteMode()) return Promise.resolve({} as DatabaseInstance);
+    return fetchApi<DatabaseInstance>(`/api/databases/${id}`, {
       method: 'PUT',
       body: JSON.stringify(updates),
-    }),
-  
-  deleteDatabase: (id: string) =>
-    fetchApi<{ deleted: boolean; id: string }>(`/api/databases/${id}`, {
-      method: 'DELETE',
-    }),
-  
-  startDatabase: (id: string) =>
-    fetchApi<DatabaseInstance>(`/api/databases/${id}/start`, {
-      method: 'POST',
-    }),
-  
-  stopDatabase: (id: string) =>
-    fetchApi<DatabaseInstance>(`/api/databases/${id}/stop`, {
-      method: 'POST',
-    }),
+    });
+  },
 
-  // Query execution
-  executeQuery: (id: string, sql: string) =>
-    fetchApi<{ columns: string[]; rows: any[][]; row_count: number }>(`/api/databases/${id}/query`, {
+  deleteDatabase: (id: string) => {
+    if (isRemoteMode()) return Promise.resolve({ deleted: false, id });
+    return fetchApi<{ deleted: boolean; id: string }>(`/api/databases/${id}`, {
+      method: 'DELETE',
+    });
+  },
+  
+  startDatabase: (id: string) => {
+    if (isRemoteMode()) return Promise.resolve({} as DatabaseInstance);
+    return fetchApi<DatabaseInstance>(`/api/databases/${id}/start`, {
+      method: 'POST',
+    });
+  },
+
+  stopDatabase: (id: string) => {
+    if (isRemoteMode()) return Promise.resolve({} as DatabaseInstance);
+    return fetchApi<DatabaseInstance>(`/api/databases/${id}/stop`, {
+      method: 'POST',
+    });
+  },
+
+  // Query execution — local engine only
+  executeQuery: (id: string, sql: string) => {
+    if (isRemoteMode()) return Promise.resolve({ columns: [], rows: [], row_count: 0 });
+    return fetchApi<{ columns: string[]; rows: any[][]; row_count: number }>(`/api/databases/${id}/query`, {
       method: 'POST',
       body: JSON.stringify({ sql }),
-    }),
+    });
+  },
 
-  // Schema introspection
-  getSchema: (id: string) =>
-    fetchApi<{ name: string; columns: { name: string; data_type: string; nullable: boolean }[] }[]>(`/api/databases/${id}/schema`),
+  // Schema introspection — local engine only
+  getSchema: (id: string) => {
+    if (isRemoteMode()) return Promise.resolve([]);
+    return fetchApi<{ name: string; columns: { name: string; data_type: string; nullable: boolean }[] }[]>(`/api/databases/${id}/schema`);
+  },
 
   getTableData: (id: string, req: {
     table: string;
@@ -116,8 +136,9 @@ export const api = {
     order_by?: string;
     order_dir?: 'ASC' | 'DESC';
     filter?: string;
-  }) =>
-    fetchApi<{
+  }) => {
+    if (isRemoteMode()) return Promise.resolve({ columns: [], rows: [], row_count: 0, total_count: 0 });
+    return fetchApi<{
       columns: string[];
       rows: any[][];
       row_count: number;
@@ -125,31 +146,37 @@ export const api = {
     }>(`/api/databases/${id}/data`, {
       method: 'POST',
       body: JSON.stringify(req),
-    }),
+    });
+  },
 
   updateRow: (id: string, req: {
     table: string;
     primary_key: any;
     primary_key_column: string;
     data: Record<string, any>;
-  }) =>
-    fetchApi<{ updated: boolean }>(`/api/databases/${id}/rows/update`, {
+  }) => {
+    if (isRemoteMode()) return Promise.resolve({ updated: false });
+    return fetchApi<{ updated: boolean }>(`/api/databases/${id}/rows/update`, {
       method: 'POST',
       body: JSON.stringify(req),
-    }),
+    });
+  },
 
   deleteRow: (id: string, req: {
     table: string;
     primary_key: any;
     primary_key_column: string;
-  }) =>
-    fetchApi<{ deleted: boolean }>(`/api/databases/${id}/rows/delete`, {
+  }) => {
+    if (isRemoteMode()) return Promise.resolve({ deleted: false });
+    return fetchApi<{ deleted: boolean }>(`/api/databases/${id}/rows/delete`, {
       method: 'POST',
       body: JSON.stringify(req),
-    }),
+    });
+  },
 
-  getTableColumns: (id: string, table: string) =>
-    fetchApi<{
+  getTableColumns: (id: string, table: string) => {
+    if (isRemoteMode()) return Promise.resolve([]);
+    return fetchApi<{
       name: string;
       data_type: string;
       nullable: boolean;
@@ -159,33 +186,44 @@ export const api = {
     }[]>(`/api/databases/${id}/columns`, {
       method: 'POST',
       body: JSON.stringify({ table }),
-    }),
+    });
+  },
 
   insertRow: (id: string, req: {
     table: string;
     data: Record<string, any>;
-  }) =>
-    fetchApi<{ inserted: boolean }>(`/api/databases/${id}/rows/insert`, {
+  }) => {
+    if (isRemoteMode()) return Promise.resolve({ inserted: false });
+    return fetchApi<{ inserted: boolean }>(`/api/databases/${id}/rows/insert`, {
       method: 'POST',
       body: JSON.stringify(req),
-    }),
+    });
+  },
 
-  discoverLocalDatabases: () =>
-    fetchApi<DatabaseInstance[]>('/api/databases/discover', {
+  discoverLocalDatabases: () => {
+    if (isRemoteMode()) return Promise.resolve([]);
+    return fetchApi<DatabaseInstance[]>('/api/databases/discover', {
       method: 'POST',
-    }),
+    });
+  },
 
-      unlockDatabase: (id: string, req: { username: string; password: string; database: string }) =>
-    fetchApi<DatabaseStatusResponse>(`/api/databases/${id}/unlock`, {
+  unlockDatabase: (id: string, req: { username: string; password: string; database: string }) => {
+    if (isRemoteMode()) return Promise.resolve({ is_unlocked: false, status: 'locked' } as DatabaseStatusResponse);
+    return fetchApi<DatabaseStatusResponse>(`/api/databases/${id}/unlock`, {
       method: 'POST',
       body: JSON.stringify(req),
-    }),
+    });
+  },
 
-  getDatabaseStatus: (id: string) =>
-    fetchApi<DatabaseStatusResponse>(`/api/databases/${id}/status`),
+  getDatabaseStatus: (id: string) => {
+    if (isRemoteMode()) return Promise.resolve({ is_unlocked: false, status: 'unknown' } as DatabaseStatusResponse);
+    return fetchApi<DatabaseStatusResponse>(`/api/databases/${id}/status`);
+  },
 
-  scanEnvFiles: (id: string) =>
-    fetchApi<EnvFileSuggestion[]>(`/api/databases/${id}/env-scan`),
+  scanEnvFiles: (id: string) => {
+    if (isRemoteMode()) return Promise.resolve([]);
+    return fetchApi<EnvFileSuggestion[]>(`/api/databases/${id}/env-scan`);
+  },
 
   // Notes API — local engine only, skip in remote share mode
   listNotes: () => {
