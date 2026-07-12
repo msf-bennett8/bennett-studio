@@ -208,7 +208,13 @@ export const api = {
   },
 
   unlockDatabase: (id: string, req: { username: string; password: string; database: string }) => {
-    if (isRemoteMode()) return Promise.resolve({ is_unlocked: false, status: 'locked' } as DatabaseStatusResponse);
+    if (isRemoteMode()) return Promise.resolve({
+      id: '',
+      is_unlocked: false,
+      is_connected: false,
+      has_credentials: false,
+      status: 'locked',
+    } as unknown as DatabaseStatusResponse);
     return fetchApi<DatabaseStatusResponse>(`/api/databases/${id}/unlock`, {
       method: 'POST',
       body: JSON.stringify(req),
@@ -216,7 +222,13 @@ export const api = {
   },
 
   getDatabaseStatus: (id: string) => {
-    if (isRemoteMode()) return Promise.resolve({ is_unlocked: false, status: 'unknown' } as DatabaseStatusResponse);
+    if (isRemoteMode()) return Promise.resolve({
+      id: '',
+      is_unlocked: false,
+      is_connected: false,
+      has_credentials: false,
+      status: 'unknown',
+    } as unknown as DatabaseStatusResponse);
     return fetchApi<DatabaseStatusResponse>(`/api/databases/${id}/status`);
   },
 
