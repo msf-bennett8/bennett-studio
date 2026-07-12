@@ -407,6 +407,7 @@ async fn start_http_proxy_api(
         .layer(cors)
         // Health check
         .route("/health", get(proxy_health))
+        .route("/api/health", get(proxy_health))
         // CORS preflight
         .route("/api/share/:code/query", options(cors_preflight))
         .route("/api/share/:code/schema", options(cors_preflight))
