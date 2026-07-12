@@ -146,6 +146,26 @@ pub async fn create_share(
     // Record host heartbeat immediately (host is alive since we're creating a share)
     let _ = state.share_store.record_heartbeat(&host_id, Some(host_ip.clone()), Some(host_port), env!("CARGO_PKG_VERSION")).await;
 
+    // Notify relay tunnel about new share so relay can route external requests
+    {
+        let tunnel_lock = state.tunnel_tx.read().await;
+        if let Some(ref tx) = *tunnel_lock {
+            let msg = crate::sharing::relay::TunnelMessage::ShareCreated {
+                code: code.clone(),
+                db_id: db.id.clone(),
+                permission: permission.to_string(),
+                expires_at: token.expires_at.timestamp(),
+            };
+            if let Err(e) = tx.send(msg) {
+                warn!("Failed to notify relay about share {}: {}", code, e);
+            } else {
+                info!("Notified relay tunnel about share {}", code);
+            }
+        } else {
+            warn!("Relay tunnel not connected — share {} not registered with relay", code);
+        }
+    }
+
     info!("Created share {} for db {} with {} permission", code, db.name, permission);
 
     // Generate short signaling code for Firebase P2P
@@ -421,6 +441,18 @@ pub async fn delete_share(
 ) -> Result<Json<crate::models::database::ApiResponse<serde_json::Value>>, StatusCode> {
     match state.share_store.hard_delete_share(&code).await {
         Ok(true) => {
+            // Notify relay tunnel about deleted share
+            {
+                let tunnel_lock = state.tunnel_tx.read().await;
+                if let Some(ref tx) = *tunnel_lock {
+                    let msg = crate::sharing::relay::TunnelMessage::ShareRevoked {
+                        code: code.clone(),
+                    };
+                    let _ = tx.send(msg);
+                    info!("Notified relay tunnel about deleted share {}", code);
+                }
+            }
+
             info!("Hard deleted share {}", code);
             Ok(Json(crate::models::database::ApiResponse::success(serde_json::json!({
                 "deleted": true,
@@ -451,6 +483,18 @@ pub async fn revoke_share(
     
     match state.share_store.revoke_share(&code, reason).await {
         Ok(true) => {
+            // Notify relay tunnel about revoked share
+            {
+                let tunnel_lock = state.tunnel_tx.read().await;
+                if let Some(ref tx) = *tunnel_lock {
+                    let msg = crate::sharing::relay::TunnelMessage::ShareRevoked {
+                        code: code.clone(),
+                    };
+                    let _ = tx.send(msg);
+                    info!("Notified relay tunnel about revoked share {}", code);
+                }
+            }
+
             info!("Revoked share {}", code);
             Ok(Json(crate::models::database::ApiResponse::success(serde_json::json!({
                 "revoked": true,

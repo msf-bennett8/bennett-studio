@@ -103,8 +103,11 @@ async fn main() {
             ).await {
                 Ok(tx) => {
                     tracing::info!("Relay tunnel established — engine reachable via relay fallback");
-                    // Keep tx alive so tunnel stays open
-                    let _ = tx;
+                    // Store tunnel sender in AppState so create_share can notify relay
+                    let mut tunnel_lock = state.tunnel_tx.write().await;
+                    *tunnel_lock = Some(tx);
+                    drop(tunnel_lock);
+                    tracing::info!("Tunnel sender stored in AppState — share notifications enabled");
                     loop {
                         tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
                     }

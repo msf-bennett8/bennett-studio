@@ -43,6 +43,8 @@ pub struct AppState {
     pub query_cache: Arc<QueryCache>,
     pub ws_buffer: Arc<WsMessageBuffer>,
     pub notes_store: Arc<tokio::sync::RwLock<NotesStore>>,
+    /// Tunnel sender for notifying relay about share changes (set after tunnel connects)
+    pub tunnel_tx: Arc<tokio::sync::RwLock<Option<tokio::sync::mpsc::UnboundedSender<crate::sharing::relay::TunnelMessage>>>>,
 }
 
 impl AppState {
@@ -101,6 +103,7 @@ impl AppState {
             query_cache: Arc::new(QueryCache::new()),
             ws_buffer: Arc::new(WsMessageBuffer::new()),
             notes_store,
+            tunnel_tx: Arc::new(tokio::sync::RwLock::new(None)),
         })
     }
 }
