@@ -420,6 +420,8 @@ async fn start_http_proxy_api(
         .route("/api/share/:code/schema", get(proxy_schema))
         // Share info
         .route("/api/share/:code", get(proxy_share_info))
+        // Share validation (guest)
+        .route("/api/share/:code/validate", post(proxy_validate_share))
         // WebSocket streaming for real-time queries
         .route("/ws/share/:code", get(ws_proxy_handler))
         // PHASE A: Engine tunnel WebSocket — engines connect here to register routes
@@ -600,6 +602,69 @@ async fn proxy_schema(
         }
         Err(e) => {
             warn!(share = %code, error = %e, "Engine schema forwarding failed");
+            (
+                StatusCode::BAD_GATEWAY,
+                headers,
+                axum::Json(serde_json::json!({
+                    "success": false,
+                    "error": format!("Engine forwarding failed: {}", e)
+                })),
+            )
+        }
+    }
+}
+
+/// Validate a share through the proxy
+/// Forwards to engine's POST /api/shares/:code/validate endpoint
+async fn proxy_validate_share(
+    Path(code): Path<String>,
+    State(state): State<ProxyApiState>,
+    Json(req): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    let mut headers = axum::http::HeaderMap::new();
+    for (k, v) in router::cors_headers() {
+        headers.insert(k, v.parse().unwrap());
+    }
+
+    if !state.router.is_active(&code) {
+        return (
+            StatusCode::NOT_FOUND,
+            headers,
+            axum::Json(serde_json::json!({
+                "success": false,
+                "error": "Share not found or expired"
+            })),
+        );
+    }
+
+    info!(share = %code, "Proxy validate request received — forwarding to engine");
+
+    match state.router.forward_to_engine(
+        &code,
+        "POST",
+        &format!("/api/shares/{}/validate", code),
+        Some(req.to_string().into_bytes()),
+        "", // Token handling TBD
+    ).await {
+        Ok(response_bytes) => {
+            let response_str = String::from_utf8_lossy(&response_bytes);
+            if let Some(body_start) = response_str.find("\r\n\r\n") {
+                let body = &response_str[body_start + 4..];
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(body) {
+                    return (StatusCode::OK, headers, axum::Json(json));
+                }
+            }
+            (
+                StatusCode::OK,
+                headers,
+                axum::Json(serde_json::json!({
+                    "success": true,
+                    "raw_response": response_str.to_string(),
+                })),
+            )
+        }
+        Err(e) => {
+            warn!(share = %code, error = %e, "Engine validate forwarding failed");
             (
                 StatusCode::BAD_GATEWAY,
                 headers,

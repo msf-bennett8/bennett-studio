@@ -72,7 +72,7 @@ class RemoteApiService {
     }
 
     // Use the local backend for validation (relay handles validation)
-    const validateUrl = `${API_BASE_URL}/api/shares/${parsed.code}/validate`;
+    const validateUrl = `${API_BASE_URL}/api/share/${parsed.code}/validate`;
 
     const response = await fetch(validateUrl, {
       method: 'POST',
@@ -136,7 +136,7 @@ class RemoteApiService {
 
     try {
       // Fetch schema via share-specific backend endpoint (validates token + returns schema)
-      const schemaResponse = await fetch(`${API_BASE_URL}/api/shares/${parsed.code}/schema`, {
+      const schemaResponse = await fetch(`${API_BASE_URL}/api/share/${parsed.code}/schema`, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',

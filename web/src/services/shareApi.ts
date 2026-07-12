@@ -101,7 +101,8 @@ export const shareApi = {
 
   // Validate a share (guest)
   validateShare: async (code: string, token: string): Promise<ValidateShareResponse> => {
-    const response = await fetch(`${API_BASE_URL}/api/shares/${code}/validate`, {
+    const path = isRemoteMode() ? `/api/share/${code}/validate` : `/api/shares/${code}/validate`;
+    const response = await fetch(`${API_BASE_URL}${path}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ code, token }),
@@ -142,7 +143,8 @@ export const shareApi = {
 
   // Get public share info
   getShareInfo: async (code: string): Promise<Partial<ValidateShareResponse>> => {
-    const response = await fetch(`${API_BASE_URL}/api/shares/${code}`);
+    const path = isRemoteMode() ? `/api/share/${code}` : `/api/shares/${code}`;
+    const response = await fetch(`${API_BASE_URL}${path}`);
     
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
