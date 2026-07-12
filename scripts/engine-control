@@ -121,6 +121,20 @@ start_engine() {
     # Clear old log so we don't see stale milestones
     rm -f "$LOGFILE"
 
+    # Load environment from engine/.env if present (industry best: single source of truth)
+    if [ -f "$ENGINE_DIR/engine/.env" ]; then
+        echo -e "[${C_GREEN}ENV${C_RESET}] Loading environment from engine/.env"
+        set -a
+        source "$ENGINE_DIR/engine/.env"
+        set +a
+    fi
+
+    # Ensure critical env vars are set (fallbacks for safety)
+    export BENNETT_HTTP_PORT="${BENNETT_HTTP_PORT:-3001}"
+    export BENNETT_RELAY_URL="${BENNETT_RELAY_URL:-wss://bennett-relay.onrender.com/ws/tunnel}"
+    export BENNETT_SHARE_BASE_URL="${BENNETT_SHARE_BASE_URL:-https://share-bennett-studio.vercel.app}"
+    export RUST_LOG="${RUST_LOG:-info}"
+
     # Start the pre-built binary directly (NOT via cargo run)
     echo -e "[${C_YELLOW}ENGINE${C_RESET}] Starting Bennett Engine on ${C_CYAN}http://0.0.0.0:${PORT}${C_RESET}..."
     echo -e "[${C_CYAN}WAIT${C_RESET}] Waiting for engine to be ready (up to 24 minutes)..."

@@ -17,7 +17,7 @@ use crate::sharing::share_store::ShareRecord;
 
 fn get_share_base_url() -> String {
     std::env::var("BENNETT_SHARE_BASE_URL")
-        .unwrap_or_else(|_| "https://share.bennett.studio".to_string())
+            .unwrap_or_else(|_| "https://share-bennett-studio.vercel.app".to_string());
 }
 use chrono::Utc;
 
@@ -74,7 +74,7 @@ impl ShareService for ShareGrpcService {
         
         // Build URL
         let base_url = std::env::var("BENNETT_SHARE_BASE_URL")
-            .unwrap_or_else(|_| "https://share.bennett.studio".to_string());
+            .unwrap_or_else(|_| "https://share-bennett-studio.vercel.app".to_string());
         let url = build_share_url(&base_url, &code, &token_result.token);
         
         // Store in DB

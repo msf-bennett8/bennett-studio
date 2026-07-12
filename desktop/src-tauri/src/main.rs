@@ -68,7 +68,7 @@ fn main() {
                             }
                             
                             // Emit event to frontend with full share URL
-                            let share_url = format!("https://share.bennett.studio/db/{}?t={}", code, token);
+                            let share_url = format!("https://share-bennett-studio.vercel.app/db/{}?t={}", code, token);
                             let _ = deep_link_handle.emit("deep-link-share", serde_json::json!({
                                 "code": code,
                                 "token": token,

@@ -404,7 +404,6 @@ async fn start_http_proxy_api(
         .allow_credentials(true);
 
     let app = Router::new()
-        .layer(cors)
         // Health check
         .route("/health", get(proxy_health))
         .route("/api/health", get(proxy_health))
@@ -425,6 +424,7 @@ async fn start_http_proxy_api(
         .route("/ws/share/:code", get(ws_proxy_handler))
         // PHASE A: Engine tunnel WebSocket — engines connect here to register routes
         .route("/ws/tunnel/:host_id", get(tunnel_ws_handler))
+        .layer(cors)
         .with_state(app_state);
 
     let addr: SocketAddr = bind_addr.parse()?;

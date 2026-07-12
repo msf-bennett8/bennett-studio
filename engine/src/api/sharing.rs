@@ -24,7 +24,7 @@ use crate::sharing::share_store::ShareRecord;
 /// Base URL for share links (configurable via env)
 fn get_share_base_url() -> String {
     std::env::var("BENNETT_SHARE_BASE_URL")
-        .unwrap_or_else(|_| "http://localhost:3001".to_string())
+        .unwrap_or_else(|_| "https://share-bennett-studio.vercel.app".to_string())
 }
 
 /// POST /api/shares — Create a new share link
@@ -110,7 +110,7 @@ pub async fn create_share(
     };
 
     // Build share URL — ICE is now embedded in the JWT token itself
-    // The URL is clean: https://share.bennett.studio/db/CODE?t=JWT
+    // The URL is clean: https://share-bennett-studio.vercel.app/db/CODE?t=JWT
     // The JWT contains everything: host, port, ICE candidates, permissions, etc.
     let base_url = get_share_base_url();
     let url = build_share_url(&base_url, &code, &token.token);

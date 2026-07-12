@@ -278,15 +278,15 @@ mod tests {
     
     #[test]
     fn test_parse_share_url() {
-        let url = "https://share.bennett.studio/db/ACQPFDAQ7P?t=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9";
+        let url = "https://example.com/db/ACQPFDAQ7P?t=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9";
         let (code, token) = parse_share_url(url).unwrap();
         assert_eq!(code, "ACQPFDAQ7P");
         assert_eq!(token, "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9");
     }
-    
+
     #[test]
     fn test_build_share_url() {
-        let url = build_share_url("https://share.bennett.studio", "ACQPFDAQ7P", "abc123");
-        assert_eq!(url, "https://share.bennett.studio/db/ACQPFDAQ7P?t=abc123");
+        let url = build_share_url("https://example.com", "ACQPFDAQ7P", "abc123");
+        assert_eq!(url, "https://example.com/db/ACQPFDAQ7P?t=abc123");
     }
 }
