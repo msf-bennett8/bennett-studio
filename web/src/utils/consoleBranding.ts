@@ -45,7 +45,7 @@ export function initConsoleBranding() {
     '%c林深时见鹿，海深时见鲸，情深时见你 ann\n' +
     '%cCrawling ten thousand miles is no match for taking the API route\n' +
     '%cOne-click access to Bennett Studio local database query\n' +
-    '%chttps://bennett.studio',
+    '%chttps://share-bennett-studio.vercel.app',
     titleStyle, lineStyle, lineStyle, chineseStyle, apiStyle, apiStyle, urlStyle
   );
 }

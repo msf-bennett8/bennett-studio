@@ -7,9 +7,16 @@ import type {
   RevokeShareRequest,
 } from '@bennettstudio/shared';
 
+// Detect if we're on the web app (remote) vs local engine
+const isRemoteMode = () => {
+  const url = (import.meta as any).env?.VITE_API_URL || '';
+  return url.includes('onrender.com') || url.includes('vercel.app') || window.location.hostname.includes('vercel.app');
+};
+
 export const shareApi = {
-  // Create a new share link
+  // Create a new share link — local engine only
   createShare: async (req: CreateShareRequest): Promise<CreateShareResponse> => {
+    if (isRemoteMode()) throw new Error('Cannot create shares from remote mode');
     const response = await fetch(`${API_BASE_URL}/api/shares`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -27,14 +34,15 @@ export const shareApi = {
     return result.data;
   },
 
-  // List all active shares
+  // List all active shares — local engine only
   listShares: async (): Promise<ListSharesResponse> => {
+    if (isRemoteMode()) return { shares: [], total: 0 };
     const response = await fetch(`${API_BASE_URL}/api/shares`);
-    
+
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }
-    
+
     const result = await response.json();
     if (!result.success) {
       throw new Error(result.error || 'Failed to list shares');
@@ -42,8 +50,9 @@ export const shareApi = {
     return result.data;
   },
 
-    // Toggle pin status for a share
+    // Toggle pin status for a share — local engine only
   togglePin: async (code: string): Promise<boolean> => {
+    if (isRemoteMode()) return false;
     const response = await fetch(`${API_BASE_URL}/api/shares/${code}/pin`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -57,8 +66,9 @@ export const shareApi = {
     return result.success;
   },
 
-  // Hard delete a share (permanent removal)
+  // Hard delete a share (permanent removal) — local engine only
   deleteShare: async (code: string): Promise<boolean> => {
+    if (isRemoteMode()) return false;
     const response = await fetch(`${API_BASE_URL}/api/shares/${code}/permanent`, {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
@@ -72,8 +82,9 @@ export const shareApi = {
     return result.success;
   },
 
-  // Revoke a share
+  // Revoke a share — local engine only
   revokeShare: async (code: string, reason?: string): Promise<boolean> => {
+    if (isRemoteMode()) return false;
     const response = await fetch(`${API_BASE_URL}/api/shares/${code}`, {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
@@ -107,8 +118,9 @@ export const shareApi = {
     return result.data;
   },
 
-  // Create share with P2P ICE candidates
+  // Create share with P2P ICE candidates — local engine only
   createShareWithIce: async (req: CreateShareRequest): Promise<CreateShareResponse & { ice?: string }> => {
+    if (isRemoteMode()) throw new Error('Cannot create shares from remote mode');
     const response = await fetch(`${API_BASE_URL}/api/shares`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

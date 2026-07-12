@@ -183,7 +183,7 @@ export const useShareStore = create<ShareState>((set, get) => ({
     try {
       const token = await vaultService.getToken(code);
       if (token) {
-        return `https://share.bennett.studio/db/${code}?t=${token}`;
+        return `https://share-bennett-studio.vercel.app/db/${code}?t=${token}`;
       }
     } catch (e) {
       console.warn('Vault retrieval failed:', e);
