@@ -72,6 +72,11 @@ impl RelayServer {
             return Arc::new(self).run_p2p(shutdown_rx).await;
         }
 
+        // HTTP mode: serve proxy API directly (Render/cloud deployment)
+        if self.config.http_mode {
+            return self.run_http_mode(shutdown_rx).await;
+        }
+
         let listener = TcpListener::bind(self.config.bind).await?;
         info!(bind = %self.config.bind, "Relay listening (ALPN: h2, http/1.1, mysql)");
 
@@ -99,6 +104,85 @@ impl RelayServer {
         }
 
         info!("Relay server stopped");
+        Ok(())
+    }
+
+    /// HTTP mode: plain HTTP server for Render/cloud deployments
+    /// Serves proxy API routes directly without TLS termination
+    async fn run_http_mode(
+        self,
+        mut shutdown_rx: tokio::sync::watch::Receiver<bool>,
+    ) -> anyhow::Result<()> {
+        use axum::{
+            routing::{get, post, options},
+            Router,
+            extract::State,
+        };
+        use tower_http::cors::{CorsLayer, Any};
+        use axum::http::{HeaderValue, Method};
+
+        let tunnel_registry = crate::tunnel_registry::TunnelRegistry::new();
+        let router = self.router.with_tunnel_registry(tunnel_registry.clone());
+
+        let app_state = crate::ProxyApiState {
+            router: router.clone(),
+            tunnel_registry: tunnel_registry.clone(),
+        };
+
+        let cors = CorsLayer::new()
+            .allow_origin([
+                "https://share-bennett-studio.vercel.app".parse::<HeaderValue>().unwrap(),
+                "http://localhost:5173".parse::<HeaderValue>().unwrap(),
+                "http://localhost:5174".parse::<HeaderValue>().unwrap(),
+                "http://localhost:3000".parse::<HeaderValue>().unwrap(),
+                "http://localhost:3001".parse::<HeaderValue>().unwrap(),
+                "tauri://localhost".parse::<HeaderValue>().unwrap(),
+            ])
+            .allow_methods([
+                Method::GET,
+                Method::POST,
+                Method::PUT,
+                Method::DELETE,
+                Method::OPTIONS,
+            ])
+            .allow_headers([
+                axum::http::header::CONTENT_TYPE,
+                axum::http::header::AUTHORIZATION,
+                axum::http::header::HeaderName::from_static("x-share-code"),
+                axum::http::header::HeaderName::from_static("x-share-token"),
+                axum::http::header::HeaderName::from_static("x-requested-with"),
+            ])
+            .allow_credentials(true);
+
+        let app = Router::new()
+            .route("/health", get(crate::proxy_health))
+            .route("/api/health", get(crate::proxy_health))
+            .route("/api/share/:code/query", options(crate::cors_preflight))
+            .route("/api/share/:code/schema", options(crate::cors_preflight))
+            .route("/ws/share/:code", options(crate::cors_preflight))
+            .route("/api/share/:code/webrtc/offer", post(crate::webrtc_offer_handler))
+            .route("/api/share/:code/webrtc/ice", post(crate::webrtc_ice_handler))
+            .route("/api/share/:code/query", post(crate::proxy_query))
+            .route("/api/share/:code/schema", get(crate::proxy_schema))
+            .route("/api/share/:code", get(crate::proxy_share_info))
+            .route("/api/share/:code/validate", post(crate::proxy_validate_share))
+            .route("/ws/share/:code", get(crate::ws_proxy_handler))
+            .route("/ws/tunnel/:host_id", get(crate::tunnel_ws_handler))
+            .layer(cors)
+            .with_state(app_state);
+
+        let addr = self.config.bind;
+        info!("HTTP relay starting on http://{}", addr);
+
+        let listener = TcpListener::bind(addr).await?;
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async move {
+                let _ = shutdown_rx.changed().await;
+                info!("HTTP mode shutdown signal received");
+            })
+            .await?;
+
+        info!("HTTP relay stopped");
         Ok(())
     }
 

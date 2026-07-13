@@ -24,13 +24,13 @@ RUN apt-get update && apt-get install -y ca-certificates libssl3 && rm -rf /var/
 COPY --from=builder /app/target/release/bennett-relay /usr/local/bin/bennett-relay
 
 # Environment defaults for Render
-ENV BENNETT_TCP_ONLY=1
+ENV BENNETT_HTTP_MODE=1
 ENV BENNETT_BIND=0.0.0.0:8443
-ENV BENNETT_PROXY_API_BIND=0.0.0.0:8444
+ENV BENNETT_PROXY_API_BIND=0.0.0.0:8443
 ENV BENNETT_LOG_LEVEL=info
 ENV RUST_LOG=info
 
-EXPOSE 8443 8444
+EXPOSE 8443
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=5 \
   CMD curl -fsS http://localhost:8444/health || exit 1

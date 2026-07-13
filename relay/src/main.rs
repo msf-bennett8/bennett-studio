@@ -175,9 +175,9 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    // Start HTTP proxy API for external websites (ALWAYS — independent of P2P mode)
-    // This is the base API endpoint that external websites use
-    let api_handle = {
+    // In HTTP mode, the proxy API is served by RelayServer::run_http_mode()
+    // In TLS mode, we spawn a separate proxy API for local development
+    let _api_handle = if !config.http_mode {
         let router_clone = router.clone();
         let _transport_clone = transport.clone();
         let bind_addr = config.proxy_api_bind.to_string();
@@ -185,18 +185,23 @@ async fn main() -> anyhow::Result<()> {
         println!("DEBUG MAIN: bind_addr={}", bind_addr);
         info!(addr = %bind_addr, "Starting HTTP proxy API for external website access");
 
-        tokio::spawn(async move {
+        Some(tokio::spawn(async move {
             println!("DEBUG PROXY: Starting HTTP proxy API task on {}", bind_addr);
             if let Err(e) = start_http_proxy_api(bind_addr, router_clone, _transport_clone).await {
                 error!("HTTP proxy API error: {}", e);
             }
             println!("DEBUG PROXY: HTTP proxy API task ended");
-        })
+        }))
+    } else {
+        info!("HTTP mode: proxy API served on main bind, skipping separate proxy API");
+        None
     };
 
-    // Yield to ensure the spawned task gets a chance to start before we block on relay.run()
-    tokio::task::yield_now().await;
-    tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+    // Yield only if we spawned a separate task
+    if _api_handle.is_some() {
+        tokio::task::yield_now().await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+    }
 
     // Start health monitor
     let _health_handle = health::HealthMonitor::start(
@@ -257,7 +262,9 @@ async fn main() -> anyhow::Result<()> {
     info!("Relay server shutdown complete");
 
     // Explicitly keep the handle alive until shutdown (prevents premature drop)
-    drop(api_handle);
+    if let Some(handle) = _api_handle {
+        drop(handle);
+    }
 
     Ok(())
 }
@@ -285,7 +292,7 @@ struct WebRtcOfferResponse {
 
 /// Handle WebRTC offer from browser
 /// Returns SDP answer for browser to complete P2P
-async fn webrtc_offer_handler(
+pub async fn webrtc_offer_handler(
     Path(code): Path<String>,
     State(state): State<ProxyApiState>,
     Json(_req): Json<WebRtcOfferRequest>,
@@ -337,7 +344,7 @@ struct WebRtcIceRequest {
 }
 
 /// Handle ICE candidate trickle from browser
-async fn webrtc_ice_handler(
+pub async fn webrtc_ice_handler(
     Path(code): Path<String>,
     State(_state): State<ProxyApiState>,
     Json(_req): Json<WebRtcIceRequest>,
@@ -439,7 +446,7 @@ async fn start_http_proxy_api(
 }
 
 #[derive(Clone)]
-struct ProxyApiState {
+pub struct ProxyApiState {
     router: Arc<router::ShareRouter>,
     tunnel_registry: Arc<crate::tunnel_registry::TunnelRegistry>,
 }
@@ -450,7 +457,7 @@ struct SchemaQueryParams {
 }
 
 /// CORS preflight response
-async fn cors_preflight() -> impl IntoResponse {
+pub async fn cors_preflight() -> impl IntoResponse {
     let mut headers = axum::http::HeaderMap::new();
     for (k, v) in router::cors_headers() {
         headers.insert(k, v.parse().unwrap());
@@ -459,7 +466,7 @@ async fn cors_preflight() -> impl IntoResponse {
 }
 
 /// Health check for proxy API
-async fn proxy_health() -> impl IntoResponse {
+pub async fn proxy_health() -> impl IntoResponse {
     info!("Proxy health check received");
     let body = serde_json::json!({ "status": "ok", "service": "bennett-proxy" });
     (StatusCode::OK, axum::Json(body))
@@ -468,7 +475,7 @@ async fn proxy_health() -> impl IntoResponse {
 /// Execute a query through the proxy
 /// External websites POST here with { sql, token }
 /// Forwards to engine's POST /api/shares/:code/query endpoint
-async fn proxy_query(
+pub async fn proxy_query(
     Path(code): Path<String>,
     State(state): State<ProxyApiState>,
     Json(req): Json<router::ProxyQueryRequest>,
@@ -545,7 +552,7 @@ async fn proxy_query(
 
 /// Get schema through the proxy
 /// Forwards to engine's GET /api/shares/:code/schema endpoint
-async fn proxy_schema(
+pub async fn proxy_schema(
     Path(code): Path<String>,
     State(state): State<ProxyApiState>,
     axum::extract::Query(params): axum::extract::Query<SchemaQueryParams>,
@@ -616,7 +623,7 @@ async fn proxy_schema(
 
 /// Validate a share through the proxy
 /// Forwards to engine's POST /api/shares/:code/validate endpoint
-async fn proxy_validate_share(
+pub async fn proxy_validate_share(
     Path(code): Path<String>,
     State(state): State<ProxyApiState>,
     Json(req): Json<serde_json::Value>,
@@ -678,7 +685,7 @@ async fn proxy_validate_share(
 }
 
 /// Get public share info
-async fn proxy_share_info(
+pub async fn proxy_share_info(
     Path(code): Path<String>,
     State(state): State<ProxyApiState>,
 ) -> impl IntoResponse {
@@ -827,7 +834,7 @@ enum TunnelEngineResponse {
 }
 
 /// WebSocket handler for engine tunnels
-async fn tunnel_ws_handler(
+pub async fn tunnel_ws_handler(
     ws: WebSocketUpgrade,
     Path(host_id): Path<String>,
     State(state): State<ProxyApiState>,
@@ -960,7 +967,7 @@ async fn handle_tunnel_ws(
 }
 
 /// WebSocket upgrade handler
-async fn ws_proxy_handler(
+pub async fn ws_proxy_handler(
     ws: WebSocketUpgrade,
     Path(code): Path<String>,
     State(state): State<ProxyApiState>,
@@ -969,7 +976,7 @@ async fn ws_proxy_handler(
 }
 
 /// Handle WebSocket connection for share streaming
-async fn handle_ws_proxy(
+pub async fn handle_ws_proxy(
     socket: WebSocket,
     code: String,
     state: ProxyApiState,

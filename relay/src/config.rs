@@ -83,6 +83,11 @@ pub struct RelayConfig {
     /// This is the base URL port for external websites
     #[arg(long, default_value = "0.0.0.0:8444", env = "BENNETT_PROXY_API_BIND")]
     pub proxy_api_bind: SocketAddr,
+
+    /// Run in HTTP mode (no TLS, serves proxy API directly)
+    /// Use on Render/cloud where TLS is terminated upstream
+    #[arg(long, default_value_t = false, env = "BENNETT_HTTP_MODE")]
+    pub http_mode: bool,
 }
 
 impl RelayConfig {
