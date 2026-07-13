@@ -1,7 +1,10 @@
 {
+  "buildCommand": "npx vite build --config vite.share.config.ts",
+  "outputDirectory": "dist-share",
   "rewrites": [
-    { "source": "/db/:code", "destination": "/index.html" },
-    { "source": "/db/:code/(.*)", "destination": "/index.html" }
+    { "source": "/db/:code", "destination": "/share.html" },
+    { "source": "/db/:code/(.*)", "destination": "/share.html" },
+    { "source": "/(.*)", "destination": "/share.html" }
   ],
   "headers": [
     {

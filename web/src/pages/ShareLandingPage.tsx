@@ -8,10 +8,12 @@ import {
 } from 'lucide-react';
 import { clientFromUrl, extractConnectionInfo, type ConnectionInfo } from '@bennettstudio/sdk';
 
-export function ShareLandingPage() {
-  const { code } = useParams<{ code: string }>();
+export function ShareLandingPage({ code: propCode, token: propToken }: { code?: string; token?: string } = {}) {
+  const { code: urlCode } = useParams<{ code: string }>();
   const [searchParams] = useSearchParams();
-  const token = searchParams.get('t');
+  
+  const code = propCode || urlCode;
+  const token = propToken || searchParams.get('t');
 
   const [connectionInfo, setConnectionInfo] = useState<ConnectionInfo | null>(null);
   const [loading, setLoading] = useState(true);

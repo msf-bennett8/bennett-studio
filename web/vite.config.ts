@@ -21,6 +21,9 @@ const bennettBranding = () => ({
 
 export default defineConfig({
   plugins: [react(), bennettBranding()],
+  build: {
+    outDir: 'dist',
+  },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
