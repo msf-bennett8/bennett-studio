@@ -1348,6 +1348,7 @@ pub fn build_proxy_api_router(
         .route("/api/health", get(proxy_health))
         .route("/api/share/:code/query", options(cors_preflight))
         .route("/api/share/:code/schema", options(cors_preflight))
+        .route("/api/share/:code/validate", options(cors_preflight))
         .route("/ws/share/:code", options(cors_preflight))
         .route("/api/share/:code/webrtc/offer", post(webrtc_offer_handler))
         .route("/api/share/:code/webrtc/ice", post(webrtc_ice_handler))
@@ -1357,6 +1358,7 @@ pub fn build_proxy_api_router(
         .route("/api/share/:code/validate", post(proxy_validate_share))
         .route("/ws/share/:code", get(ws_proxy_handler))
         .route("/ws/tunnel/:host_id", get(tunnel_ws_handler))
+        .fallback(options(cors_preflight))
         .layer(cors)
         .with_state(app_state)
 }
