@@ -113,63 +113,10 @@ impl RelayServer {
         self,
         mut shutdown_rx: tokio::sync::watch::Receiver<bool>,
     ) -> anyhow::Result<()> {
-        use axum::{
-            routing::{get, post, options},
-            Router,
-            extract::State,
-        };
-        use tower_http::cors::{CorsLayer, Any};
-        use axum::http::{HeaderValue, Method};
-
         let tunnel_registry = crate::tunnel_registry::TunnelRegistry::new();
         let router = self.router.with_tunnel_registry(tunnel_registry.clone());
 
-        let app_state = crate::ProxyApiState {
-            router: router.clone(),
-            tunnel_registry: tunnel_registry.clone(),
-        };
-
-        let cors = CorsLayer::new()
-            .allow_origin([
-                "https://share-bennett-studio.vercel.app".parse::<HeaderValue>().unwrap(),
-                "http://localhost:5173".parse::<HeaderValue>().unwrap(),
-                "http://localhost:5174".parse::<HeaderValue>().unwrap(),
-                "http://localhost:3000".parse::<HeaderValue>().unwrap(),
-                "http://localhost:3001".parse::<HeaderValue>().unwrap(),
-                "tauri://localhost".parse::<HeaderValue>().unwrap(),
-            ])
-            .allow_methods([
-                Method::GET,
-                Method::POST,
-                Method::PUT,
-                Method::DELETE,
-                Method::OPTIONS,
-            ])
-            .allow_headers([
-                axum::http::header::CONTENT_TYPE,
-                axum::http::header::AUTHORIZATION,
-                axum::http::header::HeaderName::from_static("x-share-code"),
-                axum::http::header::HeaderName::from_static("x-share-token"),
-                axum::http::header::HeaderName::from_static("x-requested-with"),
-            ])
-            .allow_credentials(true);
-
-        let app = Router::new()
-            .route("/health", get(crate::proxy_health))
-            .route("/api/health", get(crate::proxy_health))
-            .route("/api/share/:code/query", options(crate::cors_preflight))
-            .route("/api/share/:code/schema", options(crate::cors_preflight))
-            .route("/ws/share/:code", options(crate::cors_preflight))
-            .route("/api/share/:code/webrtc/offer", post(crate::webrtc_offer_handler))
-            .route("/api/share/:code/webrtc/ice", post(crate::webrtc_ice_handler))
-            .route("/api/share/:code/query", post(crate::proxy_query))
-            .route("/api/share/:code/schema", get(crate::proxy_schema))
-            .route("/api/share/:code", get(crate::proxy_share_info))
-            .route("/api/share/:code/validate", post(crate::proxy_validate_share))
-            .route("/ws/share/:code", get(crate::ws_proxy_handler))
-            .route("/ws/tunnel/:host_id", get(crate::tunnel_ws_handler))
-            .layer(cors)
-            .with_state(app_state);
+        let app = build_proxy_api_router(router, tunnel_registry);
 
         let addr = self.config.bind;
         info!("HTTP relay starting on http://{}", addr);
@@ -603,4 +550,813 @@ async fn load_tls_config(cert_dir: &std::path::Path) -> anyhow::Result<rustls::S
     ];
 
     Ok(config)
+}
+
+// ============================================================================
+// HTTP Proxy API Module — Used by run_http_mode() and start_http_proxy_api()
+// ============================================================================
+
+use axum::{
+    extract::{Path, State, Json, ws::{Message, WebSocket, WebSocketUpgrade}},
+    http::StatusCode,
+    response::IntoResponse,
+    routing::{get, post, options},
+    Router,
+};
+use futures_util::{sink::SinkExt, stream::StreamExt};
+use tower_http::cors::{CorsLayer, Any};
+use axum::http::{HeaderValue, Method};
+
+#[derive(Clone)]
+pub struct ProxyApiState {
+    pub router: Arc<crate::router::ShareRouter>,
+    pub tunnel_registry: Arc<crate::tunnel_registry::TunnelRegistry>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct WebRtcOfferRequest {
+    pub sdp: String,
+    pub ice_candidates: Vec<serde_json::Value>,
+    pub token: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct WebRtcOfferResponse {
+    pub success: bool,
+    pub answer_sdp: Option<String>,
+    pub answer_ice: Vec<serde_json::Value>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct WebRtcIceRequest {
+    pub candidate: serde_json::Value,
+    pub token: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct SchemaQueryParams {
+    pub token: String,
+}
+
+/// CORS preflight response
+pub async fn cors_preflight() -> impl IntoResponse {
+    let mut headers = axum::http::HeaderMap::new();
+    for (k, v) in crate::router::cors_headers() {
+        headers.insert(k, v.parse().unwrap());
+    }
+    (StatusCode::NO_CONTENT, headers)
+}
+
+/// Health check for proxy API
+pub async fn proxy_health() -> impl IntoResponse {
+    let body = serde_json::json!({ "status": "ok", "service": "bennett-proxy" });
+    (StatusCode::OK, axum::Json(body))
+}
+
+/// Handle WebRTC offer from browser
+pub async fn webrtc_offer_handler(
+    Path(code): Path<String>,
+    State(state): State<ProxyApiState>,
+    Json(_req): Json<WebRtcOfferRequest>,
+) -> impl IntoResponse {
+    let mut headers = axum::http::HeaderMap::new();
+    for (k, v) in crate::router::cors_headers() {
+        headers.insert(k, v.parse().unwrap());
+    }
+
+    if !state.router.is_active(&code) {
+        return (
+            StatusCode::NOT_FOUND,
+            headers,
+            axum::Json(WebRtcOfferResponse {
+                success: false,
+                answer_sdp: None,
+                answer_ice: vec![],
+                error: Some("Share not found or expired".to_string()),
+            }),
+        );
+    }
+
+    info!(share = %code, "WebRTC offer received from browser");
+
+    (
+        StatusCode::OK,
+        headers,
+        axum::Json(WebRtcOfferResponse {
+            success: true,
+            answer_sdp: None,
+            answer_ice: vec![],
+            error: Some("WebRTC P2P not yet active — use WebSocket relay instead".to_string()),
+        }),
+    )
+}
+
+/// Handle ICE candidate trickle from browser
+pub async fn webrtc_ice_handler(
+    Path(_code): Path<String>,
+    State(_state): State<ProxyApiState>,
+    Json(_req): Json<WebRtcIceRequest>,
+) -> impl IntoResponse {
+    let mut headers = axum::http::HeaderMap::new();
+    for (k, v) in crate::router::cors_headers() {
+        headers.insert(k, v.parse().unwrap());
+    }
+    (StatusCode::OK, headers, axum::Json(serde_json::json!({ "received": true })))
+}
+
+/// Execute a query through the proxy
+pub async fn proxy_query(
+    Path(code): Path<String>,
+    State(state): State<ProxyApiState>,
+    Json(req): Json<crate::router::ProxyQueryRequest>,
+) -> impl IntoResponse {
+    let mut headers = axum::http::HeaderMap::new();
+    for (k, v) in crate::router::cors_headers() {
+        headers.insert(k, v.parse().unwrap());
+    }
+
+    if !state.router.is_active(&code) {
+        return (
+            StatusCode::NOT_FOUND,
+            headers,
+            axum::Json(serde_json::json!({
+                "success": false,
+                "error": "Share not found or expired"
+            })),
+        );
+    }
+
+    info!(share = %code, sql_len = %req.sql.len(), "Proxy query received — forwarding to engine");
+
+    let engine_body = serde_json::json!({
+        "sql": req.sql,
+        "limit": req.limit,
+        "offset": req.offset,
+    });
+
+    match state.router.forward_to_engine(
+        &code,
+        "POST",
+        &format!("/api/shares/{}/query", code),
+        Some(engine_body.to_string().into_bytes()),
+        &req.token,
+    ).await {
+        Ok(response_bytes) => {
+            let response_str = String::from_utf8_lossy(&response_bytes);
+            if let Some(body_start) = response_str.find("\r\n\r\n") {
+                let body = &response_str[body_start + 4..];
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(body) {
+                    return (StatusCode::OK, headers, axum::Json(json));
+                }
+            }
+            (
+                StatusCode::OK,
+                headers,
+                axum::Json(serde_json::json!({
+                    "success": true,
+                    "raw_response": response_str.to_string(),
+                })),
+            )
+        }
+        Err(e) => {
+            warn!(share = %code, error = %e, "Engine forwarding failed");
+            (
+                StatusCode::BAD_GATEWAY,
+                headers,
+                axum::Json(serde_json::json!({
+                    "success": false,
+                    "error": format!("Engine forwarding failed: {}", e)
+                })),
+            )
+        }
+    }
+}
+
+/// Get schema through the proxy
+pub async fn proxy_schema(
+    Path(code): Path<String>,
+    State(state): State<ProxyApiState>,
+    axum::extract::Query(params): axum::extract::Query<SchemaQueryParams>,
+) -> impl IntoResponse {
+    let token = params.token;
+    let mut headers = axum::http::HeaderMap::new();
+    for (k, v) in crate::router::cors_headers() {
+        headers.insert(k, v.parse().unwrap());
+    }
+
+    if !state.router.is_active(&code) {
+        return (
+            StatusCode::NOT_FOUND,
+            headers,
+            axum::Json(serde_json::json!({
+                "success": false,
+                "error": "Share not found or expired"
+            })),
+        );
+    }
+
+    info!(share = %code, "Proxy schema request received — forwarding to engine");
+
+    match state.router.forward_to_engine(
+        &code,
+        "GET",
+        &format!("/api/shares/{}/schema", code),
+        None,
+        &token,
+    ).await {
+        Ok(response_bytes) => {
+            let response_str = String::from_utf8_lossy(&response_bytes);
+            if let Some(body_start) = response_str.find("\r\n\r\n") {
+                let body = &response_str[body_start + 4..];
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(body) {
+                    return (StatusCode::OK, headers, axum::Json(json));
+                }
+            }
+            (
+                StatusCode::OK,
+                headers,
+                axum::Json(serde_json::json!({
+                    "success": true,
+                    "raw_response": response_str.to_string(),
+                })),
+            )
+        }
+        Err(e) => {
+            warn!(share = %code, error = %e, "Engine schema forwarding failed");
+            (
+                StatusCode::BAD_GATEWAY,
+                headers,
+                axum::Json(serde_json::json!({
+                    "success": false,
+                    "error": format!("Engine forwarding failed: {}", e)
+                })),
+            )
+        }
+    }
+}
+
+/// Validate a share through the proxy
+pub async fn proxy_validate_share(
+    Path(code): Path<String>,
+    State(state): State<ProxyApiState>,
+    Json(req): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    let mut headers = axum::http::HeaderMap::new();
+    for (k, v) in crate::router::cors_headers() {
+        headers.insert(k, v.parse().unwrap());
+    }
+
+    if !state.router.is_active(&code) {
+        return (
+            StatusCode::NOT_FOUND,
+            headers,
+            axum::Json(serde_json::json!({
+                "success": false,
+                "error": "Share not found or expired"
+            })),
+        );
+    }
+
+    info!(share = %code, "Proxy validate request received — forwarding to engine");
+
+    match state.router.forward_to_engine(
+        &code,
+        "POST",
+        &format!("/api/shares/{}/validate", code),
+        Some(req.to_string().into_bytes()),
+        "",
+    ).await {
+        Ok(response_bytes) => {
+            let response_str = String::from_utf8_lossy(&response_bytes);
+            if let Some(body_start) = response_str.find("\r\n\r\n") {
+                let body = &response_str[body_start + 4..];
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(body) {
+                    return (StatusCode::OK, headers, axum::Json(json));
+                }
+            }
+            (
+                StatusCode::OK,
+                headers,
+                axum::Json(serde_json::json!({
+                    "success": true,
+                    "raw_response": response_str.to_string(),
+                })),
+            )
+        }
+        Err(e) => {
+            warn!(share = %code, error = %e, "Engine validate forwarding failed");
+            (
+                StatusCode::BAD_GATEWAY,
+                headers,
+                axum::Json(serde_json::json!({
+                    "success": false,
+                    "error": format!("Engine forwarding failed: {}", e)
+                })),
+            )
+        }
+    }
+}
+
+/// Get public share info
+pub async fn proxy_share_info(
+    Path(code): Path<String>,
+    State(state): State<ProxyApiState>,
+) -> impl IntoResponse {
+    let mut headers = axum::http::HeaderMap::new();
+    for (k, v) in crate::router::cors_headers() {
+        headers.insert(k, v.parse().unwrap());
+    }
+
+    if !state.router.is_active(&code) {
+        return (
+            StatusCode::NOT_FOUND,
+            headers,
+            axum::Json(serde_json::json!({
+                "success": false,
+                "error": "Share not found or expired"
+            })),
+        );
+    }
+
+    (
+        StatusCode::OK,
+        headers,
+        axum::Json(serde_json::json!({
+            "success": true,
+            "code": code,
+            "status": "active",
+            "message": "Share is active — connect with BennettClient"
+        })),
+    )
+}
+
+// ============================================================================
+// WebSocket Streaming Proxy
+// ============================================================================
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum WsProxyRequest {
+    Query { sql: String, limit: Option<i64>, request_id: Option<String> },
+    SubscribeSchema,
+    Ping,
+    Ack { message_id: u64 },
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum WsProxyResponse {
+    QueryResult {
+        columns: Vec<String>,
+        rows: Vec<Vec<serde_json::Value>>,
+        row_count: usize,
+        execution_time_ms: u64,
+        request_id: Option<String>,
+        message_id: u64,
+    },
+    QueryError {
+        error: String,
+        request_id: Option<String>,
+        message_id: u64,
+    },
+    SchemaUpdate {
+        tables: Vec<serde_json::Value>,
+        database_name: String,
+        database_type: String,
+        message_id: u64,
+    },
+    Status {
+        connected: bool,
+        share_code: String,
+        message: String,
+        message_id: u64,
+    },
+    Pong,
+    Error { message: String, message_id: u64 },
+}
+
+/// WebSocket upgrade handler for browser share connections
+pub async fn ws_proxy_handler(
+    ws: WebSocketUpgrade,
+    Path(code): Path<String>,
+    State(state): State<ProxyApiState>,
+) -> impl IntoResponse {
+    ws.on_upgrade(move |socket| handle_ws_proxy(socket, code, state))
+}
+
+async fn handle_ws_proxy(
+    socket: WebSocket,
+    code: String,
+    state: ProxyApiState,
+) {
+    let (mut sender, mut receiver) = socket.split();
+    let mut message_id: u64 = 0;
+
+    info!(share = %code, "WebSocket proxy connection established");
+
+    message_id += 1;
+    let status_msg = WsProxyResponse::Status {
+        connected: state.router.is_active(&code),
+        share_code: code.clone(),
+        message: "Connected to Bennett relay proxy".to_string(),
+        message_id,
+    };
+    let _ = sender.send(Message::Text(
+        serde_json::to_string(&status_msg).unwrap()
+    )).await;
+
+    if !state.router.is_active(&code) {
+        message_id += 1;
+        let _ = sender.send(Message::Text(
+            serde_json::to_string(&WsProxyResponse::Error {
+                message: "Share not found or expired".to_string(),
+                message_id,
+            }).unwrap()
+        )).await;
+        let _ = sender.close().await;
+        return;
+    }
+
+    loop {
+        tokio::select! {
+            msg = receiver.next() => {
+                match msg {
+                    Some(Ok(Message::Text(text))) => {
+                        match serde_json::from_str::<WsProxyRequest>(&text) {
+                            Ok(WsProxyRequest::Ping) => {
+                                let _ = sender.send(Message::Text(
+                                    serde_json::to_string(&WsProxyResponse::Pong).unwrap()
+                                )).await;
+                            }
+                            Ok(WsProxyRequest::Query { sql, limit, request_id }) => {
+                                info!(share = %code, sql_len = %sql.len(), "WebSocket query received");
+
+                                if sql.trim().is_empty() {
+                                    message_id += 1;
+                                    let _ = sender.send(Message::Text(
+                                        serde_json::to_string(&WsProxyResponse::QueryError {
+                                            error: "Empty SQL query".to_string(),
+                                            request_id: request_id.clone(),
+                                            message_id,
+                                        }).unwrap()
+                                    )).await;
+                                    continue;
+                                }
+
+                                message_id += 1;
+                                let start = std::time::Instant::now();
+
+                                let engine_body = serde_json::json!({
+                                    "sql": sql,
+                                    "limit": limit.unwrap_or(1000),
+                                });
+
+                                match state.router.forward_to_engine(
+                                    &code,
+                                    "POST",
+                                    &format!("/api/shares/{}/query", code),
+                                    Some(engine_body.to_string().into_bytes()),
+                                    "",
+                                ).await {
+                                    Ok(response_bytes) => {
+                                        let response_str = String::from_utf8_lossy(&response_bytes);
+                                        if let Some(body_start) = response_str.find("\r\n\r\n") {
+                                            let body = &response_str[body_start + 4..];
+                                            if let Ok(json) = serde_json::from_str::<serde_json::Value>(body) {
+                                                let data = json.get("data").unwrap_or(&json);
+                                                let columns = data.get("columns")
+                                                    .and_then(|c| c.as_array())
+                                                    .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+                                                    .unwrap_or_else(|| vec!["result".to_string()]);
+                                                let rows = data.get("rows")
+                                                    .and_then(|r| r.as_array())
+                                                    .map(|arr| arr.iter().map(|v| vec![v.clone()]).collect())
+                                                    .unwrap_or_default();
+
+                                                let response = WsProxyResponse::QueryResult {
+                                                    columns,
+                                                    rows,
+                                                    row_count: data.get("row_count").and_then(|v| v.as_u64()).unwrap_or(0) as usize,
+                                                    execution_time_ms: start.elapsed().as_millis() as u64,
+                                                    request_id,
+                                                    message_id,
+                                                };
+                                                let _ = sender.send(Message::Text(
+                                                    serde_json::to_string(&response).unwrap()
+                                                )).await;
+                                            } else {
+                                                let response = WsProxyResponse::QueryResult {
+                                                    columns: vec!["raw".to_string()],
+                                                    rows: vec![vec![serde_json::json!(body)]],
+                                                    row_count: 1,
+                                                    execution_time_ms: start.elapsed().as_millis() as u64,
+                                                    request_id,
+                                                    message_id,
+                                                };
+                                                let _ = sender.send(Message::Text(
+                                                    serde_json::to_string(&response).unwrap()
+                                                )).await;
+                                            }
+                                        } else {
+                                            let _ = sender.send(Message::Text(
+                                                serde_json::to_string(&WsProxyResponse::QueryError {
+                                                    error: "Invalid engine response".to_string(),
+                                                    request_id,
+                                                    message_id,
+                                                }).unwrap()
+                                            )).await;
+                                        }
+                                    }
+                                    Err(e) => {
+                                        let _ = sender.send(Message::Text(
+                                            serde_json::to_string(&WsProxyResponse::QueryError {
+                                                error: format!("Engine forwarding failed: {}", e),
+                                                request_id,
+                                                message_id,
+                                            }).unwrap()
+                                        )).await;
+                                    }
+                                }
+                            }
+                            Ok(WsProxyRequest::SubscribeSchema) => {
+                                message_id += 1;
+                                let response = WsProxyResponse::SchemaUpdate {
+                                    tables: vec![],
+                                    database_name: "Remote Database".to_string(),
+                                    database_type: "unknown".to_string(),
+                                    message_id,
+                                };
+                                let _ = sender.send(Message::Text(
+                                    serde_json::to_string(&response).unwrap()
+                                )).await;
+                            }
+                            Ok(WsProxyRequest::Ack { message_id: ack_id }) => {
+                                debug!("Client acked message {}", ack_id);
+                            }
+                            Err(e) => {
+                                message_id += 1;
+                                let _ = sender.send(Message::Text(
+                                    serde_json::to_string(&WsProxyResponse::Error {
+                                        message: format!("Invalid message: {}", e),
+                                        message_id,
+                                    }).unwrap()
+                                )).await;
+                            }
+                        }
+                    }
+                    Some(Ok(Message::Close(_))) | None => {
+                        info!(share = %code, "WebSocket client disconnected");
+                        break;
+                    }
+                    Some(Err(e)) => {
+                        warn!(share = %code, error = %e, "WebSocket error");
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+            _ = tokio::time::sleep(tokio::time::Duration::from_secs(30)) => {
+                message_id += 1;
+                let _ = sender.send(Message::Text(
+                    serde_json::to_string(&WsProxyResponse::Status {
+                        connected: state.router.is_active(&code),
+                        share_code: code.clone(),
+                        message: "Keepalive".to_string(),
+                        message_id,
+                    }).unwrap()
+                )).await;
+            }
+        }
+    }
+
+    info!(share = %code, "WebSocket proxy connection closed");
+}
+
+// ============================================================================
+// Engine Tunnel WebSocket Handler
+// ============================================================================
+
+#[derive(Clone)]
+struct TunnelState {
+    router: Arc<crate::router::ShareRouter>,
+    tunnels: Arc<tokio::sync::RwLock<std::collections::HashMap<String, tokio::sync::mpsc::UnboundedSender<TunnelEngineMessage>>>>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum TunnelEngineMessage {
+    QueryRequest {
+        request_id: String,
+        share_code: String,
+        token: String,
+        sql: String,
+        limit: Option<i32>,
+        offset: Option<i32>,
+    },
+    SchemaRequest {
+        request_id: String,
+        share_code: String,
+        token: String,
+    },
+    Ping,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum TunnelEngineResponse {
+    QueryResponse {
+        request_id: String,
+        result: serde_json::Value,
+    },
+    SchemaResponse {
+        request_id: String,
+        schema: serde_json::Value,
+    },
+    Register {
+        host_id: String,
+        version: String,
+        capabilities: Vec<String>,
+    },
+    ShareCreated {
+        code: String,
+        db_id: String,
+        permission: String,
+        expires_at: i64,
+    },
+    ShareRevoked {
+        code: String,
+    },
+    Pong,
+}
+
+/// WebSocket handler for engine tunnels
+pub async fn tunnel_ws_handler(
+    ws: WebSocketUpgrade,
+    Path(host_id): Path<String>,
+    State(state): State<ProxyApiState>,
+) -> impl IntoResponse {
+    ws.on_upgrade(move |socket| handle_tunnel_ws(socket, host_id, state))
+}
+
+async fn handle_tunnel_ws(
+    socket: WebSocket,
+    host_id: String,
+    state: ProxyApiState,
+) {
+    let (mut sender, mut receiver) = socket.split();
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<TunnelEngineMessage>();
+
+    info!("Engine tunnel connected: host_id={}", host_id);
+    state.router.mark_host_online(&host_id).await;
+
+    let (wrap_tx, mut wrap_rx) = tokio::sync::mpsc::unbounded_channel::<crate::tunnel_registry::TunnelMessageToEngine>();
+
+    let tx_clone = tx.clone();
+    tokio::spawn(async move {
+        while let Some(msg) = wrap_rx.recv().await {
+            let engine_msg = match msg {
+                crate::tunnel_registry::TunnelMessageToEngine::QueryRequest { request_id, share_code, token, sql, limit, offset } => {
+                    TunnelEngineMessage::QueryRequest { request_id, share_code, token, sql, limit, offset }
+                }
+                crate::tunnel_registry::TunnelMessageToEngine::SchemaRequest { request_id, share_code, token } => {
+                    TunnelEngineMessage::SchemaRequest { request_id, share_code, token }
+                }
+                crate::tunnel_registry::TunnelMessageToEngine::Ping => TunnelEngineMessage::Ping,
+            };
+            let _ = tx_clone.send(engine_msg);
+        }
+    });
+
+    state.tunnel_registry.register_tunnel(host_id.clone(), wrap_tx).await;
+    info!("Registered tunnel in registry for host: {}", host_id);
+
+    let _ = sender.send(Message::Text(
+        serde_json::to_string(&TunnelEngineMessage::Ping).unwrap()
+    )).await;
+
+    loop {
+        tokio::select! {
+            msg = receiver.next() => {
+                match msg {
+                    Some(Ok(Message::Text(text))) => {
+                        if let Ok(resp) = serde_json::from_str::<TunnelEngineResponse>(&text) {
+                            match resp {
+                                TunnelEngineResponse::Register { host_id, version, capabilities } => {
+                                    info!("Engine registered: {} (v{}, caps: {:?})", host_id, version, capabilities);
+                                }
+                                TunnelEngineResponse::ShareCreated { code, db_id, permission: _, expires_at } => {
+                                    info!("Engine reported share created: {}", code);
+                                    let route = crate::router::ShareRoute {
+                                        share_id: code.clone(),
+                                        db_id,
+                                        protocol: crate::transport::ProtocolType::ConnectRpc,
+                                        engine_port: 0,
+                                        expires_at: chrono::DateTime::from_timestamp(expires_at, 0)
+                                            .unwrap_or_else(|| chrono::Utc::now() + chrono::Duration::hours(24)),
+                                        revoked: false,
+                                        host_id: Some(host_id.clone()),
+                                    };
+                                    state.router.add_remote_route(route).await;
+                                }
+                                TunnelEngineResponse::ShareRevoked { code } => {
+                                    info!("Engine reported share revoked: {}", code);
+                                    state.router.remove_remote_route(&code).await;
+                                }
+                                TunnelEngineResponse::QueryResponse { request_id, result } => {
+                                    debug!("Engine query response: {}", request_id);
+                                    state.tunnel_registry.complete_request(&request_id, result).await;
+                                }
+                                TunnelEngineResponse::SchemaResponse { request_id, schema } => {
+                                    debug!("Engine schema response: {}", request_id);
+                                    state.tunnel_registry.complete_request(&request_id, schema).await;
+                                }
+                                TunnelEngineResponse::Pong => {
+                                    debug!("Engine tunnel pong received");
+                                }
+                            }
+                        }
+                    }
+                    Some(Ok(Message::Close(_))) | None => {
+                        info!("Engine tunnel disconnected: host_id={}", host_id);
+                        break;
+                    }
+                    Some(Err(e)) => {
+                        warn!("Engine tunnel error: {}", e);
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+            Some(msg) = rx.recv() => {
+                let text = serde_json::to_string(&msg).unwrap();
+                if let Err(e) = sender.send(Message::Text(text)).await {
+                    warn!("Failed to send to engine tunnel: {}", e);
+                    break;
+                }
+            }
+            _ = tokio::time::sleep(tokio::time::Duration::from_secs(30)) => {
+                let _ = sender.send(Message::Text(
+                    serde_json::to_string(&TunnelEngineMessage::Ping).unwrap()
+                )).await;
+            }
+        }
+    }
+
+    info!("Engine tunnel closed: host_id={}", host_id);
+    state.tunnel_registry.unregister_tunnel(&host_id).await;
+    state.router.remove_all_host_routes(&host_id).await;
+}
+
+/// Build the proxy API router — used by run_http_mode() and start_http_proxy_api()
+pub fn build_proxy_api_router(
+    router: Arc<crate::router::ShareRouter>,
+    tunnel_registry: Arc<crate::tunnel_registry::TunnelRegistry>,
+) -> Router {
+    let app_state = ProxyApiState {
+        router,
+        tunnel_registry,
+    };
+
+    let cors = CorsLayer::new()
+        .allow_origin([
+            "https://share-bennett-studio.vercel.app".parse::<HeaderValue>().unwrap(),
+            "http://localhost:5173".parse::<HeaderValue>().unwrap(),
+            "http://localhost:5174".parse::<HeaderValue>().unwrap(),
+            "http://localhost:3000".parse::<HeaderValue>().unwrap(),
+            "http://localhost:3001".parse::<HeaderValue>().unwrap(),
+            "tauri://localhost".parse::<HeaderValue>().unwrap(),
+        ])
+        .allow_methods([
+            Method::GET,
+            Method::POST,
+            Method::PUT,
+            Method::DELETE,
+            Method::OPTIONS,
+        ])
+        .allow_headers([
+            axum::http::header::CONTENT_TYPE,
+            axum::http::header::AUTHORIZATION,
+            axum::http::header::HeaderName::from_static("x-share-code"),
+            axum::http::header::HeaderName::from_static("x-share-token"),
+            axum::http::header::HeaderName::from_static("x-requested-with"),
+        ])
+        .allow_credentials(true);
+
+    Router::new()
+        .route("/health", get(proxy_health))
+        .route("/api/health", get(proxy_health))
+        .route("/api/share/:code/query", options(cors_preflight))
+        .route("/api/share/:code/schema", options(cors_preflight))
+        .route("/ws/share/:code", options(cors_preflight))
+        .route("/api/share/:code/webrtc/offer", post(webrtc_offer_handler))
+        .route("/api/share/:code/webrtc/ice", post(webrtc_ice_handler))
+        .route("/api/share/:code/query", post(proxy_query))
+        .route("/api/share/:code/schema", get(proxy_schema))
+        .route("/api/share/:code", get(proxy_share_info))
+        .route("/api/share/:code/validate", post(proxy_validate_share))
+        .route("/ws/share/:code", get(ws_proxy_handler))
+        .route("/ws/tunnel/:host_id", get(tunnel_ws_handler))
+        .layer(cors)
+        .with_state(app_state)
 }
