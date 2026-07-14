@@ -518,4 +518,3 @@ export function SharePage() {
     </div>
   );
 }
-
