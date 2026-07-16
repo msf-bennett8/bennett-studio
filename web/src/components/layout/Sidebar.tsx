@@ -1,7 +1,7 @@
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import { Database, Search, Table2, Share2, Settings, Home, Terminal, Rows3, Globe, StickyNote } from 'lucide-react';
-import { api } from '../../services/api';
+import { api, API_BASE_URL, isRemoteMode } from '../../services/api';
 
 const navItems = [
   { icon: Home, label: 'Home', path: '/' },
@@ -20,14 +20,20 @@ export function Sidebar() {
   const navigate = useNavigate();
   const [engineOnline, setEngineOnline] = useState(true);
 
-  // Real-time engine health polling
+  // Real-time engine/relay health polling
   useEffect(() => {
     let mounted = true;
 
     const checkHealth = async () => {
       try {
-        await api.health();
-        if (mounted) setEngineOnline(true);
+        // In remote mode (Vercel/Render), check relay health instead of local engine
+        if (isRemoteMode()) {
+          const response = await fetch(`${API_BASE_URL}/api/health`);
+          if (mounted) setEngineOnline(response.ok);
+        } else {
+          await api.health();
+          if (mounted) setEngineOnline(true);
+        }
       } catch {
         if (mounted) setEngineOnline(false);
       }

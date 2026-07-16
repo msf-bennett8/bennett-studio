@@ -71,8 +71,8 @@ impl ShareRouter {
         self.cache.get(share_id).map(|e| e.clone())
     }
 
-    /// Check if share exists and is active (checks both HTTP and MySQL entries)
-    pub fn is_active(&self, share_id: &str) -> bool {
+    /// Check if share exists and is active (checks cache + tunnel registry)
+    pub async fn is_active(&self, share_id: &str) -> bool {
         // Try with :http suffix first (most common)
         if let Some(route) = self.cache.get(&format!("{}:http", share_id)) {
             if !route.revoked && route.expires_at > chrono::Utc::now() {
@@ -82,6 +82,18 @@ impl ShareRouter {
         // Fallback: check bare share_id (backward compat)
         if let Some(route) = self.cache.get(share_id) {
             return !route.revoked && route.expires_at > chrono::Utc::now();
+        }
+        // PHASE FIX: Also check if any connected tunnel host has this share
+        // (handles the case where route hasn't been added to cache yet)
+        if let Some(ref registry) = self.tunnel_registry {
+            let hosts = registry.connected_hosts().await;
+            for host_id in hosts {
+                if let Some(entry) = self.host_routes.get(&host_id) {
+                    if entry.value().contains(share_id) {
+                        return true;
+                    }
+                }
+            }
         }
         false
     }

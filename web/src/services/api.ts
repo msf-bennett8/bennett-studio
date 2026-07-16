@@ -1,5 +1,5 @@
 // Detect if we're on the web app (remote) vs local engine
-const isRemoteMode = () => {
+export const isRemoteMode = () => {
   const url = (import.meta as any).env?.VITE_API_URL || '';
   return url.includes('onrender.com') || url.includes('vercel.app') || window.location.hostname.includes('vercel.app');
 };
@@ -63,8 +63,13 @@ export interface UpdateNoteRequest {
 }
 
 export const api = {
-  // Health check
-  health: () => fetchApi<Record<string, any>>('/api/health'),
+  // Health check — works for both local engine and relay
+  health: () => {
+    if (isRemoteMode()) {
+      return fetch(`${API_BASE_URL}/api/health`).then(r => r.json());
+    }
+    return fetchApi<Record<string, any>>('/api/health');
+  },
 
   // Databases — local engine only, skip in remote share mode
   listDatabases: () => {

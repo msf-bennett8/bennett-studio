@@ -59,8 +59,15 @@ pub async fn create_share(
     let duration = req.duration_hours.unwrap_or(24);
     let duration = duration.clamp(1, 168); // Max 7 days
     
-    // Generate host ID (fingerprint)
-    let host_id = format!("host-{}", uuid::Uuid::new_v4().to_string().split('-').next().unwrap_or("unknown"));
+    // Use stable host ID from store, or generate and persist
+    let host_id = {
+        let stored = state.share_store.get_host_id().await.ok().flatten();
+        stored.unwrap_or_else(|| {
+            let new_id = format!("host-{}", uuid::Uuid::new_v4().to_string().split('-').next().unwrap_or("unknown"));
+            let _ = state.share_store.set_host_id(&new_id);
+            new_id
+        })
+    };
 
     // Detect host network endpoint for guest resolution
     let host_ip = detect_lan_ip().unwrap_or_else(|| "127.0.0.1".to_string());

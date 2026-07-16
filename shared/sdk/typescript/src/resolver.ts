@@ -48,16 +48,24 @@ export async function resolveHost(code: string, token?: string): Promise<string>
         const padLen = (4 - (base64.length % 4)) % 4;
         const padded = base64 + '='.repeat(padLen);
         const payload = JSON.parse(atob(padded));
-        
+
         if (payload.host && payload.port) {
-          const resolved: ResolvedHost = {
-            baseUrl: `http://${payload.host}:${payload.port}`,
-            resolvedAt: new Date().toISOString(),
-            ttlSeconds: DEFAULT_TTL,
-          };
-          setPersistentCache(code, resolved);
-          DNS_CACHE.set(code, resolved);
-          return resolved.baseUrl;
+          // If host is localhost/127.0.0.1, we're in a browser — can't connect directly
+          // Fallback to relay instead
+          const isLocalhost = payload.host === '127.0.0.1' || payload.host === 'localhost' || payload.host.startsWith('192.168.') || payload.host.startsWith('10.');
+          if (isLocalhost && typeof window !== 'undefined') {
+            console.log(`[BennettSDK] JWT points to local host ${payload.host}:${payload.port}, using relay fallback`);
+            // Continue to relay resolution below
+          } else {
+            const resolved: ResolvedHost = {
+              baseUrl: `http://${payload.host}:${payload.port}`,
+              resolvedAt: new Date().toISOString(),
+              ttlSeconds: DEFAULT_TTL,
+            };
+            setPersistentCache(code, resolved);
+            DNS_CACHE.set(code, resolved);
+            return resolved.baseUrl;
+          }
         }
       }
     } catch {

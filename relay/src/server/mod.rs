@@ -262,7 +262,7 @@ impl RelayServer {
 
         info!(addr = %client_addr, share_id = %share_id, "MySQL/TLS auth");
 
-        if !self.router.is_active(&share_id) {
+        if !self.router.is_active(&share_id).await {
             send_mysql_share_not_found(&mut tls_stream, 1).await?;
             return Ok(());
         }
@@ -564,7 +564,7 @@ use axum::{
     Router,
 };
 use futures_util::{sink::SinkExt, stream::StreamExt};
-use tower_http::cors::{CorsLayer, Any};
+use tower_http::cors::CorsLayer;
 use axum::http::{HeaderValue, Method};
 
 #[derive(Clone)]
@@ -625,7 +625,7 @@ pub async fn webrtc_offer_handler(
         headers.insert(k, v.parse().unwrap());
     }
 
-    if !state.router.is_active(&code) {
+    if !state.router.is_active(&code).await {
         return (
             StatusCode::NOT_FOUND,
             headers,
@@ -676,7 +676,7 @@ pub async fn proxy_query(
         headers.insert(k, v.parse().unwrap());
     }
 
-    if !state.router.is_active(&code) {
+    if !state.router.is_active(&code).await {
         return (
             StatusCode::NOT_FOUND,
             headers,
@@ -745,7 +745,7 @@ pub async fn proxy_schema(
         headers.insert(k, v.parse().unwrap());
     }
 
-    if !state.router.is_active(&code) {
+    if !state.router.is_active(&code).await {
         return (
             StatusCode::NOT_FOUND,
             headers,
@@ -807,7 +807,7 @@ pub async fn proxy_validate_share(
         headers.insert(k, v.parse().unwrap());
     }
 
-    if !state.router.is_active(&code) {
+    if !state.router.is_active(&code).await {
         return (
             StatusCode::NOT_FOUND,
             headers,
@@ -868,7 +868,7 @@ pub async fn proxy_share_info(
         headers.insert(k, v.parse().unwrap());
     }
 
-    if !state.router.is_active(&code) {
+    if !state.router.is_active(&code).await {
         return (
             StatusCode::NOT_FOUND,
             headers,
@@ -957,7 +957,7 @@ async fn handle_ws_proxy(
 
     message_id += 1;
     let status_msg = WsProxyResponse::Status {
-        connected: state.router.is_active(&code),
+        connected: state.router.is_active(&code).await,
         share_code: code.clone(),
         message: "Connected to Bennett relay proxy".to_string(),
         message_id,
@@ -966,7 +966,7 @@ async fn handle_ws_proxy(
         serde_json::to_string(&status_msg).unwrap()
     )).await;
 
-    if !state.router.is_active(&code) {
+    if !state.router.is_active(&code).await {
         message_id += 1;
         let _ = sender.send(Message::Text(
             serde_json::to_string(&WsProxyResponse::Error {
@@ -1120,7 +1120,7 @@ async fn handle_ws_proxy(
                 message_id += 1;
                 let _ = sender.send(Message::Text(
                     serde_json::to_string(&WsProxyResponse::Status {
-                        connected: state.router.is_active(&code),
+                        connected: state.router.is_active(&code).await,
                         share_code: code.clone(),
                         message: "Keepalive".to_string(),
                         message_id,

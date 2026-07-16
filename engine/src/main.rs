@@ -86,10 +86,20 @@ async fn main() {
         });
 
     if !relay_url.is_empty() {
-        let host_id = format!("host-{}", uuid::Uuid::new_v4().to_string().split('-').next().unwrap_or("unknown"));
+        // Use stable host ID from share store or generate once and persist
+        let host_id = {
+            let stored = state.share_store.get_host_id().await.ok().flatten();
+            stored.unwrap_or_else(|| {
+                let new_id = format!("host-{}", uuid::Uuid::new_v4().to_string().split('-').next().unwrap_or("unknown"));
+                // Store for future consistency
+                let _ = state.share_store.set_host_id(&new_id);
+                new_id
+            })
+        };
         let token_manager_clone = state.token_manager.clone();
         let share_store_clone = state.share_store.clone();
         let connection_manager_clone = state.connections.clone();
+        let tunnel_tx_clone = state.tunnel_tx.clone();
 
         tokio::spawn(async move {
             use bennett_engine::sharing::relay::start_relay_tunnel;
@@ -104,7 +114,7 @@ async fn main() {
                 Ok(tx) => {
                     tracing::info!("Relay tunnel established — engine reachable via relay fallback");
                     // Store tunnel sender in AppState so create_share can notify relay
-                    let mut tunnel_lock = state.tunnel_tx.write().await;
+                    let mut tunnel_lock = tunnel_tx_clone.write().await;
                     *tunnel_lock = Some(tx);
                     drop(tunnel_lock);
                     tracing::info!("Tunnel sender stored in AppState — share notifications enabled");

@@ -8,7 +8,7 @@ import type {
   TableSchema,
   AutocompleteSuggestion,
 } from '@bennettstudio/shared';
-import { API_BASE_URL } from './api';
+import { API_BASE_URL, isRemoteMode } from './api';
 
 // Import SDK from shared package
 import { BennettShareClient, createClient } from '@bennettstudio/sdk';
@@ -51,12 +51,14 @@ class RemoteApiService {
    */
   private getClient(connection: RemoteConnection): BennettShareClient {
     const cacheKey = connection.code;
-    
+
     if (!this.clients.has(cacheKey)) {
-      const client = createClient(connection.code, connection.token, connection.baseUrl);
+      // On web/Vercel, force relay URL — don't use JWT's localhost
+      const baseUrl = isRemoteMode() ? API_BASE_URL : connection.baseUrl;
+      const client = createClient(connection.code, connection.token, baseUrl);
       this.clients.set(cacheKey, client);
     }
-    
+
     return this.clients.get(cacheKey)!;
   }
 

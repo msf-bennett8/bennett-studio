@@ -144,6 +144,11 @@ impl ShareStore {
 
             CREATE INDEX IF NOT EXISTS idx_revoked_jti ON revoked_tokens(jti);
 
+            CREATE TABLE IF NOT EXISTS kv_store (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS host_heartbeats (
                 host_id TEXT PRIMARY KEY,
                 last_beat TEXT NOT NULL,
@@ -459,6 +464,26 @@ impl ShareStore {
             .collect();
 
         Ok(host_ids)
+    }
+
+    /// Get stored host ID (for stable relay tunnel identity)
+    pub async fn get_host_id(&self) -> anyhow::Result<Option<String>> {
+        let row = sqlx::query("SELECT value FROM kv_store WHERE key = 'host_id'")
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(row.map(|r| r.get::<String, _>("value")))
+    }
+
+    /// Store host ID for stable relay tunnel identity
+    pub async fn set_host_id(&self, host_id: &str) -> anyhow::Result<()> {
+        sqlx::query(
+            "INSERT INTO kv_store (key, value) VALUES ('host_id', ?)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+        )
+        .bind(host_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
     }
 
     /// Cleanup stale heartbeats (> 7 days)

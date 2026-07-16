@@ -303,7 +303,7 @@ pub async fn webrtc_offer_handler(
     }
 
     // Validate share is active
-    if !state.router.is_active(&code) {
+    if !state.router.is_active(&code).await {
         return (
             StatusCode::NOT_FOUND,
             headers,
@@ -486,7 +486,7 @@ pub async fn proxy_query(
     }
 
     // Check if share is active
-    if !state.router.is_active(&code) {
+    if !state.router.is_active(&code).await {
         return (
             StatusCode::NOT_FOUND,
             headers,
@@ -567,7 +567,7 @@ pub async fn proxy_schema(
         headers.insert(k, v.parse().unwrap());
     }
 
-    if !state.router.is_active(&code) {
+    if !state.router.is_active(&code).await {
         return (
             StatusCode::NOT_FOUND,
             headers,
@@ -633,7 +633,7 @@ pub async fn proxy_validate_share(
         headers.insert(k, v.parse().unwrap());
     }
 
-    if !state.router.is_active(&code) {
+    if !state.router.is_active(&code).await {
         return (
             StatusCode::NOT_FOUND,
             headers,
@@ -694,7 +694,7 @@ pub async fn proxy_share_info(
         headers.insert(k, v.parse().unwrap());
     }
 
-    if !state.router.is_active(&code) {
+    if !state.router.is_active(&code).await {
         return (
             StatusCode::NOT_FOUND,
             headers,
@@ -988,8 +988,9 @@ pub async fn handle_ws_proxy(
 
     // Send initial status
     message_id += 1;
+    let connected = state.router.is_active(&code).await;
     let status_msg = WsProxyResponse::Status {
-        connected: state.router.is_active(&code),
+        connected,
         share_code: code.clone(),
         message: "Connected to Bennett relay proxy".to_string(),
         message_id,
@@ -999,7 +1000,7 @@ pub async fn handle_ws_proxy(
     )).await;
 
     // If share not active, close connection
-    if !state.router.is_active(&code) {
+    if !state.router.is_active(&code).await {
         message_id += 1;
         let _ = sender.send(Message::Text(
             serde_json::to_string(&WsProxyResponse::Error {
@@ -1164,9 +1165,10 @@ pub async fn handle_ws_proxy(
             // Periodic keepalive
             _ = tokio::time::sleep(tokio::time::Duration::from_secs(30)) => {
                 message_id += 1;
+                let connected = state.router.is_active(&code).await;
                 let _ = sender.send(Message::Text(
                     serde_json::to_string(&WsProxyResponse::Status {
-                        connected: state.router.is_active(&code),
+                        connected,
                         share_code: code.clone(),
                         message: "Keepalive".to_string(),
                         message_id,
