@@ -193,24 +193,37 @@ class RemoteApiService {
    */
   async fetchSchema(connection: RemoteConnection, forceRefresh = false): Promise<TableSchema[]> {
     const cached = this.schemaCache.get(connection.code);
-    
+
     if (!forceRefresh && cached) {
       const expiresAt = new Date(cached.expiresAt).getTime();
       if (Date.now() < expiresAt) {
         return cached.schema as any;
       }
     }
-    
-    const client = this.getClient(connection);
-      const response = await client.getSchema();
 
-      if (!response.success) {
-        throw new Error(response.error || 'Failed to fetch schema');
-      }
+    // Use relay REST API directly (SDK uses Connect-RPC which doesn't match relay endpoints)
+    const response = await fetch(`${API_BASE_URL}/api/share/${connection.code}/schema?token=${encodeURIComponent(connection.token)}`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Share-Token': connection.token,
+      },
+    });
 
-      // Cast to shared TableSchema[] (SDK types may differ slightly)
-      this.cacheSchema(connection.code, response.tables as any);
-      return response.tables as any;
+    if (!response.ok) {
+      throw new Error(`Schema fetch failed: HTTP ${response.status}`);
+    }
+
+    const result = await response.json();
+    if (!result.success) {
+      throw new Error(result.error || 'Failed to fetch schema');
+    }
+
+    const data = result.data || result;
+    const schema = Array.isArray(data) ? data : (data.tables || []);
+
+    this.cacheSchema(connection.code, schema as any);
+    return schema as any;
   }
 
   private cacheSchema(code: string, schema: any[]): void {
@@ -230,33 +243,53 @@ class RemoteApiService {
   async executeQuery(connection: RemoteConnection, sql: string): Promise<RemoteQueryResult> {
     const start = performance.now();
 
-    const client = this.getClient(connection);
-    const response = await client.query(sql);
+    // Use relay REST API directly (SDK uses Connect-RPC which doesn't match relay endpoints)
+    const response = await fetch(`${API_BASE_URL}/api/share/${connection.code}/query`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Share-Token': connection.token,
+      },
+      body: JSON.stringify({
+        sql,
+        token: connection.token,
+      }),
+    });
 
+    if (!response.ok) {
+      throw new Error(`Query failed: HTTP ${response.status}`);
+    }
+
+    const result = await response.json();
+    if (!result.success) {
+      throw new Error(result.error || 'Query execution failed');
+    }
+
+    const data = result.data || result;
     const executionTimeMs = Math.round(performance.now() - start);
-    
+
     // Record in history
     const history: RemoteQueryHistory = {
       id: `query-${Date.now()}`,
       sql,
       executedAt: new Date().toISOString(),
-      executionTimeMs: response.executionTimeMs || executionTimeMs,
-      rowCount: response.rowCount,
-      status: response.success ? 'success' : 'error',
-      error: response.error,
+      executionTimeMs: data.executionTimeMs || executionTimeMs,
+      rowCount: data.row_count || data.rowCount || 0,
+      status: 'success',
+      error: undefined,
     };
-    
+
     const existing = this.queryHistory.get(connection.code) || [];
     this.queryHistory.set(connection.code, [history, ...existing].slice(0, 100));
-    
+
     connection.lastActivity = new Date().toISOString();
-    
+
     return {
-      columns: response.columns,
-      rows: response.rows,
-      rowCount: response.rowCount,
-      executionTimeMs: response.executionTimeMs || executionTimeMs,
-      error: response.error,
+      columns: data.columns || [],
+      rows: data.rows || [],
+      rowCount: data.row_count || data.rowCount || 0,
+      executionTimeMs: data.executionTimeMs || executionTimeMs,
+      error: data.error,
     };
   }
 

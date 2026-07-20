@@ -60,13 +60,15 @@ pub async fn create_share(
     let duration = duration.clamp(1, 168); // Max 7 days
     
     // Use stable host ID from store, or generate and persist
-    let host_id = {
-        let stored = state.share_store.get_host_id().await.ok().flatten();
-        stored.unwrap_or_else(|| {
+    let host_id = match state.share_store.get_host_id().await.ok().flatten() {
+        Some(id) => id,
+        None => {
             let new_id = format!("host-{}", uuid::Uuid::new_v4().to_string().split('-').next().unwrap_or("unknown"));
-            let _ = state.share_store.set_host_id(&new_id);
+            if let Err(e) = state.share_store.set_host_id(&new_id).await {
+                tracing::warn!("Failed to persist host_id in create_share: {}", e);
+            }
             new_id
-        })
+        }
     };
 
     // Detect host network endpoint for guest resolution

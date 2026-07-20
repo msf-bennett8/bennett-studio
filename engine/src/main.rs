@@ -12,6 +12,9 @@ use bennett_engine::{
 
 #[tokio::main]
 async fn main() {
+    // Install rustls crypto provider for WebSocket TLS (relay tunnel)
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
     // Load .env file if present (for local development)
     // Production uses actual environment variables
     if let Err(e) = dotenvy::dotenv() {
@@ -86,15 +89,18 @@ async fn main() {
         });
 
     if !relay_url.is_empty() {
-        // Use stable host ID from share store or generate once and persist
-        let host_id = {
-            let stored = state.share_store.get_host_id().await.ok().flatten();
-            stored.unwrap_or_else(|| {
+        // Use stable host ID from share store, or generate and persist
+        let host_id = match state.share_store.get_host_id().await.ok().flatten() {
+            Some(id) => id,
+            None => {
                 let new_id = format!("host-{}", uuid::Uuid::new_v4().to_string().split('-').next().unwrap_or("unknown"));
-                // Store for future consistency
-                let _ = state.share_store.set_host_id(&new_id);
+                if let Err(e) = state.share_store.set_host_id(&new_id).await {
+                    tracing::warn!("Failed to persist host_id: {}", e);
+                } else {
+                    tracing::info!("Generated and persisted new host_id: {}", new_id);
+                }
                 new_id
-            })
+            }
         };
         let token_manager_clone = state.token_manager.clone();
         let share_store_clone = state.share_store.clone();

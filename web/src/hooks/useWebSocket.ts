@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { isRemoteMode } from '../services/api';
 
 export interface WsLogLine {
   type: 'log_line';
@@ -68,7 +69,10 @@ export function useWebSocket(databaseId: string | null) {
     
     setConnecting(true);
     
-    const ws = new WebSocket(`ws://localhost:3001/api/databases/${databaseId}/ws`);
+    const wsUrl = isRemoteMode()
+      ? `wss://bennett-relay.onrender.com/ws/share/${databaseId}`
+      : `ws://localhost:3001/api/databases/${databaseId}/ws`;
+    const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
 
     ws.onopen = () => {

@@ -31,6 +31,7 @@ use axum::{
     routing::{get, post, options},
     Router,
 };
+use base64::Engine;
 use clap::Parser;
 use futures_util::{sink::SinkExt, stream::StreamExt};
 use std::net::SocketAddr;
@@ -622,7 +623,8 @@ pub async fn proxy_schema(
 }
 
 /// Validate a share through the proxy
-/// Forwards to engine's POST /api/shares/:code/validate endpoint
+/// Checks if share is active in relay cache/tunnel registry
+/// Does NOT forward to engine — token validation happens at query time
 pub async fn proxy_validate_share(
     Path(code): Path<String>,
     State(state): State<ProxyApiState>,
@@ -644,44 +646,57 @@ pub async fn proxy_validate_share(
         );
     }
 
-    info!(share = %code, "Proxy validate request received — forwarding to engine");
+    info!(share = %code, "Proxy validate request received — share is active");
 
-    match state.router.forward_to_engine(
-        &code,
-        "POST",
-        &format!("/api/shares/{}/validate", code),
-        Some(req.to_string().into_bytes()),
-        "", // Token handling TBD
-    ).await {
-        Ok(response_bytes) => {
-            let response_str = String::from_utf8_lossy(&response_bytes);
-            if let Some(body_start) = response_str.find("\r\n\r\n") {
-                let body = &response_str[body_start + 4..];
-                if let Ok(json) = serde_json::from_str::<serde_json::Value>(body) {
-                    return (StatusCode::OK, headers, axum::Json(json));
-                }
+    // Extract token from request to decode JWT and return share metadata
+    let token = req.get("token").and_then(|t| t.as_str()).unwrap_or("");
+    let (db_id, permission, tables, expires_at) = if !token.is_empty() {
+        // Decode JWT payload to extract metadata
+        if let Some(payload) = decode_jwt_payload(token) {
+            (
+                payload.get("db_id").and_then(|v| v.as_str()).unwrap_or("unknown").to_string(),
+                payload.get("perm").and_then(|v| v.as_str()).unwrap_or("ro").to_string(),
+                payload.get("tables").and_then(|v| v.as_array())
+                    .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+                    .unwrap_or_else(|| vec!["*".to_string()]),
+                payload.get("exp").and_then(|v| v.as_i64()).unwrap_or(0),
+            )
+        } else {
+            ("unknown".to_string(), "ro".to_string(), vec!["*".to_string()], 0)
+        }
+    } else {
+        ("unknown".to_string(), "ro".to_string(), vec!["*".to_string()], 0)
+    };
+
+    (
+        StatusCode::OK,
+        headers,
+        axum::Json(serde_json::json!({
+            "success": true,
+            "data": {
+                "valid": true,
+                "code": code,
+                "db_id": db_id,
+                "permission": permission,
+                "tables": tables,
+                "expires_at": expires_at,
+                "host_online": true
             }
-            (
-                StatusCode::OK,
-                headers,
-                axum::Json(serde_json::json!({
-                    "success": true,
-                    "raw_response": response_str.to_string(),
-                })),
-            )
-        }
-        Err(e) => {
-            warn!(share = %code, error = %e, "Engine validate forwarding failed");
-            (
-                StatusCode::BAD_GATEWAY,
-                headers,
-                axum::Json(serde_json::json!({
-                    "success": false,
-                    "error": format!("Engine forwarding failed: {}", e)
-                })),
-            )
-        }
+        })),
+    )
+}
+
+/// Decode JWT payload without verification (for metadata extraction)
+fn decode_jwt_payload(token: &str) -> Option<serde_json::Value> {
+    let parts: Vec<&str> = token.split('.').collect();
+    if parts.len() != 3 {
+        return None;
     }
+    let base64 = parts[1].replace('-', "+").replace('_', "/");
+    let pad_len = (4 - (base64.len() % 4)) % 4;
+    let padded = base64 + &"=".repeat(pad_len);
+    let decoded = base64::engine::general_purpose::STANDARD.decode(&padded).ok()?;
+    serde_json::from_slice(&decoded).ok()
 }
 
 /// Get public share info

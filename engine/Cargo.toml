@@ -8,6 +8,7 @@ license = "MIT"
 
 [dependencies]
 tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
 reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
 fastrand = "2"
 tokio = { version = "1", features = ["full"] }
@@ -59,7 +60,6 @@ sqlparser = "0.52"
 
 # Phase 5: Wire Protocol Proxy + Security
 tokio-rustls = "0.26"
-rustls = "0.23"
 rustls-pemfile = "2.0"
 rcgen = "0.13"
 ring = "0.17"
