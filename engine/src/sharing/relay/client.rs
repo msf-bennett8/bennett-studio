@@ -11,6 +11,7 @@ use futures_util::{StreamExt, SinkExt};
 
 use crate::sharing::share_store::ShareStore;
 use crate::auth::share_token::ShareTokenManager;
+use crate::models::database::DatabaseInstance;
 
 /// Tunnel message types between engine and relay
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -75,6 +76,7 @@ pub struct RelayTunnelClient {
     token_manager: Arc<RwLock<ShareTokenManager>>,
     share_store: Arc<ShareStore>,
     connection_manager: Option<Arc<tokio::sync::Mutex<crate::control_plane::connection::manager::ConnectionManager>>>,
+    databases: Option<Arc<std::sync::Mutex<Vec<DatabaseInstance>>>>,
     ws_tx: Option<mpsc::UnboundedSender<TunnelMessage>>,
     connected: bool,
 }
@@ -92,6 +94,7 @@ impl RelayTunnelClient {
             token_manager,
             share_store,
             connection_manager: None,
+            databases: None,
             ws_tx: None,
             connected: false,
         }
@@ -103,6 +106,15 @@ impl RelayTunnelClient {
         cm: Arc<tokio::sync::Mutex<crate::control_plane::connection::manager::ConnectionManager>>,
     ) -> Self {
         self.connection_manager = Some(cm);
+        self
+    }
+
+    /// Attach the databases list so tunnel schema responses can include real name/type
+    pub fn with_databases(
+        mut self,
+        databases: Arc<std::sync::Mutex<Vec<DatabaseInstance>>>,
+    ) -> Self {
+        self.databases = Some(databases);
         self
     }
 
@@ -391,10 +403,27 @@ impl RelayTunnelClient {
         let tables = conn.get_schema(&record.db_id).await
             .map_err(|e| anyhow::anyhow!("Schema fetch failed: {}", e))?;
 
+        // Look up the real database name/type so the guest UI shows
+        // e.g. "MyShop AGMVFDINWM" instead of the raw db_id
+        let (db_name, db_type) = if let Some(dbs) = &self.databases {
+            let dbs = dbs.lock().unwrap();
+            dbs.iter()
+                .find(|d| d.id == record.db_id)
+                .map(|d| (d.name.clone(), d.db_type.clone()))
+                .unwrap_or_else(|| (record.db_id.clone(), "unknown".to_string()))
+        } else {
+            (record.db_id.clone(), "unknown".to_string())
+        };
+
+        // Match the shape the frontend expects from the direct-engine path:
+        // { success, data: { tables, databaseName, databaseType } }
         Ok(serde_json::json!({
             "success": true,
-            "tables": tables,
-            "database_name": record.db_id,
+            "data": {
+                "tables": tables,
+                "databaseName": db_name,
+                "databaseType": db_type,
+            }
         }))
     }
 
@@ -434,6 +463,7 @@ pub async fn start_relay_tunnel(
     token_manager: Arc<RwLock<ShareTokenManager>>,
     share_store: Arc<ShareStore>,
     connection_manager: Option<Arc<tokio::sync::Mutex<crate::control_plane::connection::manager::ConnectionManager>>>,
+    databases: Option<Arc<std::sync::Mutex<Vec<DatabaseInstance>>>>,
 ) -> anyhow::Result<mpsc::UnboundedSender<TunnelMessage>> {
     let (tx, rx) = mpsc::unbounded_channel::<TunnelMessage>();
 
@@ -447,6 +477,11 @@ pub async fn start_relay_tunnel(
     // Attach ConnectionManager if provided
     if let Some(cm) = connection_manager {
         client = client.with_connection_manager(cm);
+    }
+
+    // Attach databases list so schema responses include real name/type
+    if let Some(dbs) = databases {
+        client = client.with_databases(dbs);
     }
 
     let tx_for_caller = tx.clone();

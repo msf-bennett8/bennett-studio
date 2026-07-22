@@ -6,7 +6,8 @@
  *   const client = new BennettShareClient({ code: 'ACQPFDAQ7P', token: 'eyJ...' });
  *   const result = await client.query('SELECT * FROM users LIMIT 10');
  */
-import { resolveHost } from './resolver';
+import { resolveHost, resolveRelayUrl } from './resolver';
+import { P2PConnection } from './p2p';
 export class BennettShareClient {
     code;
     token;
@@ -15,14 +16,34 @@ export class BennettShareClient {
     resolved;
     /** gRPC-Web client for HTTP/2 streaming */
     grpcClient;
+    /** P2P WebRTC connection (null if using relay/direct) */
+    p2pConnection = null;
+    /** Connection mode: 'p2p' | 'relay' | 'direct' */
+    connectionMode = 'relay';
+    /** Whether P2P was attempted and failed */
+    p2pFailed = false;
+    /** Auto-retry configuration */
+    maxRetries = 3;
+    retryDelayMs = 1000;
+    connectionState = 'disconnected';
+    stateListeners = new Set();
     constructor(config) {
         this.code = config.code;
         this.token = config.token;
         this.baseUrl = config.baseUrl || 'https://placeholder';
         this.timeout = config.timeout || 30000;
         this.resolved = !!config.baseUrl;
+        // Detect connection mode from JWT
+        const claims = decodeJwtPayload(config.token);
+        if (claims?.ice) {
+            this.connectionMode = 'p2p';
+            console.log(`[BennettSDK] P2P mode detected — ICE candidates present`);
+        }
+        else if (config.baseUrl && config.baseUrl !== 'https://placeholder') {
+            this.connectionMode = 'direct';
+        }
         // Initialize gRPC-Web client if host supports it
-        if (config.baseUrl) {
+        if (config.baseUrl && config.baseUrl !== 'https://placeholder') {
             try {
                 const { BennettGrpcWebClient } = require('./grpcClient');
                 this.grpcClient = new BennettGrpcWebClient({
@@ -35,11 +56,53 @@ export class BennettShareClient {
             }
         }
     }
-    /** Ensure base URL is resolved before making requests */
+    /** Ensure connection is established before making requests */
     async ensureResolved() {
-        if (this.resolved)
+        if (this.resolved && this.p2pConnection?.isConnected())
             return;
-        this.baseUrl = await resolveHost(this.code);
+        // PHASE 2: Try P2P first if ICE candidates available
+        if (this.connectionMode === 'p2p' && !this.p2pFailed) {
+            try {
+                const claims = decodeJwtPayload(this.token);
+                if (claims?.ice) {
+                    console.log(`[BennettSDK] Attempting P2P connection...`);
+                    this.p2pConnection = new P2PConnection();
+                    await this.p2pConnection.connect(claims.ice, claims.sub, getFirebaseUrl());
+                    console.log(`[BennettSDK] P2P connected successfully`);
+                    this.resolved = true;
+                    return;
+                }
+            }
+            catch (e) {
+                // PHASE G: Handle relay fallback gracefully
+                if (e instanceof Error && e.name === 'P2PRelayFallbackError') {
+                    console.log(`[BennettSDK] P2P signaled relay fallback — switching to relay mode`);
+                }
+                else {
+                    console.warn(`[BennettSDK] P2P failed, will fallback to relay:`, e);
+                }
+                this.p2pFailed = true;
+                this.p2pConnection = null;
+                this.connectionMode = 'relay'; // Switch to relay mode
+            }
+        }
+        // Fallback: resolve relay URL or direct host
+        if (this.baseUrl === 'https://placeholder') {
+            try {
+                this.baseUrl = await resolveHost(this.code, this.token);
+            }
+            catch {
+                // If host resolution fails, try relay
+                try {
+                    this.baseUrl = await resolveRelayUrl(this.code);
+                    this.connectionMode = 'relay';
+                    console.log(`[BennettSDK] Using relay: ${this.baseUrl}`);
+                }
+                catch (relayErr) {
+                    throw new Error(`Could not resolve host or find relay for share ${this.code}`);
+                }
+            }
+        }
         this.resolved = true;
         // Initialize gRPC-Web client after resolution
         try {
@@ -55,9 +118,30 @@ export class BennettShareClient {
     }
     /**
      * Execute a SELECT query
+     * PHASE 2: Routes through P2P if available, otherwise REST/gRPC
      */
     async query(sql, limit, offset) {
         await this.ensureResolved();
+        // P2P path: send via WebRTC data channel
+        if (this.p2pConnection?.isConnected()) {
+            const start = performance.now();
+            const response = await this.p2pConnection.send({
+                type: 'query',
+                sql,
+                limit: limit || 1000,
+                offset: offset || 0,
+                token: this.token,
+            });
+            return {
+                success: true,
+                columns: response.columns || [],
+                rows: response.rows || [],
+                rowCount: response.rowCount || 0,
+                executionTimeMs: Math.round(performance.now() - start),
+                error: response.error,
+            };
+        }
+        // REST/gRPC fallback
         const response = await this.call('bennett.v1.QueryService/ExecuteQuery', {
             shareCode: this.code,
             token: this.token,
@@ -80,6 +164,23 @@ export class BennettShareClient {
      */
     async write(sql, parameters) {
         await this.ensureResolved();
+        // P2P path
+        if (this.p2pConnection?.isConnected()) {
+            const start = performance.now();
+            const response = await this.p2pConnection.send({
+                type: 'write',
+                sql,
+                parameters: parameters || [],
+                token: this.token,
+            });
+            return {
+                success: true,
+                rowsAffected: response.rowsAffected || 0,
+                lastInsertId: response.lastInsertId,
+                executionTimeMs: Math.round(performance.now() - start),
+                error: response.error,
+            };
+        }
         const response = await this.call('bennett.v1.QueryService/ExecuteWrite', {
             shareCode: this.code,
             token: this.token,
@@ -126,6 +227,21 @@ export class BennettShareClient {
      */
     async getSchema() {
         await this.ensureResolved();
+        // P2P path
+        if (this.p2pConnection?.isConnected()) {
+            const response = await this.p2pConnection.send({
+                type: 'getSchema',
+                token: this.token,
+            });
+            return {
+                success: true,
+                tables: response.tables || [],
+                databaseName: response.databaseName || '',
+                databaseType: response.databaseType || '',
+                databaseVersion: response.databaseVersion || '',
+                error: response.error,
+            };
+        }
         const response = await this.call('bennett.v1.SchemaService/GetSchema', {
             shareCode: this.code,
             token: this.token,
@@ -270,13 +386,78 @@ export class BennettShareClient {
         return result;
     }
     /**
-     * Low-level Connect-RPC call
+     * Get current connection mode for diagnostics
+     */
+    getConnectionMode() {
+        if (this.p2pConnection?.isConnected())
+            return 'p2p';
+        return this.connectionMode;
+    }
+    /**
+     * Close all connections (P2P + cleanup)
+     */
+    close() {
+        this.p2pConnection?.close();
+        this.p2pConnection = null;
+    }
+    /**
+     * Set connection state and notify listeners
+     */
+    setState(state) {
+        this.connectionState = state;
+        for (const listener of this.stateListeners) {
+            listener(state);
+        }
+    }
+    /**
+     * Subscribe to connection state changes
+     */
+    onStateChange(listener) {
+        this.stateListeners.add(listener);
+        // Immediately notify current state
+        listener(this.connectionState);
+        return () => this.stateListeners.delete(listener);
+    }
+    /**
+     * Low-level Connect-RPC call with auto-retry
      */
     async call(method, payload) {
+        let lastError = null;
+        for (let attempt = 0; attempt < this.maxRetries; attempt++) {
+            if (attempt > 0) {
+                console.log(`[BennettSDK] Retry ${attempt}/${this.maxRetries} after ${this.retryDelayMs}ms...`);
+                await new Promise(r => setTimeout(r, this.retryDelayMs * attempt));
+            }
+            try {
+                this.setState('connecting');
+                const result = await this.callOnce(method, payload);
+                this.setState('connected');
+                return result;
+            }
+            catch (error) {
+                lastError = error instanceof Error ? error : new Error(String(error));
+                // Don't retry on client errors (4xx)
+                if (lastError.message.includes('HTTP 4')) {
+                    this.setState('error');
+                    throw lastError;
+                }
+                // Don't retry on auth errors
+                if (lastError.message.includes('unauthorized') || lastError.message.includes('forbidden')) {
+                    this.setState('error');
+                    throw lastError;
+                }
+            }
+        }
+        this.setState('error');
+        throw lastError || new Error('Request failed after max retries');
+    }
+    /**
+     * Single attempt Connect-RPC call
+     */
+    async callOnce(method, payload) {
         const url = `${this.baseUrl}/${method}`;
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), this.timeout);
-        // Server accepts camelCase natively via #[serde(rename_all = "camelCase")]
         try {
             const response = await fetch(url, {
                 method: 'POST',
@@ -402,6 +583,16 @@ export function extractConnectionInfo(url) {
         tables: claims.tables || ['*'],
         expiresAt: claims.exp,
     };
+}
+/**
+ * Get Firebase URL from environment or default
+ */
+function getFirebaseUrl() {
+    if (typeof process !== 'undefined' && process.env?.BENNETT_FIREBASE_URL) {
+        return process.env.BENNETT_FIREBASE_URL;
+    }
+    // Default Firebase RTDB for signaling
+    return 'https://bennett-p2p-signaling-default-rtdb.europe-west1.firebasedatabase.app/';
 }
 /**
  * Convenience function to create client from code + token
