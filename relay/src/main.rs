@@ -296,10 +296,12 @@ struct WebRtcOfferResponse {
 pub async fn webrtc_offer_handler(
     Path(code): Path<String>,
     State(state): State<ProxyApiState>,
+    req_headers: axum::http::HeaderMap,
     Json(_req): Json<WebRtcOfferRequest>,
 ) -> impl IntoResponse {
+    let origin = req_headers.get(axum::http::header::ORIGIN).and_then(|v| v.to_str().ok());
     let mut headers = axum::http::HeaderMap::new();
-    for (k, v) in router::cors_headers() {
+    for (k, v) in router::cors_headers(origin) {
         headers.insert(k, v.parse().unwrap());
     }
 
@@ -348,10 +350,12 @@ struct WebRtcIceRequest {
 pub async fn webrtc_ice_handler(
     Path(code): Path<String>,
     State(_state): State<ProxyApiState>,
+    req_headers: axum::http::HeaderMap,
     Json(_req): Json<WebRtcIceRequest>,
 ) -> impl IntoResponse {
+    let origin = req_headers.get(axum::http::header::ORIGIN).and_then(|v| v.to_str().ok());
     let mut headers = axum::http::HeaderMap::new();
-    for (k, v) in router::cors_headers() {
+    for (k, v) in router::cors_headers(origin) {
         headers.insert(k, v.parse().unwrap());
     }
 
@@ -389,6 +393,7 @@ async fn start_http_proxy_api(
     let cors = CorsLayer::new()
         .allow_origin([
             "https://share-bennett-studio.vercel.app".parse::<HeaderValue>().unwrap(),
+            "https://app-bennett-studio.vercel.app".parse::<HeaderValue>().unwrap(),
             "http://localhost:5173".parse::<HeaderValue>().unwrap(),
             "http://localhost:5174".parse::<HeaderValue>().unwrap(),
             "http://localhost:3000".parse::<HeaderValue>().unwrap(),
@@ -458,9 +463,10 @@ struct SchemaQueryParams {
 }
 
 /// CORS preflight response
-pub async fn cors_preflight() -> impl IntoResponse {
+pub async fn cors_preflight(req_headers: axum::http::HeaderMap) -> impl IntoResponse {
+    let origin = req_headers.get(axum::http::header::ORIGIN).and_then(|v| v.to_str().ok());
     let mut headers = axum::http::HeaderMap::new();
-    for (k, v) in router::cors_headers() {
+    for (k, v) in router::cors_headers(origin) {
         headers.insert(k, v.parse().unwrap());
     }
     (StatusCode::NO_CONTENT, headers)
@@ -479,10 +485,12 @@ pub async fn proxy_health() -> impl IntoResponse {
 pub async fn proxy_query(
     Path(code): Path<String>,
     State(state): State<ProxyApiState>,
+    req_headers: axum::http::HeaderMap,
     Json(req): Json<router::ProxyQueryRequest>,
 ) -> impl IntoResponse {
+    let origin = req_headers.get(axum::http::header::ORIGIN).and_then(|v| v.to_str().ok());
     let mut headers = axum::http::HeaderMap::new();
-    for (k, v) in router::cors_headers() {
+    for (k, v) in router::cors_headers(origin) {
         headers.insert(k, v.parse().unwrap());
     }
 
@@ -556,15 +564,17 @@ pub async fn proxy_query(
 pub async fn proxy_schema(
     Path(code): Path<String>,
     State(state): State<ProxyApiState>,
+    req_headers: axum::http::HeaderMap,
     axum::extract::Query(params): axum::extract::Query<SchemaQueryParams>,
 ) -> impl IntoResponse {
     let token = params.token;
-    eprintln!("DEBUG SCHEMA PROXY: code={}, token_len={}, token_prefix={}", 
+    eprintln!("DEBUG SCHEMA PROXY: code={}, token_len={}, token_prefix={}",
         code, token.len(), &token[..token.len().min(20)]);
-    eprintln!("DEBUG SCHEMA PROXY: code={}, token_len={}, token_empty={}, token_prefix={}", 
+    eprintln!("DEBUG SCHEMA PROXY: code={}, token_len={}, token_empty={}, token_prefix={}",
         code, token.len(), token.is_empty(), &token[..token.len().min(20)]);
+    let origin = req_headers.get(axum::http::header::ORIGIN).and_then(|v| v.to_str().ok());
     let mut headers = axum::http::HeaderMap::new();
-    for (k, v) in router::cors_headers() {
+    for (k, v) in router::cors_headers(origin) {
         headers.insert(k, v.parse().unwrap());
     }
 
@@ -628,10 +638,12 @@ pub async fn proxy_schema(
 pub async fn proxy_validate_share(
     Path(code): Path<String>,
     State(state): State<ProxyApiState>,
+    req_headers: axum::http::HeaderMap,
     Json(req): Json<serde_json::Value>,
 ) -> impl IntoResponse {
+    let origin = req_headers.get(axum::http::header::ORIGIN).and_then(|v| v.to_str().ok());
     let mut headers = axum::http::HeaderMap::new();
-    for (k, v) in router::cors_headers() {
+    for (k, v) in router::cors_headers(origin) {
         headers.insert(k, v.parse().unwrap());
     }
 
@@ -703,9 +715,11 @@ fn decode_jwt_payload(token: &str) -> Option<serde_json::Value> {
 pub async fn proxy_share_info(
     Path(code): Path<String>,
     State(state): State<ProxyApiState>,
+    req_headers: axum::http::HeaderMap,
 ) -> impl IntoResponse {
+    let origin = req_headers.get(axum::http::header::ORIGIN).and_then(|v| v.to_str().ok());
     let mut headers = axum::http::HeaderMap::new();
-    for (k, v) in router::cors_headers() {
+    for (k, v) in router::cors_headers(origin) {
         headers.insert(k, v.parse().unwrap());
     }
 

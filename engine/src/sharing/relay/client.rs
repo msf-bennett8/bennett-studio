@@ -107,12 +107,20 @@ impl RelayTunnelClient {
     }
 
     /// Start the tunnel — connects and maintains connection with auto-reconnect
-    pub async fn run(&mut self) -> anyhow::Result<()> {
+    /// `tx`/`rx` are the SAME channel returned to the caller (start_relay_tunnel),
+    /// so external sends (notify_share_created, etc.) actually reach the socket.
+    pub async fn run(
+        &mut self,
+        tx: mpsc::UnboundedSender<TunnelMessage>,
+        mut rx: mpsc::UnboundedReceiver<TunnelMessage>,
+    ) -> anyhow::Result<()> {
+        self.ws_tx = Some(tx.clone());
+
         let mut reconnect_delay = Duration::from_secs(1);
         let max_reconnect_delay = Duration::from_secs(60);
 
         loop {
-            match self.connect_and_maintain().await {
+            match self.connect_and_maintain(&tx, &mut rx).await {
                 Ok(_) => {
                     info!("Relay tunnel closed gracefully");
                     reconnect_delay = Duration::from_secs(1);
@@ -126,7 +134,11 @@ impl RelayTunnelClient {
         }
     }
 
-    async fn connect_and_maintain(&mut self) -> anyhow::Result<()> {
+    async fn connect_and_maintain(
+        &mut self,
+        tx: &mpsc::UnboundedSender<TunnelMessage>,
+        rx: &mut mpsc::UnboundedReceiver<TunnelMessage>,
+    ) -> anyhow::Result<()> {
         // Support both URL formats: with or without /ws/tunnel prefix
         let base = if self.relay_url.ends_with("/ws/tunnel") {
             self.relay_url.clone()
@@ -142,9 +154,7 @@ impl RelayTunnelClient {
             .map_err(|e| anyhow::anyhow!("WebSocket connect failed: {}", e))?;
 
         let (mut write, mut read) = ws_stream.split();
-        let (tx, mut rx) = mpsc::unbounded_channel::<TunnelMessage>();
 
-        self.ws_tx = Some(tx.clone());
         self.connected = true;
 
         // Send registration
@@ -169,7 +179,7 @@ impl RelayTunnelClient {
                     match msg {
                         Some(Ok(tokio_tungstenite::tungstenite::Message::Text(text))) => {
                             if let Ok(tunnel_msg) = serde_json::from_str::<TunnelMessage>(&text) {
-                                self.handle_message(tunnel_msg, &tx).await;
+                                self.handle_message(tunnel_msg, tx).await;
                             }
                         }
                         Some(Ok(tokio_tungstenite::tungstenite::Message::Close(_))) | None => {
@@ -405,7 +415,7 @@ pub async fn start_relay_tunnel(
     share_store: Arc<ShareStore>,
     connection_manager: Option<Arc<tokio::sync::Mutex<crate::control_plane::connection::manager::ConnectionManager>>>,
 ) -> anyhow::Result<mpsc::UnboundedSender<TunnelMessage>> {
-    let (tx, _rx) = mpsc::unbounded_channel::<TunnelMessage>();
+    let (tx, rx) = mpsc::unbounded_channel::<TunnelMessage>();
 
     let mut client = RelayTunnelClient::new(
         relay_url,
@@ -419,14 +429,16 @@ pub async fn start_relay_tunnel(
         client = client.with_connection_manager(cm);
     }
 
-    // Spawn connection loop
+    let tx_for_caller = tx.clone();
+
+    // Spawn connection loop — pass the REAL tx/rx pair in, not a disconnected one
     tokio::spawn(async move {
-        if let Err(e) = client.run().await {
+        if let Err(e) = client.run(tx, rx).await {
             error!("Relay tunnel task ended: {}", e);
         }
     });
 
-    // Return sender for external use
-    Ok(tx)
+    // Return sender for external use (create_share, revoke_share, etc.)
+    Ok(tx_for_caller)
 }
 

@@ -541,15 +541,25 @@ pub struct ProxyQueryResponse {
     pub error: Option<String>,
 }
 
-/// CORS headers for external website access
-pub fn cors_headers() -> Vec<(&'static str, &'static str)> {
-    // Dynamic origin based on request — production-safe CORS
-    // For preflight requests, we return wildcard; actual requests get origin-checked via middleware
+/// Allowed browser origins for the HTTP proxy API
+pub const ALLOWED_ORIGINS: [&str; 2] = [
+    "https://share-bennett-studio.vercel.app",
+    "https://app-bennett-studio.vercel.app",
+];
+
+/// CORS headers for external website access.
+/// Echoes back the request's Origin if it's in the allowlist, so both
+/// share-bennett-studio.vercel.app and app-bennett-studio.vercel.app work.
+pub fn cors_headers(origin: Option<&str>) -> Vec<(&'static str, String)> {
+    let allow_origin = match origin {
+        Some(o) if ALLOWED_ORIGINS.contains(&o) => o.to_string(),
+        _ => ALLOWED_ORIGINS[0].to_string(),
+    };
     vec![
-        ("Access-Control-Allow-Origin", "https://share-bennett-studio.vercel.app"),
-        ("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS"),
-        ("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Share-Code, X-Share-Token, X-Requested-With"),
-        ("Access-Control-Allow-Credentials", "true"),
-        ("Access-Control-Max-Age", "86400"),
+        ("Access-Control-Allow-Origin", allow_origin),
+        ("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS".to_string()),
+        ("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Share-Code, X-Share-Token, X-Requested-With".to_string()),
+        ("Access-Control-Allow-Credentials", "true".to_string()),
+        ("Access-Control-Max-Age", "86400".to_string()),
     ]
 }
