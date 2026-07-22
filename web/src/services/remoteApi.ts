@@ -138,7 +138,8 @@ class RemoteApiService {
 
     try {
       // Fetch schema via share-specific backend endpoint (validates token + returns schema)
-      const schemaResponse = await fetch(`${API_BASE_URL}/api/share/${parsed.code}/schema`, {
+      // NOTE: relay's /schema route requires the token as a query param, not just a header
+      const schemaResponse = await fetch(`${API_BASE_URL}/api/share/${parsed.code}/schema?token=${encodeURIComponent(parsed.token)}`, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
