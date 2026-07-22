@@ -600,9 +600,10 @@ pub struct SchemaQueryParams {
 }
 
 /// CORS preflight response
-pub async fn cors_preflight() -> impl IntoResponse {
+pub async fn cors_preflight(req_headers: axum::http::HeaderMap) -> impl IntoResponse {
+    let origin = req_headers.get(axum::http::header::ORIGIN).and_then(|v| v.to_str().ok());
     let mut headers = axum::http::HeaderMap::new();
-    for (k, v) in crate::router::cors_headers() {
+    for (k, v) in crate::router::cors_headers(origin) {
         headers.insert(k, v.parse().unwrap());
     }
     (StatusCode::NO_CONTENT, headers)
@@ -618,10 +619,12 @@ pub async fn proxy_health() -> impl IntoResponse {
 pub async fn webrtc_offer_handler(
     Path(code): Path<String>,
     State(state): State<ProxyApiState>,
+    req_headers: axum::http::HeaderMap,
     Json(_req): Json<WebRtcOfferRequest>,
 ) -> impl IntoResponse {
+    let origin = req_headers.get(axum::http::header::ORIGIN).and_then(|v| v.to_str().ok());
     let mut headers = axum::http::HeaderMap::new();
-    for (k, v) in crate::router::cors_headers() {
+    for (k, v) in crate::router::cors_headers(origin) {
         headers.insert(k, v.parse().unwrap());
     }
 
@@ -656,10 +659,12 @@ pub async fn webrtc_offer_handler(
 pub async fn webrtc_ice_handler(
     Path(_code): Path<String>,
     State(_state): State<ProxyApiState>,
+    req_headers: axum::http::HeaderMap,
     Json(_req): Json<WebRtcIceRequest>,
 ) -> impl IntoResponse {
+    let origin = req_headers.get(axum::http::header::ORIGIN).and_then(|v| v.to_str().ok());
     let mut headers = axum::http::HeaderMap::new();
-    for (k, v) in crate::router::cors_headers() {
+    for (k, v) in crate::router::cors_headers(origin) {
         headers.insert(k, v.parse().unwrap());
     }
     (StatusCode::OK, headers, axum::Json(serde_json::json!({ "received": true })))
@@ -669,10 +674,12 @@ pub async fn webrtc_ice_handler(
 pub async fn proxy_query(
     Path(code): Path<String>,
     State(state): State<ProxyApiState>,
+    req_headers: axum::http::HeaderMap,
     Json(req): Json<crate::router::ProxyQueryRequest>,
 ) -> impl IntoResponse {
+    let origin = req_headers.get(axum::http::header::ORIGIN).and_then(|v| v.to_str().ok());
     let mut headers = axum::http::HeaderMap::new();
-    for (k, v) in crate::router::cors_headers() {
+    for (k, v) in crate::router::cors_headers(origin) {
         headers.insert(k, v.parse().unwrap());
     }
 
@@ -737,11 +744,13 @@ pub async fn proxy_query(
 pub async fn proxy_schema(
     Path(code): Path<String>,
     State(state): State<ProxyApiState>,
+    req_headers: axum::http::HeaderMap,
     axum::extract::Query(params): axum::extract::Query<SchemaQueryParams>,
 ) -> impl IntoResponse {
     let token = params.token;
+    let origin = req_headers.get(axum::http::header::ORIGIN).and_then(|v| v.to_str().ok());
     let mut headers = axum::http::HeaderMap::new();
-    for (k, v) in crate::router::cors_headers() {
+    for (k, v) in crate::router::cors_headers(origin) {
         headers.insert(k, v.parse().unwrap());
     }
 
@@ -800,10 +809,12 @@ pub async fn proxy_schema(
 pub async fn proxy_validate_share(
     Path(code): Path<String>,
     State(state): State<ProxyApiState>,
+    req_headers: axum::http::HeaderMap,
     Json(req): Json<serde_json::Value>,
 ) -> impl IntoResponse {
+    let origin = req_headers.get(axum::http::header::ORIGIN).and_then(|v| v.to_str().ok());
     let mut headers = axum::http::HeaderMap::new();
-    for (k, v) in crate::router::cors_headers() {
+    for (k, v) in crate::router::cors_headers(origin) {
         headers.insert(k, v.parse().unwrap());
     }
 
@@ -862,9 +873,11 @@ pub async fn proxy_validate_share(
 pub async fn proxy_share_info(
     Path(code): Path<String>,
     State(state): State<ProxyApiState>,
+    req_headers: axum::http::HeaderMap,
 ) -> impl IntoResponse {
+    let origin = req_headers.get(axum::http::header::ORIGIN).and_then(|v| v.to_str().ok());
     let mut headers = axum::http::HeaderMap::new();
-    for (k, v) in crate::router::cors_headers() {
+    for (k, v) in crate::router::cors_headers(origin) {
         headers.insert(k, v.parse().unwrap());
     }
 
@@ -1321,6 +1334,7 @@ pub fn build_proxy_api_router(
     let cors = CorsLayer::new()
         .allow_origin([
             "https://share-bennett-studio.vercel.app".parse::<HeaderValue>().unwrap(),
+            "https://app-bennett-studio.vercel.app".parse::<HeaderValue>().unwrap(),
             "http://localhost:5173".parse::<HeaderValue>().unwrap(),
             "http://localhost:5174".parse::<HeaderValue>().unwrap(),
             "http://localhost:3000".parse::<HeaderValue>().unwrap(),
