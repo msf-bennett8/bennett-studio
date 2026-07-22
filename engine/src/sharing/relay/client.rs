@@ -169,6 +169,26 @@ impl RelayTunnelClient {
 
         info!("Relay tunnel connected and registered");
 
+        // Re-sync all active shares from persistent store so relay learns about them after reconnect
+        if let Ok(shares) = self.share_store.list_all_active().await {
+            for share in shares {
+                if share.revoked || share.expires_at < chrono::Utc::now() {
+                    continue;
+                }
+                let msg = TunnelMessage::ShareCreated {
+                    code: share.code,
+                    db_id: share.db_id,
+                    permission: share.permission,
+                    expires_at: share.expires_at.timestamp(),
+                };
+                if let Err(e) = tx.send(msg) {
+                    warn!("Failed to re-sync share to relay: {}", e);
+                } else {
+                    info!("Re-synced share {} to relay after reconnect", share.code);
+                }
+            }
+        }
+
         // Heartbeat interval
         let mut heartbeat = interval(Duration::from_secs(30));
 

@@ -599,6 +599,11 @@ pub struct SchemaQueryParams {
     pub token: String,
 }
 
+#[derive(Debug, serde::Deserialize)]
+pub struct ProxySchemaRequest {
+    pub token: String,
+}
+
 /// CORS preflight response
 pub async fn cors_preflight(req_headers: axum::http::HeaderMap) -> impl IntoResponse {
     let origin = req_headers.get(axum::http::header::ORIGIN).and_then(|v| v.to_str().ok());
@@ -745,9 +750,9 @@ pub async fn proxy_schema(
     Path(code): Path<String>,
     State(state): State<ProxyApiState>,
     req_headers: axum::http::HeaderMap,
-    axum::extract::Query(params): axum::extract::Query<SchemaQueryParams>,
+    Json(req): Json<ProxySchemaRequest>,
 ) -> impl IntoResponse {
-    let token = params.token;
+    let token = req.token;
     let origin = req_headers.get(axum::http::header::ORIGIN).and_then(|v| v.to_str().ok());
     let mut headers = axum::http::HeaderMap::new();
     for (k, v) in crate::router::cors_headers(origin) {
@@ -1367,7 +1372,7 @@ pub fn build_proxy_api_router(
         .route("/api/share/:code/webrtc/offer", post(webrtc_offer_handler))
         .route("/api/share/:code/webrtc/ice", post(webrtc_ice_handler))
         .route("/api/share/:code/query", post(proxy_query))
-        .route("/api/share/:code/schema", get(proxy_schema))
+        .route("/api/share/:code/schema", post(proxy_schema))
         .route("/api/share/:code", get(proxy_share_info))
         .route("/api/share/:code/validate", post(proxy_validate_share))
         .route("/ws/share/:code", get(ws_proxy_handler))
