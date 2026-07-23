@@ -24,9 +24,9 @@ export const ApiKeyPanel: React.FC = () => {
 
   if (isRemoteMode()) {
     return (
-      <div className="api-key-panel p-4 text-center text-gray-500">
+      <div className="api-key-panel p-4 text-center" style={{ color: 'var(--textMuted)' }}>
         API key management is only available when connected to your local engine —
-        open the desktop app or run this page pointed at <code>localhost</code>.
+        open the desktop app or run this page pointed at <code style={{ color: 'var(--textPrimary)' }}>localhost</code>.
       </div>
     );
   }

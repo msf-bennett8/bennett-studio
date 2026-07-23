@@ -12,13 +12,13 @@ export const ApiKeyItem: React.FC<ApiKeyItemProps> = ({ apiKey, onRevoke }) => {
   };
 
   return (
-    <div className="api-key-item border rounded p-3 mb-2 bg-white shadow-sm">
+    <div className="api-key-item rounded p-3 mb-2" style={{ backgroundColor: 'var(--bgSecondary)', border: '1px solid var(--borderDefault)' }}>
       <div className="flex justify-between items-start">
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold">{apiKey.name}</p>
-          <p className="text-sm font-mono text-gray-500 truncate">{apiKey.key_preview}</p>
-          <div className="flex gap-2 mt-1 text-xs text-gray-500">
-            <span className={apiKey.revoked ? 'text-red-600' : 'text-green-600'}>
+          <p className="text-sm font-semibold" style={{ color: 'var(--textPrimary)' }}>{apiKey.name}</p>
+          <p className="text-sm font-mono truncate" style={{ color: 'var(--textMuted)' }}>{apiKey.key_preview}</p>
+          <div className="flex gap-2 mt-1 text-xs" style={{ color: 'var(--textMuted)' }}>
+            <span style={{ color: apiKey.revoked ? 'var(--accentError)' : 'var(--accentSuccess)' }}>
               {apiKey.revoked ? 'revoked' : 'active'}
             </span>
             <span>•</span>
@@ -30,11 +30,11 @@ export const ApiKeyItem: React.FC<ApiKeyItemProps> = ({ apiKey, onRevoke }) => {
           </div>
         </div>
         <div className="flex gap-2 ml-2">
-          <button onClick={handleCopyId} className="px-2 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded">
+          <button onClick={handleCopyId} className="px-2 py-1 text-xs rounded" style={{ backgroundColor: 'var(--bgTertiary)', color: 'var(--textSecondary)' }}>
             Copy ID
           </button>
           {!apiKey.revoked && (
-            <button onClick={onRevoke} className="px-2 py-1 text-xs bg-red-100 text-red-700 hover:bg-red-200 rounded">
+            <button onClick={onRevoke} className="px-2 py-1 text-xs rounded" style={{ backgroundColor: 'rgba(255,68,68,0.1)', color: 'var(--accentError)' }}>
               Revoke
             </button>
           )}

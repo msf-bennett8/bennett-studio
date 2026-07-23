@@ -36,64 +36,66 @@ export const ApiKeyPanel: React.FC = () => {
       </p>
 
       {error && (
-        <div className="mb-4 p-2 bg-red-50 text-red-700 text-sm rounded flex justify-between">
+        <div className="mb-4 p-2 text-sm rounded flex justify-between" style={{ backgroundColor: 'rgba(255,68,68,0.1)', color: 'var(--accentError)' }}>
           <span>{error}</span>
           <button onClick={clearError} className="font-bold">×</button>
         </div>
       )}
 
       {justCreatedKey && (
-        <div className="mb-4 p-3 bg-yellow-50 border border-yellow-300 rounded">
-          <p className="text-sm font-semibold mb-1">Save this key now — it won't be shown again:</p>
+        <div className="mb-4 p-3 rounded" style={{ backgroundColor: 'var(--surfaceActive)', border: '1px solid var(--borderDefault)' }}>
+          <p className="text-sm font-semibold mb-1" style={{ color: 'var(--accentWarning)' }}>Save this key now — it won't be shown again:</p>
           <div className="flex gap-2 items-center">
-            <code className="text-xs bg-white p-2 rounded flex-1 truncate">{justCreatedKey}</code>
-            <button onClick={handleCopyKey} className="px-2 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded">Copy</button>
-            <button onClick={dismissJustCreatedKey} className="px-2 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded">Dismiss</button>
+            <code className="text-xs p-2 rounded flex-1 truncate" style={{ backgroundColor: 'var(--bgTertiary)', color: 'var(--textPrimary)' }}>{justCreatedKey}</code>
+            <button onClick={handleCopyKey} className="px-2 py-1 text-xs rounded" style={{ backgroundColor: 'var(--bgTertiary)', color: 'var(--textSecondary)' }}>Copy</button>
+            <button onClick={dismissJustCreatedKey} className="px-2 py-1 text-xs rounded" style={{ backgroundColor: 'var(--bgTertiary)', color: 'var(--textSecondary)' }}>Dismiss</button>
           </div>
         </div>
       )}
 
       <div className="mb-4 space-y-2">
         <div>
-          <label className="block text-sm font-medium mb-1">Database</label>
-          <select value={selectedDb} onChange={(e) => setSelectedDb(e.target.value)} className="w-full p-2 border rounded">
-            <option value="">Choose a database...</option>
+          <label className="block text-sm font-medium mb-1" style={{ color: 'var(--textPrimary)' }}>Database</label>
+          <select value={selectedDb} onChange={(e) => setSelectedDb(e.target.value)} className="w-full p-2 rounded" style={{ backgroundColor: 'var(--bgTertiary)', color: 'var(--textPrimary)', border: '1px solid var(--borderDefault)' }}>
+            <option value="" style={{ backgroundColor: 'var(--bgTertiary)' }}>Choose a database...</option>
             {databases.map((db) => (
-              <option key={db.id} value={db.id}>{db.name} ({db.type})</option>
+              <option key={db.id} value={db.id} style={{ backgroundColor: 'var(--bgTertiary)' }}>{db.name} ({db.type})</option>
             ))}
           </select>
         </div>
         <div>
-          <label className="block text-sm font-medium mb-1">Key name</label>
+          <label className="block text-sm font-medium mb-1" style={{ color: 'var(--textPrimary)' }}>Key name</label>
           <input
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="e.g. oshocks-backend"
-            className="w-full p-2 border rounded"
+            className="w-full p-2 rounded"
+            style={{ backgroundColor: 'var(--bgTertiary)', color: 'var(--textPrimary)', border: '1px solid var(--borderDefault)' }}
           />
         </div>
         <div>
-          <label className="block text-sm font-medium mb-1">Permission</label>
-          <select value={permission} onChange={(e) => setPermission(e.target.value as 'ro' | 'rw' | 'adm')} className="w-full p-2 border rounded">
-            <option value="ro">Read only</option>
-            <option value="rw">Read/write</option>
-            <option value="adm">Admin</option>
+          <label className="block text-sm font-medium mb-1" style={{ color: 'var(--textPrimary)' }}>Permission</label>
+          <select value={permission} onChange={(e) => setPermission(e.target.value as 'ro' | 'rw' | 'adm')} className="w-full p-2 rounded" style={{ backgroundColor: 'var(--bgTertiary)', color: 'var(--textPrimary)', border: '1px solid var(--borderDefault)' }}>
+            <option value="ro" style={{ backgroundColor: 'var(--bgTertiary)' }}>Read only</option>
+            <option value="rw" style={{ backgroundColor: 'var(--bgTertiary)' }}>Read/write</option>
+            <option value="adm" style={{ backgroundColor: 'var(--bgTertiary)' }}>Admin</option>
           </select>
         </div>
         <button
           onClick={handleCreate}
           disabled={!selectedDb || !name.trim() || creating}
-          className="px-4 py-2 bg-blue-600 text-white rounded disabled:opacity-50"
+          className="px-4 py-2 rounded disabled:opacity-50"
+          style={{ backgroundColor: 'var(--accentPrimary)', color: 'var(--textInverse)' }}
         >
           {creating ? 'Generating...' : 'Generate API Key'}
         </button>
       </div>
 
       <div className="mt-6">
-        <h3 className="text-lg font-semibold mb-2">Active Keys</h3>
-        {loading && <p className="text-sm text-gray-500">Loading...</p>}
-        {!loading && keys.length === 0 && <p className="text-sm text-gray-500">No API keys yet.</p>}
+        <h3 className="text-lg font-semibold mb-2" style={{ color: 'var(--textPrimary)' }}>Active Keys</h3>
+        {loading && <p className="text-sm" style={{ color: 'var(--textMuted)' }}>Loading...</p>}
+        {!loading && keys.length === 0 && <p className="text-sm" style={{ color: 'var(--textMuted)' }}>No API keys yet.</p>}
         {keys.map((k) => (
           <ApiKeyItem key={k.id} apiKey={k} onRevoke={() => revokeKey(k.id)} />
         ))}
