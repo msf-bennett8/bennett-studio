@@ -74,6 +74,49 @@ export interface ListSharesResponse {
 }
 
 // ============================================================================
+// API Key Types — durable credentials for external app access (/api/v1)
+// Distinct from ShareLink: no expiry until explicitly revoked.
+// ============================================================================
+
+export interface CreateApiKeyRequest {
+  database_id: string;
+  name: string;
+  permission?: SharePermission;
+  tables?: string[];
+  cols?: Record<string, string[]>;
+  rls?: string;
+  max_rows?: number;
+  timeout_secs?: number;
+}
+
+export interface CreateApiKeyResponse {
+  id: string;
+  key: string; // plaintext — shown once
+  name: string;
+  permission: SharePermission;
+  created_at: string;
+}
+
+export interface ApiKeyInfo {
+  id: string;
+  name: string;
+  db_id: string;
+  permission: SharePermission;
+  tables: string[];
+  created_at: string;
+  last_used_at: string | null;
+  revoked: boolean;
+  key_preview: string;
+  max_rows: number;
+  timeout_secs: number;
+}
+
+export interface ListApiKeysResponse {
+  keys: ApiKeyInfo[];
+  total: number;
+}
+
+// ============================================================================
 // Phase 3: Guest/Remote Connection Types
 // ============================================================================
 

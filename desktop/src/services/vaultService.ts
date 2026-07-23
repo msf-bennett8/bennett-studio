@@ -2,7 +2,7 @@
 //! Inside Tauri app: OS keychain via invoke
 //! In browser (dev): IndexedDB + hardened Web Crypto (shared SDK)
 
-import type { StoredToken, TokenVault, VaultStatus } from '@bennett/shared';
+import type { StoredToken, TokenVault, VaultStatus } from '@bennettstudio/shared';
 import {
   getMasterKey,
   encryptToken,
@@ -11,7 +11,7 @@ import {
   openDB,
   deleteVaultEntry,
   type EncryptedToken,
-} from '@bennett/sdk';
+} from '@bennettstudio/sdk';
 
 // ============================================================================
 // Platform Detection
@@ -101,7 +101,7 @@ const webVault: TokenVault = {
           resolve(token);
         } catch (e) {
           if (e instanceof DecryptionError) {
-            console.warn(`[vaultService] ${e.reason} for ${code}: ${e.message}`);
+            console.warn(`[vaultService] ${(e as any).reason} for ${code}: ${(e as any).message}`);
           } else {
             console.warn(`[vaultService] Decryption failed for ${code}:`, e);
           }
@@ -184,9 +184,9 @@ const webVault: TokenVault = {
             });
           } catch (e) {
             if (e instanceof DecryptionError) {
-              console.warn(`[vaultService] Skipping corrupt entry ${e.code}: ${e.reason}`);
+              console.warn(`[vaultService] Skipping corrupt entry ${(e as any).code}: ${(e as any).reason}`);
               try {
-                await deleteVaultEntry(e.code);
+                await deleteVaultEntry((e as any).code);
               } catch { /* ignore cleanup error */ }
             }
           }

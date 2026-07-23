@@ -18,8 +18,8 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"],
-      "@bennett/shared": ["../shared/dist"],
-      "@bennett/shared/*": ["../shared/dist/*"]
+      "@bennettstudio/shared": ["../shared/types/dist"],
+      "@bennettstudio/shared/*": ["../shared/types/dist/*"]
     }
   },
   "include": ["src"],

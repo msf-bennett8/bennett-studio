@@ -7,8 +7,8 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
-      '@bennett/shared': path.resolve(__dirname, '../shared/dist'),
-      '@bennett/sdk': path.resolve(__dirname, '../shared/sdk/typescript/dist'),
+      '@bennettstudio/shared': path.resolve(__dirname, '../shared/dist'),
+      '@bennettstudio/sdk': path.resolve(__dirname, '../shared/sdk/typescript/dist'),
     },
   },
   build: {

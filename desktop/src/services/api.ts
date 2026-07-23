@@ -1,6 +1,6 @@
 export const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:3001';
 
-import { DatabaseInstance, CreateDatabaseRequest, DatabaseSource, DatabaseStatusResponse, EnvFileSuggestion } from '@bennett/shared';
+import { DatabaseInstance, CreateDatabaseRequest, DatabaseSource, DatabaseStatusResponse, EnvFileSuggestion } from '@bennettstudio/shared';
 export type { DatabaseInstance, CreateDatabaseRequest, DatabaseSource, DatabaseStatusResponse, EnvFileSuggestion };
 
 export interface ApiResponse<T> {

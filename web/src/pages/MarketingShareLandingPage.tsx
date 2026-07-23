@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import {
-  Database, Lock, Globe, Clock, Zap, ExternalLink, Play, Table2,
-  ChevronRight, AlertCircle, Loader2, Code2, Terminal, Copy, Check,
-  Shield, Server, Wifi, WifiOff, ChevronDown, ChevronUp, Info,
+  Database, Lock, Clock, Zap, ExternalLink, Play, Table2,
+  ChevronRight, Loader2, Code2, Terminal, Copy, Check,
+  Shield, Wifi, ChevronDown, ChevronUp,
   FileJson, Braces, Eye, EyeOff, Sparkles, MousePointer, ArrowRight
 } from 'lucide-react';
 

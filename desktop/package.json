@@ -10,8 +10,8 @@
     "tauri": "tauri"
   },
   "dependencies": {
-    "@bennett/sdk": "*",
-    "@bennett/shared": "*",
+    "@bennettstudio/sdk": "^0.4.0",
+    "@bennettstudio/shared": "^0.4.0",
     "@tauri-apps/api": "^2.11.1",
     "cookie": "^1.1.1",
     "lucide-react": "^0.378.0",

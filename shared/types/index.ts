@@ -21,4 +21,8 @@ export type {
   StoredToken,
   TokenVault,
   VaultStatus,
+  CreateApiKeyRequest,
+  CreateApiKeyResponse,
+  ApiKeyInfo,
+  ListApiKeysResponse,
 } from './sharing';

@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { shareApi } from '../services/shareApi';
 import { vaultService } from '../services/vaultService';
-import type { ShareLink, CreateShareRequest, StoredToken } from '@bennett/shared';
+import type { ShareLink, CreateShareRequest, StoredToken } from '@bennettstudio/shared';
 
 interface ShareState {
   shares: ShareLink[];

@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
-import { Database, Plus, Play, Square, Trash2, RefreshCw, CheckCircle, XCircle, Clock, AlertCircle, FolderOpen, ScanLine, Lock, Unlock, Globe } from 'lucide-react';
+import { Database, Plus, Play, Square, Trash2, RefreshCw, CheckCircle, XCircle, Clock, AlertCircle, FolderOpen, ScanLine, Lock, Unlock, Globe, KeyRound } from 'lucide-react';
 import { useRemoteConnectionStore } from '../stores/remoteConnectionStore';
 import { useDatabaseStore } from '../stores/databaseStore';
 import { UnlockDatabaseModal } from '../components/database/UnlockDatabaseModal';
+import { ApiKeyPanel } from '../components/sharing/ApiKeyPanel';
 
 const dbTypes = [
   { id: 'postgres', name: 'PostgreSQL', versions: ['16.2', '15.6', '14.11'] },
@@ -43,6 +44,7 @@ export function DatabasePage() {
   const [selectedVersion, setSelectedVersion] = useState('16.2');
   const [dbName, setDbName] = useState('');
   const [showUnlockModal, setShowUnlockModal] = useState<string | null>(null);
+  const [showApiKeysModal, setShowApiKeysModal] = useState(false);
 
   useEffect(() => {
     fetchDatabases();
@@ -106,6 +108,9 @@ export function DatabasePage() {
             </button>
             <button onClick={discoverLocalDatabases} className="btn-secondary flex items-center gap-2 px-4 py-2 rounded-xl" disabled={loading}>
               <ScanLine size={18} /> Discover Local
+            </button>
+            <button onClick={() => setShowApiKeysModal(true)} className="btn-secondary flex items-center gap-2 px-4 py-2 rounded-xl">
+              <KeyRound size={18} /> API Keys
             </button>
             <button onClick={() => setShowAddModal(true)} className="btn-primary flex items-center gap-2 px-4 py-2 rounded-xl">
               <Plus size={18} /> Add Database
@@ -279,6 +284,23 @@ export function DatabasePage() {
           onUnlock={handleUnlock}
           envSuggestions={useDatabaseStore.getState().envSuggestions[showUnlockModal] || []}
         />
+      )}
+
+      {showApiKeysModal && (
+        <div className="fixed inset-0 flex items-center justify-center z-50" style={{ backgroundColor: 'var(--bgOverlay)' }}>
+          <div className="w-full max-w-lg max-h-[85vh] overflow-y-auto rounded-2xl" style={{ backgroundColor: 'var(--bgElevated)', border: '1px solid var(--borderDefault)' }}>
+            <div className="flex justify-end p-2">
+              <button
+                onClick={() => setShowApiKeysModal(false)}
+                className="p-2 rounded-lg"
+                style={{ backgroundColor: 'var(--bgTertiary)' }}
+              >
+                <XCircle size={18} style={{ color: 'var(--textSecondary)' }} />
+              </button>
+            </div>
+            <ApiKeyPanel />
+          </div>
+        </div>
       )}
 
       {showAddModal && (

@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 import { shareApi } from '../services/shareApi';
-import type { CreateShareRequest, ValidateShareResponse } from '@bennett/shared';
+import type { CreateShareRequest, ValidateShareResponse } from '@bennettstudio/shared';
 
 export function useSharing() {
   const [loading, setLoading] = useState(false);

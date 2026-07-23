@@ -1,5 +1,5 @@
 import React from 'react';
-import type { ShareLink as ShareLinkType } from '@bennett/shared';
+import type { ShareLink as ShareLinkType } from '@bennettstudio/shared';
 
 interface ShareLinkProps {
   share: ShareLinkType;

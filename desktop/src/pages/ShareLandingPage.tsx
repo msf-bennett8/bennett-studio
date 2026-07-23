@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { Database, Lock, Globe, Clock, Zap, ExternalLink, Play, Table2, ChevronRight, AlertCircle, Loader2 } from 'lucide-react';
-import { clientFromUrl, extractConnectionInfo, type ConnectionInfo } from '@bennett/sdk';
+import { clientFromUrl, extractConnectionInfo, type ConnectionInfo } from '@bennettstudio/sdk';
 
 export function ShareLandingPage() {
   const { code } = useParams<{ code: string }>();

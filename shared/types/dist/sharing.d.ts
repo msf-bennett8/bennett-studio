@@ -58,6 +58,40 @@ export interface ListSharesResponse {
     shares: ShareLink[];
     total: number;
 }
+export interface CreateApiKeyRequest {
+    database_id: string;
+    name: string;
+    permission?: SharePermission;
+    tables?: string[];
+    cols?: Record<string, string[]>;
+    rls?: string;
+    max_rows?: number;
+    timeout_secs?: number;
+}
+export interface CreateApiKeyResponse {
+    id: string;
+    key: string;
+    name: string;
+    permission: SharePermission;
+    created_at: string;
+}
+export interface ApiKeyInfo {
+    id: string;
+    name: string;
+    db_id: string;
+    permission: SharePermission;
+    tables: string[];
+    created_at: string;
+    last_used_at: string | null;
+    revoked: boolean;
+    key_preview: string;
+    max_rows: number;
+    timeout_secs: number;
+}
+export interface ListApiKeysResponse {
+    keys: ApiKeyInfo[];
+    total: number;
+}
 export interface RemoteConnection {
     id: string;
     code: string;

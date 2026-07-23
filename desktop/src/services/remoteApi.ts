@@ -7,11 +7,11 @@ import type {
   SharePermission,
   TableSchema,
   AutocompleteSuggestion,
-} from '@bennett/shared';
+} from '@bennettstudio/shared';
 import { API_BASE_URL } from './api';
 
 // Import SDK from shared package
-import { BennettShareClient, createClient } from '@bennett/sdk';
+import { BennettShareClient, createClient } from '@bennettstudio/sdk';
 
 const SCHEMA_TTL_MS = 30000; // 30 seconds cache TTL
 

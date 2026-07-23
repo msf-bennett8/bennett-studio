@@ -3,7 +3,7 @@ import { Share2, Copy, Check, Globe, Lock, Users, Clock, X, Trash2, Pin, PinOff,
 import { ConfirmModal } from '../components/ui/ConfirmModal';
 import { useDatabaseStore } from '../stores/databaseStore';
 import { useShareStore } from '../stores/shareStore';
-import type { ShareLink, SharePermission } from '@bennett/shared';
+import type { ShareLink, SharePermission } from '@bennettstudio/shared';
 
 export function SharePage() {
   const { databases } = useDatabaseStore();
