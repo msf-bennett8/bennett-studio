@@ -55,6 +55,26 @@ pub struct RevokedToken {
     pub reason: String,
 }
 
+/// API key record (durable, no expiry until explicitly revoked)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ApiKeyRecord {
+    pub id: String,
+    pub key_hash: String,
+    pub db_id: String,
+    pub name: String,
+    pub permission: String,
+    pub tables: String,
+    pub cols: Option<String>,
+    pub rls: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub last_used_at: Option<DateTime<Utc>>,
+    pub revoked: bool,
+    /// Max rows per query — independent of share defaults
+    pub max_rows: i32,
+    /// Query timeout in seconds — independent of share defaults
+    pub timeout_secs: i32,
+}
+
 /// Share store with SQLite backend
 pub struct ShareStore {
     pool: Pool<Sqlite>,
@@ -156,6 +176,25 @@ impl ShareStore {
                 port INTEGER,
                 version TEXT
             );
+
+            CREATE TABLE IF NOT EXISTS api_keys (
+                id TEXT PRIMARY KEY,
+                key_hash TEXT NOT NULL UNIQUE,
+                db_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                permission TEXT NOT NULL DEFAULT 'ro',
+                tables TEXT NOT NULL DEFAULT '["*"]',
+                cols TEXT,
+                rls TEXT,
+                created_at TEXT NOT NULL,
+                last_used_at TEXT,
+                revoked INTEGER NOT NULL DEFAULT 0,
+                max_rows INTEGER NOT NULL DEFAULT 1000,
+                timeout_secs INTEGER NOT NULL DEFAULT 30
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash);
+            CREATE INDEX IF NOT EXISTS idx_api_keys_db_id ON api_keys(db_id);
             "#
         )
         .execute(pool)
@@ -168,6 +207,14 @@ impl ShareStore {
 
         // Migration: Add ice column to existing shares table (for P2P)
         let _ = sqlx::query("ALTER TABLE shares ADD COLUMN ice TEXT")
+            .execute(pool)
+            .await;
+
+        // Migration: Add per-key limits to existing api_keys table (for upgrades)
+        let _ = sqlx::query("ALTER TABLE api_keys ADD COLUMN max_rows INTEGER NOT NULL DEFAULT 1000")
+            .execute(pool)
+            .await;
+        let _ = sqlx::query("ALTER TABLE api_keys ADD COLUMN timeout_secs INTEGER NOT NULL DEFAULT 30")
             .execute(pool)
             .await;
 
@@ -484,6 +531,109 @@ impl ShareStore {
         .execute(&self.pool)
         .await?;
         Ok(())
+    }
+
+    // ========================================================================
+    // API Keys — durable, long-lived credentials (no expiry, revocable)
+    // ========================================================================
+
+    pub async fn create_api_key(&self, record: &ApiKeyRecord) -> anyhow::Result<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO api_keys (id, key_hash, db_id, name, permission, tables, cols, rls, created_at, last_used_at, revoked, max_rows, timeout_secs)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            "#
+        )
+        .bind(&record.id)
+        .bind(&record.key_hash)
+        .bind(&record.db_id)
+        .bind(&record.name)
+        .bind(&record.permission)
+        .bind(&record.tables)
+        .bind(record.cols.as_ref())
+        .bind(record.rls.as_ref())
+        .bind(record.created_at.to_rfc3339())
+        .bind(record.last_used_at.map(|d| d.to_rfc3339()))
+        .bind(record.revoked as i32)
+        .bind(record.max_rows)
+        .bind(record.timeout_secs)
+        .execute(&self.pool)
+        .await?;
+
+        info!("Created API key {} ({}) for db {}", record.id, record.name, record.db_id);
+        Ok(())
+    }
+
+    pub async fn get_api_key_by_hash(&self, key_hash: &str) -> anyhow::Result<Option<ApiKeyRecord>> {
+        let row = sqlx::query("SELECT * FROM api_keys WHERE key_hash = ? AND revoked = 0")
+            .bind(key_hash)
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(row.map(Self::row_to_api_key))
+    }
+
+    pub async fn list_api_keys_by_db(&self, db_id: &str) -> anyhow::Result<Vec<ApiKeyRecord>> {
+        let rows = sqlx::query("SELECT * FROM api_keys WHERE db_id = ? ORDER BY created_at DESC")
+            .bind(db_id)
+            .fetch_all(&self.pool)
+            .await?;
+        Ok(rows.into_iter().map(Self::row_to_api_key).collect())
+    }
+
+    /// Re-sync helper for relay reconnect (mirrors list_all_active() for shares)
+    pub async fn list_all_active_api_keys(&self) -> anyhow::Result<Vec<ApiKeyRecord>> {
+        let rows = sqlx::query("SELECT * FROM api_keys WHERE revoked = 0 ORDER BY created_at DESC")
+            .fetch_all(&self.pool)
+            .await?;
+        Ok(rows.into_iter().map(Self::row_to_api_key).collect())
+    }
+
+    pub async fn revoke_api_key(&self, id: &str) -> anyhow::Result<Option<String>> {
+        let row = sqlx::query("SELECT key_hash FROM api_keys WHERE id = ?")
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await?;
+        let key_hash: Option<String> = row.map(|r| r.get("key_hash"));
+
+        if key_hash.is_some() {
+            sqlx::query("UPDATE api_keys SET revoked = 1 WHERE id = ?")
+                .bind(id)
+                .execute(&self.pool)
+                .await?;
+            info!("Revoked API key {}", id);
+        }
+        Ok(key_hash)
+    }
+
+    pub async fn touch_api_key(&self, key_hash: &str) -> anyhow::Result<()> {
+        sqlx::query("UPDATE api_keys SET last_used_at = ? WHERE key_hash = ?")
+            .bind(Utc::now().to_rfc3339())
+            .bind(key_hash)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    fn row_to_api_key(row: sqlx::sqlite::SqliteRow) -> ApiKeyRecord {
+        ApiKeyRecord {
+            id: row.get("id"),
+            key_hash: row.get("key_hash"),
+            db_id: row.get("db_id"),
+            name: row.get("name"),
+            permission: row.get("permission"),
+            tables: row.get("tables"),
+            cols: row.get("cols"),
+            rls: row.get("rls"),
+            created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
+                .map(|d| d.with_timezone(&Utc))
+                .unwrap_or_else(|_| Utc::now()),
+            last_used_at: row.get::<Option<String>, _>("last_used_at")
+                .and_then(|s| DateTime::parse_from_rfc3339(&s).ok())
+                .map(|d| d.with_timezone(&Utc)),
+            revoked: row.get::<i32, _>("revoked") != 0,
+            max_rows: row.get("max_rows"),
+            timeout_secs: row.get("timeout_secs"),
+        }
     }
 
     /// Cleanup stale heartbeats (> 7 days)

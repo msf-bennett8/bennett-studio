@@ -88,6 +88,14 @@ pub struct RelayConfig {
     /// Use on Render/cloud where TLS is terminated upstream
     #[arg(long, default_value_t = false, env = "BENNETT_HTTP_MODE")]
     pub http_mode: bool,
+
+    /// Per-API-key rate limit for /api/v1/* (requests per second)
+    #[arg(long, default_value_t = 5, env = "BENNETT_API_V1_RATE_RPS")]
+    pub api_v1_rate_rps: u32,
+
+    /// Per-API-key burst allowance for /api/v1/*
+    #[arg(long, default_value_t = 10, env = "BENNETT_API_V1_RATE_BURST")]
+    pub api_v1_rate_burst: u32,
 }
 
 impl RelayConfig {

@@ -107,6 +107,7 @@ async fn main() {
         let connection_manager_clone = state.connections.clone();
         let tunnel_tx_clone = state.tunnel_tx.clone();
         let state_databases_clone = state.databases.clone();
+        let rate_limiter_clone = state.rate_limiter.clone();
 
         tokio::spawn(async move {
             use bennett_engine::sharing::relay::start_relay_tunnel;
@@ -118,6 +119,7 @@ async fn main() {
                 share_store_clone,
                 Some(connection_manager_clone),
                 Some(state_databases_clone),
+                Some(rate_limiter_clone),
             ).await {
                 Ok(tx) => {
                     tracing::info!("Relay tunnel established — engine reachable via relay fallback");

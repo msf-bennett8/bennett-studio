@@ -67,6 +67,39 @@ pub enum TunnelMessage {
         request_id: String,
         schema: serde_json::Value,
     },
+    /// New API key registered — notify relay so it can route bearer-token requests
+    ApiKeyRegistered {
+        key_hash: String,
+        db_id: String,
+        permission: String,
+    },
+    /// API key revoked — notify relay to stop routing it
+    ApiKeyRevoked {
+        key_hash: String,
+    },
+    /// API key query request from relay (external app via /api/v1/query)
+    ApiKeyQueryRequest {
+        request_id: String,
+        key_hash: String,
+        sql: String,
+        limit: Option<i32>,
+        offset: Option<i32>,
+    },
+    /// API key query response back to relay
+    ApiKeyQueryResponse {
+        request_id: String,
+        result: serde_json::Value,
+    },
+    /// API key schema request from relay
+    ApiKeySchemaRequest {
+        request_id: String,
+        key_hash: String,
+    },
+    /// API key schema response back to relay
+    ApiKeySchemaResponse {
+        request_id: String,
+        schema: serde_json::Value,
+    },
 }
 
 /// Relay tunnel client state
@@ -77,6 +110,7 @@ pub struct RelayTunnelClient {
     share_store: Arc<ShareStore>,
     connection_manager: Option<Arc<tokio::sync::Mutex<crate::control_plane::connection::manager::ConnectionManager>>>,
     databases: Option<Arc<std::sync::Mutex<Vec<DatabaseInstance>>>>,
+    rate_limiter: Option<Arc<crate::rate_limit::RateLimitService>>,
     ws_tx: Option<mpsc::UnboundedSender<TunnelMessage>>,
     connected: bool,
 }
@@ -95,6 +129,7 @@ impl RelayTunnelClient {
             share_store,
             connection_manager: None,
             databases: None,
+            rate_limiter: None,
             ws_tx: None,
             connected: false,
         }
@@ -115,6 +150,16 @@ impl RelayTunnelClient {
         databases: Arc<std::sync::Mutex<Vec<DatabaseInstance>>>,
     ) -> Self {
         self.databases = Some(databases);
+        self
+    }
+
+    /// Attach the engine's rate limiter for defense-in-depth on API key
+    /// queries (in addition to the relay's own per-key rate limiting)
+    pub fn with_rate_limiter(
+        mut self,
+        rate_limiter: Arc<crate::rate_limit::RateLimitService>,
+    ) -> Self {
+        self.rate_limiter = Some(rate_limiter);
         self
     }
 
@@ -198,6 +243,23 @@ impl RelayTunnelClient {
                     warn!("Failed to re-sync share to relay: {}", e);
                 } else {
                     info!("Re-synced share {} to relay after reconnect", code);
+                }
+            }
+        }
+
+        // Re-sync all active API keys so the relay can route bearer-token
+        // requests immediately after reconnect (same pattern as shares above)
+        if let Ok(keys) = self.share_store.list_all_active_api_keys().await {
+            for key in keys {
+                let msg = TunnelMessage::ApiKeyRegistered {
+                    key_hash: key.key_hash.clone(),
+                    db_id: key.db_id.clone(),
+                    permission: key.permission.clone(),
+                };
+                if let Err(e) = tx.send(msg) {
+                    warn!("Failed to re-sync API key to relay: {}", e);
+                } else {
+                    info!("Re-synced API key '{}' to relay after reconnect", key.name);
                 }
             }
         }
@@ -290,9 +352,9 @@ impl RelayTunnelClient {
                 };
                 let _ = tx.send(response);
             }
-            TunnelMessage::SchemaRequest { request_id, share_code, token } => {
+TunnelMessage::SchemaRequest { request_id, share_code, token } => {
                 debug!("Tunnel schema request: {} for share {}", request_id, share_code);
-                
+
                 let result = if let Some(ref cm) = self.connection_manager {
                     self.execute_tunnel_schema(cm, &share_code, &token).await
                 } else {
@@ -309,6 +371,48 @@ impl RelayTunnelClient {
                         schema: serde_json::json!({
                             "success": false,
                             "error": format!("Tunnel schema failed: {}", e)
+                        }),
+                    },
+                };
+                let _ = tx.send(response);
+            }
+            TunnelMessage::ApiKeyQueryRequest { request_id, key_hash, sql, limit, offset } => {
+                debug!("Tunnel API key query request: {}", request_id);
+
+                let result = if let Some(ref cm) = self.connection_manager {
+                    self.execute_tunnel_api_key_query(cm, &key_hash, &sql, limit, offset).await
+                } else {
+                    Err(anyhow::anyhow!("ConnectionManager not attached to tunnel client"))
+                };
+
+                let response = match result {
+                    Ok(data) => TunnelMessage::ApiKeyQueryResponse { request_id, result: data },
+                    Err(e) => TunnelMessage::ApiKeyQueryResponse {
+                        request_id,
+                        result: serde_json::json!({
+                            "success": false,
+                            "error": format!("API key query failed: {}", e)
+                        }),
+                    },
+                };
+                let _ = tx.send(response);
+            }
+            TunnelMessage::ApiKeySchemaRequest { request_id, key_hash } => {
+                debug!("Tunnel API key schema request: {}", request_id);
+
+                let result = if let Some(ref cm) = self.connection_manager {
+                    self.execute_tunnel_api_key_schema(cm, &key_hash).await
+                } else {
+                    Err(anyhow::anyhow!("ConnectionManager not attached to tunnel client"))
+                };
+
+                let response = match result {
+                    Ok(data) => TunnelMessage::ApiKeySchemaResponse { request_id, schema: data },
+                    Err(e) => TunnelMessage::ApiKeySchemaResponse {
+                        request_id,
+                        schema: serde_json::json!({
+                            "success": false,
+                            "error": format!("API key schema failed: {}", e)
                         }),
                     },
                 };
@@ -428,6 +532,103 @@ impl RelayTunnelClient {
         }))
     }
 
+    /// Execute a query authenticated by a durable API key (not a share JWT).
+    /// Applies the key's own row limit and timeout — independent of the
+    /// defaults used for ephemeral shares.
+    async fn execute_tunnel_api_key_query(
+        &self,
+        cm: &Arc<tokio::sync::Mutex<crate::control_plane::connection::manager::ConnectionManager>>,
+        key_hash: &str,
+        sql: &str,
+        limit: Option<i32>,
+        _offset: Option<i32>,
+    ) -> anyhow::Result<serde_json::Value> {
+        let key = self.share_store.get_api_key_by_hash(key_hash).await
+            .map_err(|e| anyhow::anyhow!("API key lookup failed: {}", e))?
+            .ok_or_else(|| anyhow::anyhow!("Invalid or revoked API key"))?;
+
+        // Engine-side rate limit — defense in depth behind the relay's own
+        // per-key limiter. Keyed by key_hash; per-IP diversity isn't visible
+        // at this hop since requests arrive over the shared relay tunnel.
+        if let Some(ref limiter) = self.rate_limiter {
+            let dummy_ip: std::net::IpAddr = std::net::IpAddr::from([0, 0, 0, 0]);
+            if let Err(e) = limiter.check(key_hash, &dummy_ip).await {
+                return Err(anyhow::anyhow!(e));
+            }
+        }
+
+        if let Err(e) = crate::api::http::validate_sql(sql) {
+            return Err(anyhow::anyhow!(e));
+        }
+
+        let permission = crate::auth::share_token::SharePermission::from_str(&key.permission);
+        if !permission.can_write() && !sql.trim().to_uppercase().starts_with("SELECT") {
+            return Err(anyhow::anyhow!("Write not permitted for this API key"));
+        }
+
+        // Apply this key's own row limit (independent of share defaults)
+        let requested_limit = limit.unwrap_or(key.max_rows).clamp(1, key.max_rows.max(1));
+        let is_select = sql.trim().to_uppercase().starts_with("SELECT") || sql.trim().to_uppercase().starts_with("WITH");
+        let final_sql = if is_select && !sql.to_uppercase().contains("LIMIT") {
+            format!("{} LIMIT {}", sql, requested_limit)
+        } else {
+            sql.to_string()
+        };
+
+        let timeout = std::time::Duration::from_secs(key.timeout_secs.max(1) as u64);
+        let conn = cm.lock().await;
+        let result = tokio::time::timeout(timeout, conn.execute(&key.db_id, &final_sql))
+            .await
+            .map_err(|_| anyhow::anyhow!("Query timed out after {}s", key.timeout_secs))?
+            .map_err(|e| anyhow::anyhow!("Query execution failed: {}", e))?;
+        drop(conn);
+
+        let _ = self.share_store.touch_api_key(key_hash).await;
+
+        Ok(serde_json::json!({
+            "success": true,
+            "columns": result.columns,
+            "rows": result.rows,
+            "row_count": result.row_count,
+            "last_insert_id": result.last_insert_id,
+        }))
+    }
+
+    /// Get schema authenticated by a durable API key
+    async fn execute_tunnel_api_key_schema(
+        &self,
+        cm: &Arc<tokio::sync::Mutex<crate::control_plane::connection::manager::ConnectionManager>>,
+        key_hash: &str,
+    ) -> anyhow::Result<serde_json::Value> {
+        let key = self.share_store.get_api_key_by_hash(key_hash).await
+            .map_err(|e| anyhow::anyhow!("API key lookup failed: {}", e))?
+            .ok_or_else(|| anyhow::anyhow!("Invalid or revoked API key"))?;
+
+        let conn = cm.lock().await;
+        let tables = conn.get_schema(&key.db_id).await
+            .map_err(|e| anyhow::anyhow!("Schema fetch failed: {}", e))?;
+        drop(conn);
+
+        let (db_name, db_type) = if let Some(dbs) = &self.databases {
+            let dbs = dbs.lock().unwrap();
+            dbs.iter()
+                .find(|d| d.id == key.db_id)
+                .map(|d| (d.name.clone(), d.db_type.clone()))
+                .unwrap_or_else(|| (key.db_id.clone(), "unknown".to_string()))
+        } else {
+            (key.db_id.clone(), "unknown".to_string())
+        };
+
+        Ok(serde_json::json!({
+            "success": true,
+            "data": {
+                "tables": tables,
+                "databaseName": db_name,
+                "databaseType": db_type,
+            }
+        }))
+    }
+
     /// Notify relay that a new share was created
     pub async fn notify_share_created(&self, code: &str, db_id: &str, permission: &str, expires_at: i64) {
         if let Some(tx) = &self.ws_tx {
@@ -465,6 +666,7 @@ pub async fn start_relay_tunnel(
     share_store: Arc<ShareStore>,
     connection_manager: Option<Arc<tokio::sync::Mutex<crate::control_plane::connection::manager::ConnectionManager>>>,
     databases: Option<Arc<std::sync::Mutex<Vec<DatabaseInstance>>>>,
+    rate_limiter: Option<Arc<crate::rate_limit::RateLimitService>>,
 ) -> anyhow::Result<mpsc::UnboundedSender<TunnelMessage>> {
     let (tx, rx) = mpsc::unbounded_channel::<TunnelMessage>();
 
@@ -483,6 +685,11 @@ pub async fn start_relay_tunnel(
     // Attach databases list so schema responses include real name/type
     if let Some(dbs) = databases {
         client = client.with_databases(dbs);
+    }
+
+    // Attach rate limiter for API-key query throttling (defense in depth)
+    if let Some(rl) = rate_limiter {
+        client = client.with_rate_limiter(rl);
     }
 
     let tx_for_caller = tx.clone();

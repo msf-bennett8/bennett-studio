@@ -4,6 +4,7 @@ import { useDatabaseStore } from '../../stores/databaseStore';
 import { ShareLink } from './ShareLink';
 import { ShareSettings } from './ShareSettings';
 import { GuestList } from './GuestList';
+import { ApiKeyPanel } from './ApiKeyPanel';
 
 export const SharePanel: React.FC = () => {
   const [selectedDb, setSelectedDb] = useState<string>('');
@@ -60,6 +61,10 @@ export const SharePanel: React.FC = () => {
       </div>
 
       <GuestList />
+
+      <hr className="my-6" />
+
+      <ApiKeyPanel />
     </div>
   );
 };

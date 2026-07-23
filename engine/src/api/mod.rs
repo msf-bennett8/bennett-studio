@@ -1,3 +1,4 @@
+pub mod api_keys;
 pub mod health;
 pub mod http;
 pub mod middleware;
@@ -65,6 +66,10 @@ pub fn routes() -> Router<AppState> {
         .route("/api/shares/:code/query", post(sharing::execute_share_query))
         .route("/api/shares/:code/validate", post(sharing::validate_share))
         .route("/api/shares/:code/resolve", get(sharing::resolve_share))
+        // API Keys — durable credentials for external apps
+        .route("/api/keys", post(api_keys::create_api_key))
+        .route("/api/keys", get(api_keys::list_api_keys))
+        .route("/api/keys/:id", delete(api_keys::revoke_api_key))
         .route("/api/health", get(crate::api::health::comprehensive_health_check))
         // Notes endpoints
         .route("/api/notes", get(http::list_notes))

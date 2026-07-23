@@ -22,6 +22,17 @@ pub enum TunnelMessageToEngine {
         share_code: String,
         token: String,
     },
+    ApiKeyQueryRequest {
+        request_id: String,
+        key_hash: String,
+        sql: String,
+        limit: Option<i32>,
+        offset: Option<i32>,
+    },
+    ApiKeySchemaRequest {
+        request_id: String,
+        key_hash: String,
+    },
     Ping,
 }
 
@@ -99,6 +110,8 @@ impl TunnelRegistry {
         let request_id = match &msg {
             TunnelMessageToEngine::QueryRequest { request_id, .. } => request_id.clone(),
             TunnelMessageToEngine::SchemaRequest { request_id, .. } => request_id.clone(),
+            TunnelMessageToEngine::ApiKeyQueryRequest { request_id, .. } => request_id.clone(),
+            TunnelMessageToEngine::ApiKeySchemaRequest { request_id, .. } => request_id.clone(),
             _ => uuid::Uuid::new_v4().to_string(),
         };
 

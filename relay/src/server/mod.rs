@@ -1240,6 +1240,12 @@ async fn handle_tunnel_ws(
                 crate::tunnel_registry::TunnelMessageToEngine::SchemaRequest { request_id, share_code, token } => {
                     TunnelEngineMessage::SchemaRequest { request_id, share_code, token }
                 }
+                crate::tunnel_registry::TunnelMessageToEngine::ApiKeyQueryRequest { request_id, key_hash, sql, limit, offset } => {
+                    TunnelEngineMessage::QueryRequest { request_id, share_code: key_hash, token: "".to_string(), sql, limit, offset }
+                }
+                crate::tunnel_registry::TunnelMessageToEngine::ApiKeySchemaRequest { request_id, key_hash } => {
+                    TunnelEngineMessage::SchemaRequest { request_id, share_code: key_hash, token: "".to_string() }
+                }
                 crate::tunnel_registry::TunnelMessageToEngine::Ping => TunnelEngineMessage::Ping,
             };
             let _ = tx_clone.send(engine_msg);

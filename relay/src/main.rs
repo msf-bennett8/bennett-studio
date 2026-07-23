@@ -11,10 +11,13 @@
 //!
 //! Future: P2P transport fallback via WebRTC/QUIC
 
+mod api_key_registry;
+mod api_v1;
 mod config;
 mod health;
 mod metrics;
 mod multiplexer;
+mod rate_limit;
 mod router;
 mod server;
 mod signaling;
@@ -186,9 +189,11 @@ async fn main() -> anyhow::Result<()> {
         println!("DEBUG MAIN: bind_addr={}", bind_addr);
         info!(addr = %bind_addr, "Starting HTTP proxy API for external website access");
 
+        let rate_rps = config.api_v1_rate_rps;
+        let rate_burst = config.api_v1_rate_burst;
         Some(tokio::spawn(async move {
             println!("DEBUG PROXY: Starting HTTP proxy API task on {}", bind_addr);
-            if let Err(e) = start_http_proxy_api(bind_addr, router_clone, _transport_clone).await {
+            if let Err(e) = start_http_proxy_api(bind_addr, router_clone, _transport_clone, rate_rps, rate_burst).await {
                 error!("HTTP proxy API error: {}", e);
             }
             println!("DEBUG PROXY: HTTP proxy API task ended");
@@ -372,18 +377,29 @@ async fn start_http_proxy_api(
     bind_addr: String,
     router: Arc<router::ShareRouter>,
     _transport: Arc<dyn transport::Transport>,
+    api_v1_rate_rps: u32,
+    api_v1_rate_burst: u32,
 ) -> anyhow::Result<()> {
     // Use eprintln to bypass any tracing/log capture and guarantee visibility
     eprintln!("DEBUG PROXY: bind_addr={}", bind_addr);
-    // Initialize shared tunnel registry
+// Initialize shared tunnel registry
     let tunnel_registry = crate::tunnel_registry::TunnelRegistry::new();
-    
+
     // Inject tunnel registry into router
     let router = router.with_tunnel_registry(tunnel_registry.clone());
 
-    let app_state = ProxyApiState { 
+    // Initialize API key routing table (key_hash -> host_id)
+    let api_key_registry = crate::api_key_registry::ApiKeyRegistry::new();
+
+    // Initialize /api/v1 rate limiter — per-key throttling is the primary
+    // defense here since durable keys have no expiry to bound abuse
+    let rate_limiter = Arc::new(crate::rate_limit::ApiV1RateLimiter::new(api_v1_rate_rps, api_v1_rate_burst));
+
+    let app_state = ProxyApiState {
         router,
         tunnel_registry: tunnel_registry.clone(),
+        api_key_registry,
+        rate_limiter,
     };
 
     // CORS middleware for external web app access
@@ -416,6 +432,24 @@ async fn start_http_proxy_api(
         ])
         .allow_credentials(true);
 
+    let app_v1_cors = CorsLayer::new()
+        .allow_origin(Any)
+        .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
+        .allow_headers([
+            axum::http::header::CONTENT_TYPE,
+            axum::http::header::AUTHORIZATION,
+        ]);
+
+    let app_v1 = Router::new()
+        // Stable public API gateway — durable Bearer bnt_live_ keys, no expiry,
+        // meant to be hardcoded as a base URL by external apps, unlike the
+        // ephemeral /db/:code share links.
+        .route("/api/v1/health", get(api_v1::api_v1_health))
+        .route("/api/v1/query", post(api_v1::api_v1_query))
+        .route("/api/v1/schema", get(api_v1::api_v1_schema))
+        .layer(app_v1_cors)
+        .with_state(app_state.clone());
+
     let app = Router::new()
         // Health check
         .route("/health", get(proxy_health))
@@ -440,7 +474,8 @@ async fn start_http_proxy_api(
         // PHASE A: Engine tunnel WebSocket — engines connect here to register routes
         .route("/ws/tunnel/:host_id", get(tunnel_ws_handler))
         .layer(cors)
-        .with_state(app_state);
+        .with_state(app_state)
+        .merge(app_v1);
 
     let addr: SocketAddr = bind_addr.parse()?;
     info!("HTTP proxy API listening on http://{}", addr);
@@ -455,6 +490,8 @@ async fn start_http_proxy_api(
 pub struct ProxyApiState {
     router: Arc<router::ShareRouter>,
     tunnel_registry: Arc<crate::tunnel_registry::TunnelRegistry>,
+    api_key_registry: Arc<crate::api_key_registry::ApiKeyRegistry>,
+    rate_limiter: Arc<crate::rate_limit::ApiV1RateLimiter>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -831,6 +868,17 @@ enum TunnelEngineMessage {
         share_code: String,
         token: String,
     },
+    ApiKeyQueryRequest {
+        request_id: String,
+        key_hash: String,
+        sql: String,
+        limit: Option<i32>,
+        offset: Option<i32>,
+    },
+    ApiKeySchemaRequest {
+        request_id: String,
+        key_hash: String,
+    },
     Ping,
 }
 
@@ -858,6 +906,22 @@ enum TunnelEngineResponse {
     },
     ShareRevoked {
         code: String,
+    },
+    ApiKeyRegistered {
+        key_hash: String,
+        db_id: String,
+        permission: String,
+    },
+    ApiKeyRevoked {
+        key_hash: String,
+    },
+    ApiKeyQueryResponse {
+        request_id: String,
+        result: serde_json::Value,
+    },
+    ApiKeySchemaResponse {
+        request_id: String,
+        schema: serde_json::Value,
     },
     Pong,
 }
@@ -898,6 +962,12 @@ async fn handle_tunnel_ws(
                 }
                 crate::tunnel_registry::TunnelMessageToEngine::SchemaRequest { request_id, share_code, token } => {
                     TunnelEngineMessage::SchemaRequest { request_id, share_code, token }
+                }
+                crate::tunnel_registry::TunnelMessageToEngine::ApiKeyQueryRequest { request_id, key_hash, sql, limit, offset } => {
+                    TunnelEngineMessage::ApiKeyQueryRequest { request_id, key_hash, sql, limit, offset }
+                }
+                crate::tunnel_registry::TunnelMessageToEngine::ApiKeySchemaRequest { request_id, key_hash } => {
+                    TunnelEngineMessage::ApiKeySchemaRequest { request_id, key_hash }
                 }
                 crate::tunnel_registry::TunnelMessageToEngine::Ping => TunnelEngineMessage::Ping,
             };
@@ -943,6 +1013,23 @@ async fn handle_tunnel_ws(
                                 TunnelEngineResponse::ShareRevoked { code } => {
                                     info!("Engine reported share revoked: {}", code);
                                     state.router.remove_remote_route(&code).await;
+                                }
+                                TunnelEngineResponse::ApiKeyRegistered { key_hash, .. } => {
+                                    info!("Engine registered API key for host: {}", host_id);
+                                    state.api_key_registry.register(key_hash, host_id.clone());
+                                }
+                                TunnelEngineResponse::ApiKeyRevoked { key_hash } => {
+                                    info!("Engine revoked API key");
+                                    state.api_key_registry.revoke(&key_hash);
+                                    state.rate_limiter.remove_key(&key_hash).await;
+                                }
+                                TunnelEngineResponse::ApiKeyQueryResponse { request_id, result } => {
+                                    debug!("Engine API key query response: {}", request_id);
+                                    state.tunnel_registry.complete_request(&request_id, result).await;
+                                }
+                                TunnelEngineResponse::ApiKeySchemaResponse { request_id, schema } => {
+                                    debug!("Engine API key schema response: {}", request_id);
+                                    state.tunnel_registry.complete_request(&request_id, schema).await;
                                 }
                                 TunnelEngineResponse::QueryResponse { request_id, result } => {
                                     debug!("Engine query response: {}", request_id);
@@ -993,6 +1080,8 @@ async fn handle_tunnel_ws(
     state.tunnel_registry.unregister_tunnel(&host_id).await;
     // Cleanup ALL routes from this host
     state.router.remove_all_host_routes(&host_id).await;
+    // Cleanup ALL API keys registered by this host
+    state.api_key_registry.remove_all_host_keys(&host_id);
 }
 
 /// WebSocket upgrade handler
