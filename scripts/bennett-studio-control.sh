@@ -1,4 +1,5 @@
 #!/bin/bash
+set -o pipefail
 
 # MSF Bennett Command Controller
 # Usage: msf bennett <action> bennett-studio <environment>
@@ -264,17 +265,36 @@ build_engine() {
     pkill -f "rust-lld" 2>/dev/null || true
     sleep 2
 
+    # Record the old binary's mtime (or note it's absent) so we can PROVE
+    # a new one was actually produced, not just assume from cargo's exit code.
+    local old_mtime=""
+    if [ -f "$BINARY" ]; then
+        old_mtime=$(stat -c %Y "$BINARY" 2>/dev/null || stat -f %m "$BINARY" 2>/dev/null)
+    fi
+
     cd "$ENGINE_DIR" || exit 1
-    if cargo build --bin bennett-engine 2>&1 | tee /tmp/bennett-engine-build.log; then
-        echo ""
-        echo -e "[${C_GREEN}OK${C_RESET}] ${C_GREEN}Engine built successfully${C_RESET}"
-        return 0
-    else
+    if ! cargo build --bin bennett-engine 2>&1 | tee /tmp/bennett-engine-build.log; then
         echo ""
         echo -e "[${C_RED}ERROR${C_RESET}] ${C_RED}Engine build failed!${C_RESET}"
         echo -e "   ${C_DIM}Check: cat /tmp/bennett-engine-build.log${C_RESET}"
         return 1
     fi
+
+    # Verify the binary actually changed — catches silent no-op builds
+    if [ ! -f "$BINARY" ]; then
+        echo -e "[${C_RED}ERROR${C_RESET}] ${C_RED}Build reported success but binary is missing!${C_RESET}"
+        return 1
+    fi
+    local new_mtime
+    new_mtime=$(stat -c %Y "$BINARY" 2>/dev/null || stat -f %m "$BINARY" 2>/dev/null)
+    if [ -n "$old_mtime" ] && [ "$new_mtime" = "$old_mtime" ]; then
+        echo -e "[${C_YELLOW}WARN${C_RESET}] ${C_YELLOW}Binary timestamp unchanged — cargo may have skipped rebuilding.${C_RESET}"
+        echo -e "   ${C_DIM}If you expected code changes to be included, run: cargo clean && retry${C_RESET}"
+    fi
+
+    echo ""
+    echo -e "[${C_GREEN}OK${C_RESET}] ${C_GREEN}Engine built successfully${C_RESET} ${C_DIM}(binary updated: $(date -d @"$new_mtime" 2>/dev/null || date -r "$new_mtime"))${C_RESET}"
+    return 0
 }
 
 # ============================================================================

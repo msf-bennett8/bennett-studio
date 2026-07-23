@@ -187,6 +187,7 @@ impl RelayTunnelClient {
                 if share.revoked || share.expires_at < chrono::Utc::now() {
                     continue;
                 }
+                let code = share.code.clone();
                 let msg = TunnelMessage::ShareCreated {
                     code: share.code,
                     db_id: share.db_id,
@@ -196,7 +197,7 @@ impl RelayTunnelClient {
                 if let Err(e) = tx.send(msg) {
                     warn!("Failed to re-sync share to relay: {}", e);
                 } else {
-                    info!("Re-synced share {} to relay after reconnect", share.code);
+                    info!("Re-synced share {} to relay after reconnect", code);
                 }
             }
         }
