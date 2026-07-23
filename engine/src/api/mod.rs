@@ -1,4 +1,7 @@
+pub mod activity;
 pub mod api_keys;
+pub mod engine_info;
+pub mod guests;
 pub mod health;
 pub mod http;
 pub mod middleware;
@@ -70,6 +73,13 @@ pub fn routes() -> Router<AppState> {
         .route("/api/keys", post(api_keys::create_api_key))
         .route("/api/keys", get(api_keys::list_api_keys))
         .route("/api/keys/:id", delete(api_keys::revoke_api_key))
+        // General settings — real host/engine identity
+        .route("/api/engine/info", get(engine_info::get_engine_info))
+        // Activity settings — real audit log
+        .route("/api/activity", get(activity::list_activity).delete(activity::clear_activity))
+        // Guests settings — real connected-guest sessions
+        .route("/api/guests", get(guests::list_guests))
+        .route("/api/guests/:id", delete(guests::disconnect_guest))
         .route("/api/health", get(crate::api::health::comprehensive_health_check))
         // Notes endpoints
         .route("/api/notes", get(http::list_notes))

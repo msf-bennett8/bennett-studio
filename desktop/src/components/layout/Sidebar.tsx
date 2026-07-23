@@ -1,7 +1,8 @@
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useEffect, useState } from 'react';
-import { Database, Search, Table2, Share2, Settings, Home, Terminal, Cpu, Rows3, Globe, StickyNote, Palette, Bell, Shield, KeyRound, ArrowLeft } from 'lucide-react';
-import { api } from '../services/api';
+import { Database, Search, Table2, Share2, Settings, Home, Terminal, Cpu, Rows3, Globe, StickyNote, Palette, Bell, Shield, KeyRound, ArrowLeft, Sliders, Users, Activity, BookOpen } from 'lucide-react';
+import { api } from '../../services/api';
+import { useUIPreferencesStore } from '../../stores/uiPreferencesStore';
 
 const navItems = [
   { icon: Home, label: 'Home', path: '/' },
@@ -16,11 +17,14 @@ const navItems = [
 ];
 
 const settingsNavItems = [
+  { icon: Sliders, label: 'General', path: '/settings/general' },
   { icon: Palette, label: 'Appearance', path: '/settings/appearance' },
   { icon: Bell, label: 'Notifications', path: '/settings/notifications' },
   { icon: Shield, label: 'Privacy & Security', path: '/settings/privacy' },
   { icon: KeyRound, label: 'API Keys', path: '/settings/api-keys' },
-  { icon: Terminal, label: 'Engine Info', path: '/settings/engine' },
+  { icon: Users, label: 'Guests', path: '/settings/guests' },
+  { icon: Activity, label: 'Activity', path: '/settings/activity' },
+  { icon: BookOpen, label: 'Resources', path: '/settings/resources' },
 ];
 
 export function Sidebar() {
@@ -28,6 +32,8 @@ export function Sidebar() {
   const navigate = useNavigate();
   const [engineOnline, setEngineOnline] = useState(true);
   const isSettingsSection = location.pathname.startsWith('/settings');
+  const { compactSidebar } = useUIPreferencesStore();
+  const navButtonPadding = compactSidebar ? 'px-4 py-2' : 'px-4 py-3';
 
   // Real-time engine health polling
   useEffect(() => {
@@ -76,7 +82,7 @@ export function Sidebar() {
               const Icon = item.icon;
               const isActive = location.pathname === item.path;
               return (
-                <button key={item.path} onClick={() => navigate(item.path)} className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all"
+                <button key={item.path} onClick={() => navigate(item.path)} className={`w-full flex items-center gap-3 ${navButtonPadding} rounded-xl text-sm font-medium transition-all`}
                   style={{ backgroundColor: isActive ? 'var(--surfaceActive)' : 'transparent', color: isActive ? 'var(--accentPrimary)' : 'var(--textSecondary)', borderRight: isActive ? '3px solid var(--accentPrimary)' : '3px solid transparent' }}>
                   <Icon size={18} />
                   {item.label}
@@ -89,7 +95,7 @@ export function Sidebar() {
             const Icon = item.icon;
             const isActive = location.pathname === item.path;
             return (
-              <button key={item.path} onClick={() => navigate(item.path)} className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all"
+              <button key={item.path} onClick={() => navigate(item.path)} className={`w-full flex items-center gap-3 ${navButtonPadding} rounded-xl text-sm font-medium transition-all`}
                 style={{ backgroundColor: isActive ? 'var(--surfaceActive)' : 'transparent', color: isActive ? 'var(--accentPrimary)' : 'var(--textSecondary)', borderRight: isActive ? '3px solid var(--accentPrimary)' : '3px solid transparent' }}>
                 <Icon size={18} />
                 {item.label}

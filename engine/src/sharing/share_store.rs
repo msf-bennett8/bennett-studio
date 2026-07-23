@@ -388,6 +388,30 @@ impl ShareStore {
         Ok(())
     }
     
+    /// List all guest sessions across all shares (for the Guests settings view)
+    pub async fn list_all_guest_sessions(&self) -> anyhow::Result<Vec<GuestSession>> {
+        let rows = sqlx::query("SELECT * FROM guest_sessions ORDER BY connected_at DESC")
+            .fetch_all(&self.pool)
+            .await?;
+        Ok(rows.into_iter().map(Self::row_to_guest).collect())
+    }
+
+    fn row_to_guest(row: sqlx::sqlite::SqliteRow) -> GuestSession {
+        GuestSession {
+            id: row.get("id"),
+            share_code: row.get("share_code"),
+            ip_address: row.get("ip_address"),
+            user_agent: row.get("user_agent"),
+            connected_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("connected_at"))
+                .map(|d| d.with_timezone(&Utc))
+                .unwrap_or_else(|_| Utc::now()),
+            last_active: DateTime::parse_from_rfc3339(&row.get::<String, _>("last_active"))
+                .map(|d| d.with_timezone(&Utc))
+                .unwrap_or_else(|_| Utc::now()),
+            query_count: row.get("query_count"),
+        }
+    }
+
     /// Disconnect guest
     pub async fn record_guest_disconnect(&self, session_id: &str) -> anyhow::Result<()> {
         // Delete guest session and decrement count

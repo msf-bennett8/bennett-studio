@@ -171,6 +171,12 @@ impl AuditService {
         Ok(())
     }
     
+    /// Clear all audit log entries (user-initiated, from Privacy settings)
+    pub async fn clear_all(&self) -> Result<u64, sqlx::Error> {
+        let result = sqlx::query("DELETE FROM audit_log").execute(&self.pool).await?;
+        Ok(result.rows_affected())
+    }
+
     /// Cleanup entries older than retention_days
     async fn cleanup_old(pool: &Pool<Sqlite>, retention_days: i64) -> Result<u64, sqlx::Error> {
         let cutoff = (Utc::now() - chrono::Duration::days(retention_days)).to_rfc3339();
@@ -196,23 +202,21 @@ impl AuditService {
         _to: Option<DateTime<Utc>>,
         limit: i64,
     ) -> Result<Vec<AuditEntry>, sqlx::Error> {
-        let mut query_str = "SELECT * FROM audit_log WHERE 1=1".to_string();
-        //TODO
-        // Note: Proper parameterized queries would use query_as! macro
-        // For now, simplified query without dynamic binds
-        //let mut binds: Vec<Box<dyn sqlx::Encode<'_, sqlx::Sqlite> + sqlx::Type<sqlx::Sqlite> + Send>> = Vec::new();
-        
-        if let Some(_code) = share_code {
+let mut query_str = "SELECT * FROM audit_log WHERE 1=1".to_string();
+
+        if share_code.is_some() {
             query_str.push_str(" AND share_code = ?");
-            // binds.push(Box::new(code)); // Simplified - real impl needs proper binding
         }
-        
+
         query_str.push_str(" ORDER BY timestamp DESC LIMIT ?");
-        
-        let rows = sqlx::query(&query_str)
-            .bind(limit)
-            .fetch_all(&self.pool)
-            .await?;
+
+        let mut q = sqlx::query(&query_str);
+        if let Some(code) = share_code {
+            q = q.bind(code);
+        }
+        q = q.bind(limit);
+
+        let rows = q.fetch_all(&self.pool).await?;
         
         let entries = rows.into_iter().map(|row| {
             let query_type_str: String = row.get("query_type");
