@@ -73,6 +73,7 @@ pub fn routes() -> Router<AppState> {
         .route("/api/keys", post(api_keys::create_api_key))
         .route("/api/keys", get(api_keys::list_api_keys))
         .route("/api/keys/:id", delete(api_keys::revoke_api_key))
+        .route("/api/keys/:id/permanent", delete(api_keys::delete_api_key))
         // General settings — real host/engine identity
         .route("/api/engine/info", get(engine_info::get_engine_info))
         // Activity settings — real audit log

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useApiKeysStore } from '../../stores/apiKeysStore';
 import { useDatabaseStore } from '../../stores/databaseStore';
 import { ApiKeyItem } from './ApiKeyItem';
+import { ConfirmModal } from '../ui/ConfirmModal';
 
 const isRemoteMode = () => {
   const url = (import.meta as any).env?.VITE_API_URL || '';
@@ -14,9 +15,51 @@ export const ApiKeyPanel: React.FC = () => {
   const [permission, setPermission] = useState<'ro' | 'rw' | 'adm'>('ro');
   const {
     keys, loading, creating, error, justCreatedKey,
-    fetchKeys, createKey, revokeKey, dismissJustCreatedKey, clearError,
+    fetchKeys, createKey, revokeKey, deleteKey, dismissJustCreatedKey, clearError,
   } = useApiKeysStore();
   const { databases } = useDatabaseStore();
+
+  const [confirmModal, setConfirmModal] = useState<{
+    open: boolean;
+    type: 'revoke' | 'delete';
+    id: string;
+    title: string;
+    message: string;
+    confirmText: string;
+  } | null>(null);
+
+  const openRevokeConfirm = (id: string, name: string) => {
+    setConfirmModal({
+      open: true,
+      type: 'revoke',
+      id,
+      title: 'Revoke API Key',
+      message: `"${name}" will immediately stop working for any external app using it. The key stays visible in history and can be permanently deleted afterward.`,
+      confirmText: 'Revoke Key',
+    });
+  };
+
+  const openDeleteConfirm = (id: string, name: string) => {
+    setConfirmModal({
+      open: true,
+      type: 'delete',
+      id,
+      title: 'Permanently Delete API Key',
+      message: `"${name}" will be permanently removed. This cannot be undone.`,
+      confirmText: 'Delete Permanently',
+    });
+  };
+
+  const handleConfirmAction = async () => {
+    if (!confirmModal) return;
+    const { type, id } = confirmModal;
+    setConfirmModal(null);
+    if (type === 'revoke') {
+      await revokeKey(id);
+    } else {
+      await deleteKey(id);
+    }
+  };
 
   useEffect(() => {
     if (!isRemoteMode()) fetchKeys();
@@ -109,9 +152,27 @@ export const ApiKeyPanel: React.FC = () => {
         {loading && <p className="text-sm text-gray-500">Loading...</p>}
         {!loading && keys.length === 0 && <p className="text-sm text-gray-500">No API keys yet.</p>}
         {keys.map((k) => (
-          <ApiKeyItem key={k.id} apiKey={k} onRevoke={() => revokeKey(k.id)} />
+          <ApiKeyItem
+            key={k.id}
+            apiKey={k}
+            onRevoke={() => openRevokeConfirm(k.id, k.name)}
+            onDelete={() => openDeleteConfirm(k.id, k.name)}
+          />
         ))}
       </div>
+
+      {confirmModal?.open && (
+        <ConfirmModal
+          open={confirmModal.open}
+          type={confirmModal.type}
+          title={confirmModal.title}
+          message={confirmModal.message}
+          code={confirmModal.id}
+          confirmText={confirmModal.confirmText}
+          onConfirm={handleConfirmAction}
+          onCancel={() => setConfirmModal(null)}
+        />
+      )}
     </div>
   );
 };

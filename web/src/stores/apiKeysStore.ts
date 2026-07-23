@@ -12,6 +12,7 @@ interface ApiKeysState {
   fetchKeys: (databaseId?: string) => Promise<void>;
   createKey: (req: CreateApiKeyRequest) => Promise<boolean>;
   revokeKey: (id: string) => Promise<boolean>;
+  deleteKey: (id: string) => Promise<boolean>;
   dismissJustCreatedKey: () => void;
   clearError: () => void;
 }
@@ -77,6 +78,22 @@ export const useApiKeysStore = create<ApiKeysState>((set) => ({
       return success;
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to revoke API key';
+      set({ error: msg });
+      return false;
+    }
+  },
+
+  deleteKey: async (id) => {
+    try {
+      const success = await apiKeysApi.deleteApiKey(id);
+      if (success) {
+        set((state) => ({
+          keys: state.keys.filter((k) => k.id !== id),
+        }));
+      }
+      return success;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to delete API key';
       set({ error: msg });
       return false;
     }

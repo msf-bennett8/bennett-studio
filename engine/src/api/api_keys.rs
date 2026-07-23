@@ -127,6 +127,40 @@ pub async fn list_api_keys(
     Ok(Json(crate::models::database::ApiResponse::success(ListApiKeysResponse { keys, total })))
 }
 
+/// DELETE /api/keys/:id/permanent — hard delete (irreversible)
+pub async fn delete_api_key(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<crate::models::database::ApiResponse<serde_json::Value>>, StatusCode> {
+    match state.share_store.hard_delete_api_key(&id).await {
+        Ok(Some(key_hash)) => {
+            state.rate_limiter.remove(&key_hash).await;
+
+            let tunnel_lock = state.tunnel_tx.read().await;
+            if let Some(ref tx) = *tunnel_lock {
+                let msg = crate::sharing::relay::TunnelMessage::ApiKeyRevoked { key_hash };
+                let _ = tx.send(msg);
+                info!("Notified relay tunnel about deleted API key {}", id);
+            }
+
+            info!("Hard deleted API key {}", id);
+            Ok(Json(crate::models::database::ApiResponse::success(serde_json::json!({
+                "deleted": true,
+                "id": id
+            }))))
+        }
+        Ok(None) => Ok(Json(crate::models::database::ApiResponse::error(
+            format!("API key {} not found", id)
+        ))),
+        Err(e) => {
+            warn!("Failed to hard delete API key {}: {}", id, e);
+            Ok(Json(crate::models::database::ApiResponse::error(
+                "Failed to delete API key".to_string()
+            )))
+        }
+    }
+}
+
 pub async fn revoke_api_key(
     Path(id): Path<String>,
     State(state): State<AppState>,

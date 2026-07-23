@@ -53,4 +53,12 @@ export const apiKeysApi = {
     const result = await response.json();
     return result.success;
   },
+
+  deleteApiKey: async (id: string): Promise<boolean> => {
+    if (isRemoteMode()) return false;
+    const response = await fetch(`${API_BASE_URL}/api/keys/${id}/permanent`, { method: 'DELETE' });
+    if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    const result = await response.json();
+    return result.success;
+  },
 };

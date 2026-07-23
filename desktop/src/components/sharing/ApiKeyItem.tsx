@@ -1,12 +1,14 @@
 import React from 'react';
+import { Trash2 } from 'lucide-react';
 import type { ApiKeyInfo } from '../../services/apiKeysApi';
 
 interface ApiKeyItemProps {
   apiKey: ApiKeyInfo;
   onRevoke: () => void;
+  onDelete: () => void;
 }
 
-export const ApiKeyItem: React.FC<ApiKeyItemProps> = ({ apiKey, onRevoke }) => {
+export const ApiKeyItem: React.FC<ApiKeyItemProps> = ({ apiKey, onRevoke, onDelete }) => {
   const handleCopyId = () => {
     navigator.clipboard.writeText(apiKey.id);
   };
@@ -29,13 +31,20 @@ export const ApiKeyItem: React.FC<ApiKeyItemProps> = ({ apiKey, onRevoke }) => {
             <span>Last used: {apiKey.last_used_at ? new Date(apiKey.last_used_at).toLocaleString() : 'never'}</span>
           </div>
         </div>
-        <div className="flex gap-2 ml-2">
-          <button onClick={handleCopyId} className="px-2 py-1 text-xs rounded" style={{ backgroundColor: 'var(--bgTertiary)', color: 'var(--textSecondary)' }}>
-            Copy ID
-          </button>
-          {!apiKey.revoked && (
-            <button onClick={onRevoke} className="px-2 py-1 text-xs rounded" style={{ backgroundColor: 'rgba(255,68,68,0.1)', color: 'var(--accentError)' }}>
-              Revoke
+        <div className="flex flex-col gap-2 ml-2 items-end">
+          <div className="flex gap-2">
+            <button onClick={handleCopyId} className="px-2 py-1 text-xs rounded" style={{ backgroundColor: 'var(--bgTertiary)', color: 'var(--textSecondary)' }}>
+              Copy ID
+            </button>
+            {!apiKey.revoked && (
+              <button onClick={onRevoke} className="px-2 py-1 text-xs rounded" style={{ backgroundColor: 'rgba(255,68,68,0.1)', color: 'var(--accentError)' }}>
+                Revoke
+              </button>
+            )}
+          </div>
+          {apiKey.revoked && (
+            <button onClick={onDelete} className="flex items-center gap-1 px-2 py-1 text-xs rounded" style={{ backgroundColor: 'rgba(255,68,68,0.1)', color: 'var(--accentError)' }}>
+              <Trash2 size={12} /> Delete
             </button>
           )}
         </div>

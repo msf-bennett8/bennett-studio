@@ -612,6 +612,26 @@ impl ShareStore {
         Ok(rows.into_iter().map(Self::row_to_api_key).collect())
     }
 
+    /// Permanently delete an API key (irreversible — distinct from revoke,
+    /// which keeps the row for history). Returns the key_hash if found, so
+    /// the caller can clear it from the relay's routing table too.
+    pub async fn hard_delete_api_key(&self, id: &str) -> anyhow::Result<Option<String>> {
+        let row = sqlx::query("SELECT key_hash FROM api_keys WHERE id = ?")
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await?;
+        let key_hash: Option<String> = row.map(|r| r.get("key_hash"));
+
+        if key_hash.is_some() {
+            sqlx::query("DELETE FROM api_keys WHERE id = ?")
+                .bind(id)
+                .execute(&self.pool)
+                .await?;
+            info!("Hard deleted API key {}", id);
+        }
+        Ok(key_hash)
+    }
+
     pub async fn revoke_api_key(&self, id: &str) -> anyhow::Result<Option<String>> {
         let row = sqlx::query("SELECT key_hash FROM api_keys WHERE id = ?")
             .bind(id)
