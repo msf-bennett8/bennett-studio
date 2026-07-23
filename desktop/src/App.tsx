@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { HashRouter, Routes, Route } from 'react-router-dom';
+import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useThemeStore } from './stores/themeStore';
 import { useRemoteConnectionStore } from './stores/remoteConnectionStore';
 import { Layout } from './components/Layout';
@@ -12,6 +12,11 @@ import { SharePage } from './pages/SharePage';
 import { JoinSharePage } from './pages/JoinSharePage';
 import { RemoteQueryPage } from './pages/RemoteQueryPage';
 import { SettingsPage } from './pages/SettingsPage';
+import { AppearanceSettings } from './pages/settings/AppearanceSettings';
+import { NotificationSettings } from './pages/settings/NotificationSettings';
+import { PrivacySettings } from './pages/settings/PrivacySettings';
+import { ApiKeySettings } from './pages/settings/ApiKeySettings';
+import { EngineSettings } from './pages/settings/EngineSettings';
 import { NotesPage } from './pages/NotesPage';
 import { ShareLandingPage } from './pages/ShareLandingPage';
 import './index.css';
@@ -54,7 +59,14 @@ function App() {
           <Route path="/join-share" element={<JoinSharePage />} />
           <Route path="/remote-query" element={<RemoteQueryPage />} />
           <Route path="/notes" element={<NotesPage />} />
-          <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/settings" element={<SettingsPage />}>
+            <Route index element={<Navigate to="appearance" replace />} />
+            <Route path="appearance" element={<AppearanceSettings />} />
+            <Route path="notifications" element={<NotificationSettings />} />
+            <Route path="privacy" element={<PrivacySettings />} />
+            <Route path="api-keys" element={<ApiKeySettings />} />
+            <Route path="engine" element={<EngineSettings />} />
+          </Route>
           <Route path="/db/:code" element={<ShareLandingPage />} />
         </Routes>
       </Layout>

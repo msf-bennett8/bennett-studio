@@ -1,6 +1,6 @@
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useEffect, useState } from 'react';
-import { Database, Search, Table2, Share2, Settings, Home, Terminal, Cpu, Rows3, Globe, StickyNote } from 'lucide-react';
+import { Database, Search, Table2, Share2, Settings, Home, Terminal, Cpu, Rows3, Globe, StickyNote, Palette, Bell, Shield, KeyRound, ArrowLeft } from 'lucide-react';
 import { api } from '../services/api';
 
 const navItems = [
@@ -15,10 +15,19 @@ const navItems = [
   { icon: Settings, label: 'Settings', path: '/settings' },
 ];
 
+const settingsNavItems = [
+  { icon: Palette, label: 'Appearance', path: '/settings/appearance' },
+  { icon: Bell, label: 'Notifications', path: '/settings/notifications' },
+  { icon: Shield, label: 'Privacy & Security', path: '/settings/privacy' },
+  { icon: KeyRound, label: 'API Keys', path: '/settings/api-keys' },
+  { icon: Terminal, label: 'Engine Info', path: '/settings/engine' },
+];
+
 export function Sidebar() {
   const location = useLocation();
   const navigate = useNavigate();
   const [engineOnline, setEngineOnline] = useState(true);
+  const isSettingsSection = location.pathname.startsWith('/settings');
 
   // Real-time engine health polling
   useEffect(() => {
@@ -55,17 +64,39 @@ export function Sidebar() {
       </div>
 
       <nav className="flex-1 px-3 py-4 space-y-1">
-        {navItems.map((item) => {
-          const Icon = item.icon;
-          const isActive = location.pathname === item.path;
-          return (
-            <button key={item.path} onClick={() => navigate(item.path)} className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all"
-              style={{ backgroundColor: isActive ? 'var(--surfaceActive)' : 'transparent', color: isActive ? 'var(--accentPrimary)' : 'var(--textSecondary)', borderRight: isActive ? '3px solid var(--accentPrimary)' : '3px solid transparent' }}>
-              <Icon size={18} />
-              {item.label}
+        {isSettingsSection ? (
+          <>
+            <button onClick={() => navigate('/')} className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all mb-2"
+              style={{ color: 'var(--textSecondary)' }}>
+              <ArrowLeft size={18} />
+              Back to Studio
             </button>
-          );
-        })}
+            <div className="h-px my-2" style={{ backgroundColor: 'var(--borderDefault)' }} />
+            {settingsNavItems.map((item) => {
+              const Icon = item.icon;
+              const isActive = location.pathname === item.path;
+              return (
+                <button key={item.path} onClick={() => navigate(item.path)} className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all"
+                  style={{ backgroundColor: isActive ? 'var(--surfaceActive)' : 'transparent', color: isActive ? 'var(--accentPrimary)' : 'var(--textSecondary)', borderRight: isActive ? '3px solid var(--accentPrimary)' : '3px solid transparent' }}>
+                  <Icon size={18} />
+                  {item.label}
+                </button>
+              );
+            })}
+          </>
+        ) : (
+          navItems.map((item) => {
+            const Icon = item.icon;
+            const isActive = location.pathname === item.path;
+            return (
+              <button key={item.path} onClick={() => navigate(item.path)} className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all"
+                style={{ backgroundColor: isActive ? 'var(--surfaceActive)' : 'transparent', color: isActive ? 'var(--accentPrimary)' : 'var(--textSecondary)', borderRight: isActive ? '3px solid var(--accentPrimary)' : '3px solid transparent' }}>
+                <Icon size={18} />
+                {item.label}
+              </button>
+            );
+          })
+        )}
       </nav>
 
       <div className="p-4 border-t space-y-2" style={{ borderColor: 'var(--borderDefault)' }}>
@@ -89,4 +120,3 @@ export function Sidebar() {
     </aside>
   );
 }
-
