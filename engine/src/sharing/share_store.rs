@@ -641,40 +641,40 @@ impl ShareStore {
     }
 
     /// Permanently delete an API key (irreversible — distinct from revoke,
-    /// which keeps the row for history). Returns the key_hash if found, so
-    /// the caller can clear it from the relay's routing table too.
-    pub async fn hard_delete_api_key(&self, id: &str) -> anyhow::Result<Option<String>> {
-        let row = sqlx::query("SELECT key_hash FROM api_keys WHERE id = ?")
+    /// which keeps the row for history). Returns (key_hash, wire_password_hash)
+    /// if found, so the caller can clear both from the relay's routing tables.
+    pub async fn hard_delete_api_key(&self, id: &str) -> anyhow::Result<Option<(String, Option<String>)>> {
+        let row = sqlx::query("SELECT key_hash, wire_password_hash FROM api_keys WHERE id = ?")
             .bind(id)
             .fetch_optional(&self.pool)
             .await?;
-        let key_hash: Option<String> = row.map(|r| r.get("key_hash"));
+        let result: Option<(String, Option<String>)> = row.map(|r| (r.get("key_hash"), r.get("wire_password_hash")));
 
-        if key_hash.is_some() {
+        if result.is_some() {
             sqlx::query("DELETE FROM api_keys WHERE id = ?")
                 .bind(id)
                 .execute(&self.pool)
                 .await?;
             info!("Hard deleted API key {}", id);
         }
-        Ok(key_hash)
+        Ok(result)
     }
 
-    pub async fn revoke_api_key(&self, id: &str) -> anyhow::Result<Option<String>> {
-        let row = sqlx::query("SELECT key_hash FROM api_keys WHERE id = ?")
+    pub async fn revoke_api_key(&self, id: &str) -> anyhow::Result<Option<(String, Option<String>)>> {
+        let row = sqlx::query("SELECT key_hash, wire_password_hash FROM api_keys WHERE id = ?")
             .bind(id)
             .fetch_optional(&self.pool)
             .await?;
-        let key_hash: Option<String> = row.map(|r| r.get("key_hash"));
+        let result: Option<(String, Option<String>)> = row.map(|r| (r.get("key_hash"), r.get("wire_password_hash")));
 
-        if key_hash.is_some() {
+        if result.is_some() {
             sqlx::query("UPDATE api_keys SET revoked = 1 WHERE id = ?")
                 .bind(id)
                 .execute(&self.pool)
                 .await?;
             info!("Revoked API key {}", id);
         }
-        Ok(key_hash)
+        Ok(result)
     }
 
     pub async fn touch_api_key(&self, key_hash: &str) -> anyhow::Result<()> {

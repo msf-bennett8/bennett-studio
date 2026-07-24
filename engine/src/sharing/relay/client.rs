@@ -74,10 +74,14 @@ pub enum TunnelMessage {
         key_hash: String,
         db_id: String,
         permission: String,
+        /// Present only if this key also has wire-protocol (MySQL/Postgres) access enabled
+        wire_password_hash: Option<String>,
     },
     /// API key revoked — notify relay to stop routing it
     ApiKeyRevoked {
         key_hash: String,
+        /// Present only if this key also had wire-protocol access enabled
+        wire_password_hash: Option<String>,
     },
     /// API key query request from relay (external app via /api/v1/query)
     ApiKeyQueryRequest {
@@ -294,6 +298,7 @@ impl RelayTunnelClient {
                     key_hash: key.key_hash.clone(),
                     db_id: key.db_id.clone(),
                     permission: key.permission.clone(),
+                    wire_password_hash: key.wire_password_hash.clone(),
                 };
                 if let Err(e) = tx.send(msg) {
                     warn!("Failed to re-sync API key to relay: {}", e);

@@ -24,7 +24,15 @@ mod signaling;
 mod transport;
 mod tunnel_registry;
 mod wire_frame;
+mod wire_listener;
 mod wire_registry;
+mod wire_tls;
+
+/// Global handle to the wire-stream registry, set once at startup — needed
+/// because wire_listener's per-connection tasks are spawned independently
+/// of ProxyApiState and need to route bytes back through the same
+/// registry the tunnel WebSocket handler uses.
+pub static WIRE_STREAM_REGISTRY: once_cell::sync::OnceCell<Arc<crate::wire_registry::WireStreamRegistry>> = once_cell::sync::OnceCell::new();
 
 use axum::{
     extract::{
@@ -399,6 +407,35 @@ async fn start_http_proxy_api(
 
     // Initialize wire-protocol (MySQL/Postgres) tunneled stream registry (Phase 2)
     let wire_stream_registry = crate::wire_registry::WireStreamRegistry::new();
+    let _ = WIRE_STREAM_REGISTRY.set(wire_stream_registry.clone());
+
+    // Initialize wire credential registry (wire_password_hash -> host_id) and
+    // start the public MySQL wire-protocol listener (Phase 3)
+    let wire_credentials = crate::wire_registry::WireCredentialRegistry::new();
+    {
+        let wire_credentials = wire_credentials.clone();
+        let tunnel_registry = tunnel_registry.clone();
+        let wire_bind: SocketAddr = std::env::var("BENNETT_WIRE_LISTENER_BIND")
+            .unwrap_or_else(|_| "0.0.0.0:3307".to_string())
+            .parse()
+            .expect("Invalid BENNETT_WIRE_LISTENER_BIND");
+        tokio::spawn(async move {
+            let tls_acceptor = match crate::wire_tls::build_wire_tls_acceptor("bennett-relay.onrender.com") {
+                Ok(a) => a,
+                Err(e) => {
+                    error!("Failed to build wire-listener TLS acceptor: {}", e);
+                    return;
+                }
+            };
+            let state = Arc::new(crate::wire_listener::WireListenerState {
+                tunnel_registry,
+                wire_credentials,
+            });
+            if let Err(e) = crate::wire_listener::start_wire_listener(wire_bind, tls_acceptor, state).await {
+                error!("Wire listener error: {}", e);
+            }
+        });
+    }
 
     let app_state = ProxyApiState {
         router,
@@ -406,6 +443,7 @@ async fn start_http_proxy_api(
         api_key_registry,
         rate_limiter,
         wire_stream_registry,
+        wire_credentials,
     };
 
     // CORS middleware for external web app access
@@ -499,6 +537,7 @@ pub struct ProxyApiState {
     api_key_registry: Arc<crate::api_key_registry::ApiKeyRegistry>,
     rate_limiter: Arc<crate::rate_limit::ApiV1RateLimiter>,
     wire_stream_registry: Arc<crate::wire_registry::WireStreamRegistry>,
+    wire_credentials: Arc<crate::wire_registry::WireCredentialRegistry>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -926,9 +965,11 @@ enum TunnelEngineResponse {
         key_hash: String,
         db_id: String,
         permission: String,
+        wire_password_hash: Option<String>,
     },
     ApiKeyRevoked {
         key_hash: String,
+        wire_password_hash: Option<String>,
     },
     ApiKeyQueryResponse {
         request_id: String,
@@ -1049,14 +1090,20 @@ async fn handle_tunnel_ws(
                                     info!("Engine reported share revoked: {}", code);
                                     state.router.remove_remote_route(&code).await;
                                 }
-                                TunnelEngineResponse::ApiKeyRegistered { key_hash, .. } => {
+                                TunnelEngineResponse::ApiKeyRegistered { key_hash, wire_password_hash, .. } => {
                                     info!("Engine registered API key for host: {}", host_id);
                                     state.api_key_registry.register(key_hash, host_id.clone());
+                                    if let Some(wh) = wire_password_hash {
+                                        state.wire_credentials.register(wh, host_id.clone());
+                                    }
                                 }
-                                TunnelEngineResponse::ApiKeyRevoked { key_hash } => {
+                                TunnelEngineResponse::ApiKeyRevoked { key_hash, wire_password_hash } => {
                                     info!("Engine revoked API key");
                                     state.api_key_registry.revoke(&key_hash);
                                     state.rate_limiter.remove_key(&key_hash).await;
+                                    if let Some(wh) = wire_password_hash {
+                                        state.wire_credentials.revoke(&wh);
+                                    }
                                 }
                                 TunnelEngineResponse::ApiKeyQueryResponse { request_id, result } => {
                                     debug!("Engine API key query response: {}", request_id);
@@ -1143,6 +1190,7 @@ async fn handle_tunnel_ws(
     state.router.remove_all_host_routes(&host_id).await;
     // Cleanup ALL API keys registered by this host
     state.api_key_registry.remove_all_host_keys(&host_id);
+    state.wire_credentials.remove_all_host_credentials(&host_id);
 }
 
 /// WebSocket upgrade handler

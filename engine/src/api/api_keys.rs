@@ -92,6 +92,7 @@ pub async fn create_api_key(
                 key_hash: key_hash.clone(),
                 db_id: req.database_id.clone(),
                 permission: permission.clone(),
+                wire_password_hash: wire_password_hash.clone(),
             };
             if let Err(e) = tx.send(msg) {
                 warn!("Failed to notify relay about new API key: {}", e);
@@ -163,12 +164,12 @@ pub async fn delete_api_key(
     State(state): State<AppState>,
 ) -> Result<Json<crate::models::database::ApiResponse<serde_json::Value>>, StatusCode> {
     match state.share_store.hard_delete_api_key(&id).await {
-        Ok(Some(key_hash)) => {
+        Ok(Some((key_hash, wire_password_hash))) => {
             state.rate_limiter.remove(&key_hash).await;
 
             let tunnel_lock = state.tunnel_tx.read().await;
             if let Some(ref tx) = *tunnel_lock {
-                let msg = crate::sharing::relay::TunnelMessage::ApiKeyRevoked { key_hash };
+                let msg = crate::sharing::relay::TunnelMessage::ApiKeyRevoked { key_hash, wire_password_hash };
                 let _ = tx.send(msg);
                 info!("Notified relay tunnel about deleted API key {}", id);
             }
@@ -196,12 +197,15 @@ pub async fn revoke_api_key(
     State(state): State<AppState>,
 ) -> Result<Json<crate::models::database::ApiResponse<serde_json::Value>>, StatusCode> {
     match state.share_store.revoke_api_key(&id).await {
-        Ok(Some(key_hash)) => {
+        Ok(Some((key_hash, wire_password_hash))) => {
             state.rate_limiter.remove(&key_hash).await;
 
             let tunnel_lock = state.tunnel_tx.read().await;
             if let Some(ref tx) = *tunnel_lock {
-                let msg = crate::sharing::relay::TunnelMessage::ApiKeyRevoked { key_hash };
+                let msg = crate::sharing::relay::TunnelMessage::ApiKeyRevoked {
+                    key_hash,
+                    wire_password_hash,
+                };
                 let _ = tx.send(msg);
                 info!("Notified relay tunnel about revoked API key {}", id);
             }

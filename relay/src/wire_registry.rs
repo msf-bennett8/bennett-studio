@@ -8,6 +8,37 @@ use dashmap::DashMap;
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
 
+/// Maps a wire-protocol (MySQL/Postgres) password hash to the host_id that
+/// owns it — separate from ApiKeyRegistry, which maps the bnt_live_ key
+/// hash used by /api/v1. Populated by ApiKeyRegistered tunnel messages
+/// when a key has wire access enabled.
+#[derive(Default)]
+pub struct WireCredentialRegistry {
+    entries: DashMap<String, String>, // wire_password_hash -> host_id
+}
+
+impl WireCredentialRegistry {
+    pub fn new() -> Arc<Self> {
+        Arc::new(Self::default())
+    }
+
+    pub fn register(&self, wire_password_hash: String, host_id: String) {
+        self.entries.insert(wire_password_hash, host_id);
+    }
+
+    pub fn revoke(&self, wire_password_hash: &str) {
+        self.entries.remove(wire_password_hash);
+    }
+
+    pub fn resolve(&self, wire_password_hash: &str) -> Option<String> {
+        self.entries.get(wire_password_hash).map(|v| v.clone())
+    }
+
+    pub fn remove_all_host_credentials(&self, host_id: &str) {
+        self.entries.retain(|_, v| v != host_id);
+    }
+}
+
 pub type ClientFrameSender = mpsc::UnboundedSender<Vec<u8>>;
 
 #[derive(Default)]
