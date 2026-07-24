@@ -63,7 +63,8 @@ pub async fn start_wire_listener(
 fn hash_wire_password(password: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(password.as_bytes());
-    format!("{:x}", hasher.finalize())
+    let digest: [u8; 32] = hasher.finalize().into();
+    digest.iter().map(|b| format!("{:02x}", b)).collect()
 }
 
 async fn handle_client(

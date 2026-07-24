@@ -75,7 +75,7 @@ pub async fn create_api_key(
         max_rows,
         timeout_secs,
         wire_username: wire_username.clone(),
-        wire_password_hash,
+        wire_password_hash: wire_password_hash.clone(),
     };
 
     if let Err(e) = state.share_store.create_api_key(&record).await {

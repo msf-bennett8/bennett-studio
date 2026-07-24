@@ -1231,6 +1231,7 @@ async fn handle_tunnel_ws(
     let (wrap_tx, mut wrap_rx) = tokio::sync::mpsc::unbounded_channel::<crate::tunnel_registry::TunnelMessageToEngine>();
 
     let tx_clone = tx.clone();
+    let _ = &tx_clone; // used below in the spawned task
     tokio::spawn(async move {
         while let Some(msg) = wrap_rx.recv().await {
             let engine_msg = match msg {
@@ -1247,6 +1248,15 @@ async fn handle_tunnel_ws(
                     TunnelEngineMessage::SchemaRequest { request_id, share_code: key_hash, token: "".to_string() }
                 }
                 crate::tunnel_registry::TunnelMessageToEngine::Ping => TunnelEngineMessage::Ping,
+                // Not handled in this legacy path — server/mod.rs's run_http_mode()
+                // is currently unused (BENNETT_HTTP_MODE is unset, defaults false,
+                // so main.rs's start_http_proxy_api() is what's actually live).
+                // Wire-protocol tunneling was only built into the active path.
+                crate::tunnel_registry::TunnelMessageToEngine::WireStreamOpen { .. }
+                | crate::tunnel_registry::TunnelMessageToEngine::WireStreamClose { .. } => {
+                    warn!("Wire-protocol tunneling not supported via legacy http_mode path");
+                    return;
+                }
             };
             let _ = tx_clone.send(engine_msg);
         }

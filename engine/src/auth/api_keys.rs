@@ -21,7 +21,8 @@ pub fn generate_api_key() -> (String, String) {
 pub fn hash_api_key(key: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(key.as_bytes());
-    format!("{:x}", hasher.finalize())
+    let digest: [u8; 32] = hasher.finalize().into();
+    digest.iter().map(|b| format!("{:02x}", b)).collect()
 }
 
 /// Generate a human-friendly wire-protocol password (no prefix — meant to

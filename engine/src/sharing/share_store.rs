@@ -201,7 +201,6 @@ impl ShareStore {
 
             CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash);
             CREATE INDEX IF NOT EXISTS idx_api_keys_db_id ON api_keys(db_id);
-            CREATE INDEX IF NOT EXISTS idx_api_keys_wire_password_hash ON api_keys(wire_password_hash);
             "#
         )
         .execute(pool)
@@ -230,6 +229,14 @@ impl ShareStore {
             .execute(pool)
             .await;
         let _ = sqlx::query("ALTER TABLE api_keys ADD COLUMN wire_password_hash TEXT")
+            .execute(pool)
+            .await;
+
+        // Index must be created AFTER the column exists — on a fresh database
+        // the column is already present from CREATE TABLE above, but on an
+        // upgraded database it only exists once the ALTER TABLE lines just
+        // above have run. Defensive (ignore errors) like the other migrations.
+        let _ = sqlx::query("CREATE INDEX IF NOT EXISTS idx_api_keys_wire_password_hash ON api_keys(wire_password_hash)")
             .execute(pool)
             .await;
 
