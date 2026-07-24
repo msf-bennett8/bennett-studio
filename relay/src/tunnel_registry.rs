@@ -33,6 +33,16 @@ pub enum TunnelMessageToEngine {
         request_id: String,
         key_hash: String,
     },
+    /// Open a tunneled wire-protocol (MySQL/Postgres) byte stream on the engine
+    WireStreamOpen {
+        stream_id: String,
+        wire_username: String,
+        wire_password_hash: String,
+    },
+    /// Close a tunneled wire-protocol byte stream
+    WireStreamClose {
+        stream_id: String,
+    },
     Ping,
 }
 
@@ -57,6 +67,8 @@ pub struct TunnelRegistry {
     tunnels: RwLock<HashMap<String, mpsc::UnboundedSender<TunnelMessageToEngine>>>,
     /// request_id -> oneshot sender for HTTP response correlation
     pending: RwLock<HashMap<String, oneshot::Sender<serde_json::Value>>>,
+    /// host_id -> sender for raw binary wire-protocol frames (Phase 2)
+    wire_tunnels: RwLock<HashMap<String, mpsc::UnboundedSender<Vec<u8>>>>,
 }
 
 impl TunnelRegistry {
@@ -76,6 +88,39 @@ impl TunnelRegistry {
         let mut tunnels = self.tunnels.write().await;
         tunnels.remove(host_id);
         debug!("Unregistered tunnel for host: {}", host_id);
+    }
+
+    /// Register a binary wire-protocol frame sender for a host (Phase 2)
+    pub async fn register_wire_tunnel(&self, host_id: String, tx: mpsc::UnboundedSender<Vec<u8>>) {
+        let mut wire_tunnels = self.wire_tunnels.write().await;
+        wire_tunnels.insert(host_id.clone(), tx);
+        debug!("Registered wire tunnel for host: {}", host_id);
+    }
+
+    /// Remove a host's binary wire-protocol frame sender
+    pub async fn unregister_wire_tunnel(&self, host_id: &str) {
+        let mut wire_tunnels = self.wire_tunnels.write().await;
+        wire_tunnels.remove(host_id);
+        debug!("Unregistered wire tunnel for host: {}", host_id);
+    }
+
+    /// Get a host's binary wire-protocol frame sender, if connected
+    pub async fn get_wire_tunnel(&self, host_id: &str) -> Option<mpsc::UnboundedSender<Vec<u8>>> {
+        let wire_tunnels = self.wire_tunnels.read().await;
+        wire_tunnels.get(host_id).cloned()
+    }
+
+    /// Send a wire-stream control message (open/close) to a host without
+    /// waiting for a request/response correlation — unlike send_and_wait,
+    /// the acknowledgement (WireStreamOpened/WireStreamError) arrives
+    /// separately and is matched by stream_id via WireStreamRegistry.
+    pub async fn send_wire_control(&self, host_id: &str, msg: TunnelMessageToEngine) -> anyhow::Result<()> {
+        let tunnels = self.tunnels.read().await;
+        let tx = tunnels.get(host_id)
+            .ok_or_else(|| anyhow::anyhow!("No tunnel for host: {}", host_id))?
+            .clone();
+        drop(tunnels);
+        tx.send(msg).map_err(|e| anyhow::anyhow!("Tunnel send failed: {}", e))
     }
 
     /// Register a pending HTTP request waiting for tunnel response

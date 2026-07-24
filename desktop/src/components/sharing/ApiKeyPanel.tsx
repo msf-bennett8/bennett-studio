@@ -8,8 +8,11 @@ export const ApiKeyPanel: React.FC = () => {
   const [selectedDb, setSelectedDb] = useState<string>('');
   const [name, setName] = useState('');
   const [permission, setPermission] = useState<'ro' | 'rw' | 'adm'>('ro');
+  const [enableWireAccess, setEnableWireAccess] = useState(false);
+  const [wireUsername, setWireUsername] = useState('');
+  const [wirePassword, setWirePassword] = useState('');
   const {
-    keys, loading, creating, error, justCreatedKey,
+    keys, loading, creating, error, justCreatedKey, justCreatedWireCreds,
     fetchKeys, createKey, revokeKey, deleteKey, dismissJustCreatedKey, clearError,
   } = useApiKeysStore();
   const { databases } = useDatabaseStore();
@@ -62,8 +65,21 @@ export const ApiKeyPanel: React.FC = () => {
 
   const handleCreate = async () => {
     if (!selectedDb || !name.trim()) return;
-    const ok = await createKey({ database_id: selectedDb, name: name.trim(), permission, tables: ['*'] });
-    if (ok) setName('');
+    const ok = await createKey({
+      database_id: selectedDb,
+      name: name.trim(),
+      permission,
+      tables: ['*'],
+      enable_wire_access: enableWireAccess,
+      wire_username: wireUsername.trim() || undefined,
+      wire_password: wirePassword.trim() || undefined,
+    });
+    if (ok) {
+      setName('');
+      setEnableWireAccess(false);
+      setWireUsername('');
+      setWirePassword('');
+    }
   };
 
   const handleCopyKey = () => {
@@ -91,8 +107,27 @@ export const ApiKeyPanel: React.FC = () => {
           <div className="flex gap-2 items-center">
             <code className="text-xs p-2 rounded flex-1 truncate" style={{ backgroundColor: 'var(--bgTertiary)', color: 'var(--textPrimary)' }}>{justCreatedKey}</code>
             <button onClick={handleCopyKey} className="px-2 py-1 text-xs rounded" style={{ backgroundColor: 'var(--bgTertiary)', color: 'var(--textSecondary)' }}>Copy</button>
-            <button onClick={dismissJustCreatedKey} className="px-2 py-1 text-xs rounded" style={{ backgroundColor: 'var(--bgTertiary)', color: 'var(--textSecondary)' }}>Dismiss</button>
           </div>
+
+          {justCreatedWireCreds && (
+            <div className="mt-3 pt-3" style={{ borderTop: '1px solid var(--borderDefault)' }}>
+              <p className="text-sm font-semibold mb-1" style={{ color: 'var(--accentWarning)' }}>MySQL/Postgres wire credentials — also shown only once:</p>
+              <div className="text-xs space-y-1">
+                <div className="flex gap-2 items-center">
+                  <span className="w-20" style={{ color: 'var(--textMuted)' }}>Username</span>
+                  <code className="p-1.5 rounded flex-1" style={{ backgroundColor: 'var(--bgTertiary)', color: 'var(--textPrimary)' }}>{justCreatedWireCreds.username}</code>
+                  <button onClick={() => navigator.clipboard.writeText(justCreatedWireCreds.username)} className="px-2 py-1 rounded" style={{ backgroundColor: 'var(--bgTertiary)', color: 'var(--textSecondary)' }}>Copy</button>
+                </div>
+                <div className="flex gap-2 items-center">
+                  <span className="w-20" style={{ color: 'var(--textMuted)' }}>Password</span>
+                  <code className="p-1.5 rounded flex-1" style={{ backgroundColor: 'var(--bgTertiary)', color: 'var(--textPrimary)' }}>{justCreatedWireCreds.password}</code>
+                  <button onClick={() => navigator.clipboard.writeText(justCreatedWireCreds.password)} className="px-2 py-1 rounded" style={{ backgroundColor: 'var(--bgTertiary)', color: 'var(--textSecondary)' }}>Copy</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <button onClick={dismissJustCreatedKey} className="mt-3 px-2 py-1 text-xs rounded" style={{ backgroundColor: 'var(--bgTertiary)', color: 'var(--textSecondary)' }}>Dismiss</button>
         </div>
       )}
 
@@ -125,6 +160,37 @@ export const ApiKeyPanel: React.FC = () => {
             <option value="adm" style={{ backgroundColor: 'var(--bgTertiary)' }}>Admin</option>
           </select>
         </div>
+        <div className="pt-2" style={{ borderTop: '1px solid var(--borderDefault)' }}>
+          <label className="flex items-center gap-2 text-sm" style={{ color: 'var(--textPrimary)' }}>
+            <input type="checkbox" checked={enableWireAccess} onChange={(e) => setEnableWireAccess(e.target.checked)} />
+            Enable MySQL/Postgres wire access (a real DB connection string)
+          </label>
+          {enableWireAccess && (
+            <div className="mt-2 space-y-2">
+              <p className="text-xs" style={{ color: 'var(--textMuted)' }}>
+                Leave blank to auto-generate. Custom values let you choose a recognizable username/password
+                (e.g. for a production <code style={{ color: 'var(--textPrimary)' }}>.env</code>) instead of a random one.
+              </p>
+              <input
+                type="text"
+                value={wireUsername}
+                onChange={(e) => setWireUsername(e.target.value)}
+                placeholder="Wire username (optional, e.g. bennett_oshocks)"
+                className="w-full p-2 rounded text-sm"
+                style={{ backgroundColor: 'var(--bgTertiary)', color: 'var(--textPrimary)', border: '1px solid var(--borderDefault)' }}
+              />
+              <input
+                type="text"
+                value={wirePassword}
+                onChange={(e) => setWirePassword(e.target.value)}
+                placeholder="Wire password (optional)"
+                className="w-full p-2 rounded text-sm"
+                style={{ backgroundColor: 'var(--bgTertiary)', color: 'var(--textPrimary)', border: '1px solid var(--borderDefault)' }}
+              />
+            </div>
+          )}
+        </div>
+
         <button
           onClick={handleCreate}
           disabled={!selectedDb || !name.trim() || creating}

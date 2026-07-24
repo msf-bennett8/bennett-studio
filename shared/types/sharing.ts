@@ -87,6 +87,12 @@ export interface CreateApiKeyRequest {
   rls?: string;
   max_rows?: number;
   timeout_secs?: number;
+  /** Enable a MySQL/Postgres wire-protocol credential pair for this key */
+  enable_wire_access?: boolean;
+  /** Custom wire username — auto-generated as "bennett_<name>" if omitted */
+  wire_username?: string;
+  /** Custom wire password — auto-generated if omitted */
+  wire_password?: string;
 }
 
 export interface CreateApiKeyResponse {
@@ -95,6 +101,9 @@ export interface CreateApiKeyResponse {
   name: string;
   permission: SharePermission;
   created_at: string;
+  /** Present only if wire access was enabled — shown once, never retrievable again */
+  wire_username?: string;
+  wire_password?: string;
 }
 
 export interface ApiKeyInfo {
@@ -109,6 +118,8 @@ export interface ApiKeyInfo {
   key_preview: string;
   max_rows: number;
   timeout_secs: number;
+  wire_enabled: boolean;
+  wire_username: string | null;
 }
 
 export interface ListApiKeysResponse {

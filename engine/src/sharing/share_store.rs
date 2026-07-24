@@ -73,6 +73,10 @@ pub struct ApiKeyRecord {
     pub max_rows: i32,
     /// Query timeout in seconds — independent of share defaults
     pub timeout_secs: i32,
+    /// Wire-protocol (MySQL/Postgres) username, if wire access is enabled
+    pub wire_username: Option<String>,
+    /// sha256 hash of the wire-protocol password — never store plaintext
+    pub wire_password_hash: Option<String>,
 }
 
 /// Share store with SQLite backend
@@ -190,11 +194,14 @@ impl ShareStore {
                 last_used_at TEXT,
                 revoked INTEGER NOT NULL DEFAULT 0,
                 max_rows INTEGER NOT NULL DEFAULT 1000,
-                timeout_secs INTEGER NOT NULL DEFAULT 30
+                timeout_secs INTEGER NOT NULL DEFAULT 30,
+                wire_username TEXT,
+                wire_password_hash TEXT UNIQUE
             );
 
             CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash);
             CREATE INDEX IF NOT EXISTS idx_api_keys_db_id ON api_keys(db_id);
+            CREATE INDEX IF NOT EXISTS idx_api_keys_wire_password_hash ON api_keys(wire_password_hash);
             "#
         )
         .execute(pool)
@@ -215,6 +222,14 @@ impl ShareStore {
             .execute(pool)
             .await;
         let _ = sqlx::query("ALTER TABLE api_keys ADD COLUMN timeout_secs INTEGER NOT NULL DEFAULT 30")
+            .execute(pool)
+            .await;
+
+        // Migration: Add wire-protocol credentials to existing api_keys table (for upgrades)
+        let _ = sqlx::query("ALTER TABLE api_keys ADD COLUMN wire_username TEXT")
+            .execute(pool)
+            .await;
+        let _ = sqlx::query("ALTER TABLE api_keys ADD COLUMN wire_password_hash TEXT")
             .execute(pool)
             .await;
 
@@ -564,8 +579,8 @@ impl ShareStore {
     pub async fn create_api_key(&self, record: &ApiKeyRecord) -> anyhow::Result<()> {
         sqlx::query(
             r#"
-            INSERT INTO api_keys (id, key_hash, db_id, name, permission, tables, cols, rls, created_at, last_used_at, revoked, max_rows, timeout_secs)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO api_keys (id, key_hash, db_id, name, permission, tables, cols, rls, created_at, last_used_at, revoked, max_rows, timeout_secs, wire_username, wire_password_hash)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#
         )
         .bind(&record.id)
@@ -581,6 +596,8 @@ impl ShareStore {
         .bind(record.revoked as i32)
         .bind(record.max_rows)
         .bind(record.timeout_secs)
+        .bind(record.wire_username.as_ref())
+        .bind(record.wire_password_hash.as_ref())
         .execute(&self.pool)
         .await?;
 
@@ -591,6 +608,17 @@ impl ShareStore {
     pub async fn get_api_key_by_hash(&self, key_hash: &str) -> anyhow::Result<Option<ApiKeyRecord>> {
         let row = sqlx::query("SELECT * FROM api_keys WHERE key_hash = ? AND revoked = 0")
             .bind(key_hash)
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(row.map(Self::row_to_api_key))
+    }
+
+    /// Lookup by wire-protocol password hash (for the MySQL/Postgres wire
+    /// proxy — Phase 3). Caller should additionally verify the record's
+    /// wire_username matches what the client presented.
+    pub async fn get_api_key_by_wire_password_hash(&self, wire_password_hash: &str) -> anyhow::Result<Option<ApiKeyRecord>> {
+        let row = sqlx::query("SELECT * FROM api_keys WHERE wire_password_hash = ? AND revoked = 0")
+            .bind(wire_password_hash)
             .fetch_optional(&self.pool)
             .await?;
         Ok(row.map(Self::row_to_api_key))
@@ -677,6 +705,8 @@ impl ShareStore {
             revoked: row.get::<i32, _>("revoked") != 0,
             max_rows: row.get("max_rows"),
             timeout_secs: row.get("timeout_secs"),
+            wire_username: row.get("wire_username"),
+            wire_password_hash: row.get("wire_password_hash"),
         }
     }
 

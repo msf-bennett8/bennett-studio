@@ -10,11 +10,20 @@ use axum::{
 use tracing::{info, warn};
 
 use crate::AppState;
-use crate::auth::api_keys::generate_api_key;
+use crate::auth::api_keys::{generate_api_key, generate_wire_password, hash_wire_password};
 use crate::models::api_key::{
     CreateApiKeyRequest, CreateApiKeyResponse, ApiKeyInfo, ListApiKeysResponse,
 };
 use crate::sharing::share_store::ApiKeyRecord;
+
+/// Default wire username when the caller doesn't provide a custom one:
+/// "bennett_<slugified-name>" — e.g. "oshocks-backend" -> "bennett_oshocks_backend"
+fn default_wire_username(name: &str) -> String {
+    let slug: String = name.chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '_' })
+        .collect();
+    format!("bennett_{}", slug)
+}
 
 pub async fn create_api_key(
     State(state): State<AppState>,
@@ -39,6 +48,18 @@ pub async fn create_api_key(
     let max_rows = req.max_rows.unwrap_or(1000).clamp(1, 10000);
     let timeout_secs = req.timeout_secs.unwrap_or(30).clamp(1, 300);
 
+    // Wire-protocol (MySQL/Postgres) credentials — optional, generated once,
+    // shown to the caller exactly once, stored only as a hash thereafter.
+    let (wire_username, wire_password_plaintext, wire_password_hash) =
+        if req.enable_wire_access.unwrap_or(false) {
+            let username = req.wire_username.clone().unwrap_or_else(|| default_wire_username(&req.name));
+            let password = req.wire_password.clone().unwrap_or_else(generate_wire_password);
+            let hash = hash_wire_password(&password);
+            (Some(username), Some(password), Some(hash))
+        } else {
+            (None, None, None)
+        };
+
     let record = ApiKeyRecord {
         id: id.clone(),
         key_hash: key_hash.clone(),
@@ -53,6 +74,8 @@ pub async fn create_api_key(
         revoked: false,
         max_rows,
         timeout_secs,
+        wire_username: wire_username.clone(),
+        wire_password_hash,
     };
 
     if let Err(e) = state.share_store.create_api_key(&record).await {
@@ -81,9 +104,14 @@ pub async fn create_api_key(
     }
 
     info!("Created API key '{}' for db {}", req.name, req.database_id);
+    if wire_username.is_some() {
+        info!("Wire-protocol access enabled for API key '{}' (username: {:?})", req.name, wire_username);
+    }
 
     Ok(Json(crate::models::database::ApiResponse::success(CreateApiKeyResponse {
         id, key: plaintext, name: req.name, permission, created_at,
+        wire_username,
+        wire_password: wire_password_plaintext,
     })))
 }
 
@@ -116,6 +144,8 @@ pub async fn list_api_keys(
                         key_preview: format!("{}...{}", &r.key_hash[..6], &r.key_hash[r.key_hash.len()-4..]),
                         max_rows: r.max_rows,
                         timeout_secs: r.timeout_secs,
+                        wire_enabled: r.wire_username.is_some(),
+                        wire_username: r.wire_username,
                     });
                 }
             }

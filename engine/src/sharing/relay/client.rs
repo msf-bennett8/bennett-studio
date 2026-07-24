@@ -12,6 +12,8 @@ use futures_util::{StreamExt, SinkExt};
 use crate::sharing::share_store::ShareStore;
 use crate::auth::share_token::ShareTokenManager;
 use crate::models::database::DatabaseInstance;
+use crate::sharing::multiplex::wire_bridge::{WireBridgeRegistry, WireFrameSender};
+use crate::sharing::multiplex::wire_frame::{decode_wire_frame, WIRE_FRAME_TYPE_DATA};
 
 /// Tunnel message types between engine and relay
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -100,6 +102,28 @@ pub enum TunnelMessage {
         request_id: String,
         schema: serde_json::Value,
     },
+    /// Open a new tunneled wire-protocol (MySQL/Postgres) byte stream —
+    /// sent from relay to engine when a client's wire handshake completes.
+    /// Bulk data itself travels as raw binary WebSocket frames, not this
+    /// JSON message; this only carries stream lifecycle + auth.
+    WireStreamOpen {
+        stream_id: String,
+        wire_username: String,
+        wire_password_hash: String,
+    },
+    /// Engine confirms a wire stream was opened successfully
+    WireStreamOpened {
+        stream_id: String,
+    },
+    /// Engine reports a wire stream failed to open (bad credentials, db unreachable, etc.)
+    WireStreamError {
+        stream_id: String,
+        message: String,
+    },
+    /// Either side signals a tunneled wire stream has ended
+    WireStreamClose {
+        stream_id: String,
+    },
 }
 
 /// Relay tunnel client state
@@ -113,6 +137,10 @@ pub struct RelayTunnelClient {
     rate_limiter: Option<Arc<crate::rate_limit::RateLimitService>>,
     ws_tx: Option<mpsc::UnboundedSender<TunnelMessage>>,
     connected: bool,
+    /// Registry of active tunneled wire-protocol (MySQL/Postgres) byte streams
+    wire_registry: Arc<WireBridgeRegistry>,
+    /// Sends already-framed binary payloads out over the tunnel (engine -> relay)
+    wire_out_tx: Option<WireFrameSender>,
 }
 
 impl RelayTunnelClient {
@@ -132,6 +160,8 @@ impl RelayTunnelClient {
             rate_limiter: None,
             ws_tx: None,
             connected: false,
+            wire_registry: WireBridgeRegistry::new(),
+            wire_out_tx: None,
         }
     }
 
@@ -163,6 +193,13 @@ impl RelayTunnelClient {
         self
     }
 
+    /// Attach the sender used to push tunneled wire-protocol binary frames
+    /// out to the relay (Phase 2: MySQL/Postgres byte-stream tunneling)
+    pub fn with_wire_out_tx(mut self, wire_out_tx: WireFrameSender) -> Self {
+        self.wire_out_tx = Some(wire_out_tx);
+        self
+    }
+
     /// Start the tunnel — connects and maintains connection with auto-reconnect
     /// `tx`/`rx` are the SAME channel returned to the caller (start_relay_tunnel),
     /// so external sends (notify_share_created, etc.) actually reach the socket.
@@ -170,6 +207,7 @@ impl RelayTunnelClient {
         &mut self,
         tx: mpsc::UnboundedSender<TunnelMessage>,
         mut rx: mpsc::UnboundedReceiver<TunnelMessage>,
+        mut wire_out_rx: mpsc::UnboundedReceiver<Vec<u8>>,
     ) -> anyhow::Result<()> {
         self.ws_tx = Some(tx.clone());
 
@@ -177,7 +215,7 @@ impl RelayTunnelClient {
         let max_reconnect_delay = Duration::from_secs(60);
 
         loop {
-            match self.connect_and_maintain(&tx, &mut rx).await {
+            match self.connect_and_maintain(&tx, &mut rx, &mut wire_out_rx).await {
                 Ok(_) => {
                     info!("Relay tunnel closed gracefully");
                     reconnect_delay = Duration::from_secs(1);
@@ -195,6 +233,7 @@ impl RelayTunnelClient {
         &mut self,
         tx: &mpsc::UnboundedSender<TunnelMessage>,
         rx: &mut mpsc::UnboundedReceiver<TunnelMessage>,
+        wire_out_rx: &mut mpsc::UnboundedReceiver<Vec<u8>>,
     ) -> anyhow::Result<()> {
         // Support both URL formats: with or without /ws/tunnel prefix
         let base = if self.relay_url.ends_with("/ws/tunnel") {
@@ -277,6 +316,15 @@ impl RelayTunnelClient {
                                 self.handle_message(tunnel_msg, tx).await;
                             }
                         }
+                        Some(Ok(tokio_tungstenite::tungstenite::Message::Binary(data))) => {
+                            if let Some((msg_type, stream_id, payload)) = decode_wire_frame(&data) {
+                                if msg_type == WIRE_FRAME_TYPE_DATA {
+                                    if !self.wire_registry.route_inbound(stream_id, payload.to_vec()) {
+                                        debug!("Wire frame for unknown/closed stream {}", stream_id);
+                                    }
+                                }
+                            }
+                        }
                         Some(Ok(tokio_tungstenite::tungstenite::Message::Close(_))) | None => {
                             warn!("Relay WebSocket closed");
                             self.connected = false;
@@ -298,6 +346,15 @@ impl RelayTunnelClient {
                         warn!("Failed to send to relay: {}", e);
                         self.connected = false;
                         return Err(anyhow::anyhow!("Send failed: {}", e));
+                    }
+                }
+
+                // Outgoing wire-protocol binary frames (Phase 2: tunneled MySQL/Postgres bytes)
+                Some(frame) = wire_out_rx.recv() => {
+                    if let Err(e) = write.send(tokio_tungstenite::tungstenite::Message::Binary(frame)).await {
+                        warn!("Failed to send wire binary frame to relay: {}", e);
+                        self.connected = false;
+                        return Err(anyhow::anyhow!("Wire binary send failed: {}", e));
                     }
                 }
 
@@ -417,6 +474,53 @@ TunnelMessage::SchemaRequest { request_id, share_code, token } => {
                     },
                 };
                 let _ = tx.send(response);
+            }
+            TunnelMessage::WireStreamOpen { stream_id, wire_username, wire_password_hash } => {
+                debug!("Wire stream open request: {}", stream_id);
+
+                let databases = match &self.databases {
+                    Some(d) => d.clone(),
+                    None => {
+                        let _ = tx.send(TunnelMessage::WireStreamError {
+                            stream_id,
+                            message: "Engine databases not attached to tunnel client".to_string(),
+                        });
+                        return;
+                    }
+                };
+                let wire_out_tx = match &self.wire_out_tx {
+                    Some(w) => w.clone(),
+                    None => {
+                        let _ = tx.send(TunnelMessage::WireStreamError {
+                            stream_id,
+                            message: "Engine wire-out channel not attached".to_string(),
+                        });
+                        return;
+                    }
+                };
+
+                let share_store = self.share_store.clone();
+                let registry = self.wire_registry.clone();
+                let tx = tx.clone();
+                let stream_id_for_result = stream_id.clone();
+
+                tokio::spawn(async move {
+                    match crate::sharing::multiplex::wire_bridge::open_wire_stream(
+                        share_store, databases, registry, stream_id.clone(),
+                        wire_username, wire_password_hash, wire_out_tx,
+                    ).await {
+                        Ok(_) => {
+                            let _ = tx.send(TunnelMessage::WireStreamOpened { stream_id: stream_id_for_result });
+                        }
+                        Err(e) => {
+                            let _ = tx.send(TunnelMessage::WireStreamError { stream_id: stream_id_for_result, message: e });
+                        }
+                    }
+                });
+            }
+            TunnelMessage::WireStreamClose { stream_id } => {
+                debug!("Wire stream close: {}", stream_id);
+                self.wire_registry.remove(&stream_id);
             }
             _ => {
                 debug!("Unhandled tunnel message: {:?}", msg);
@@ -669,13 +773,17 @@ pub async fn start_relay_tunnel(
     rate_limiter: Option<Arc<crate::rate_limit::RateLimitService>>,
 ) -> anyhow::Result<mpsc::UnboundedSender<TunnelMessage>> {
     let (tx, rx) = mpsc::unbounded_channel::<TunnelMessage>();
+    // Phase 2: dedicated channel for tunneled wire-protocol binary frames
+    // (MySQL/Postgres bytes), kept separate from the JSON control channel
+    // above so bulk transfer never touches JSON/base64 encoding.
+    let (wire_out_tx, wire_out_rx) = mpsc::unbounded_channel::<Vec<u8>>();
 
     let mut client = RelayTunnelClient::new(
         relay_url,
         host_id,
         token_manager,
         share_store,
-    );
+    ).with_wire_out_tx(wire_out_tx);
 
     // Attach ConnectionManager if provided
     if let Some(cm) = connection_manager {
@@ -696,7 +804,7 @@ pub async fn start_relay_tunnel(
 
     // Spawn connection loop — pass the REAL tx/rx pair in, not a disconnected one
     tokio::spawn(async move {
-        if let Err(e) = client.run(tx, rx).await {
+        if let Err(e) = client.run(tx, rx, wire_out_rx).await {
             error!("Relay tunnel task ended: {}", e);
         }
     });

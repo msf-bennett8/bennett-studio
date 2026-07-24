@@ -8,6 +8,8 @@ interface ApiKeysState {
   error: string | null;
   /** Plaintext key shown once right after creation — never persisted */
   justCreatedKey: string | null;
+  /** Wire-protocol credentials shown once right after creation, if enabled */
+  justCreatedWireCreds: { username: string; password: string } | null;
 
   fetchKeys: (databaseId?: string) => Promise<void>;
   createKey: (req: CreateApiKeyRequest) => Promise<boolean>;
@@ -23,6 +25,7 @@ export const useApiKeysStore = create<ApiKeysState>((set) => ({
   creating: false,
   error: null,
   justCreatedKey: null,
+  justCreatedWireCreds: null,
 
   fetchKeys: async (databaseId) => {
     set({ loading: true, error: null });
@@ -42,6 +45,9 @@ export const useApiKeysStore = create<ApiKeysState>((set) => ({
       set((state) => ({
         creating: false,
         justCreatedKey: result.key,
+        justCreatedWireCreds: result.wire_username && result.wire_password
+          ? { username: result.wire_username, password: result.wire_password }
+          : null,
         keys: [
           {
             id: result.id,
@@ -55,6 +61,8 @@ export const useApiKeysStore = create<ApiKeysState>((set) => ({
             key_preview: `${result.key.slice(0, 12)}...`,
             max_rows: req.max_rows ?? 1000,
             timeout_secs: req.timeout_secs ?? 30,
+            wire_enabled: !!result.wire_username,
+            wire_username: result.wire_username ?? null,
           },
           ...state.keys,
         ],
@@ -99,6 +107,6 @@ export const useApiKeysStore = create<ApiKeysState>((set) => ({
     }
   },
 
-  dismissJustCreatedKey: () => set({ justCreatedKey: null }),
+  dismissJustCreatedKey: () => set({ justCreatedKey: null, justCreatedWireCreds: null }),
   clearError: () => set({ error: null }),
 }));

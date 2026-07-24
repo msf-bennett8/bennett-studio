@@ -27,6 +27,12 @@ export const ApiKeyItem: React.FC<ApiKeyItemProps> = ({ apiKey, onRevoke, onDele
             <span>{apiKey.permission}</span>
             <span>•</span>
             <span>{apiKey.max_rows} rows / {apiKey.timeout_secs}s</span>
+            {apiKey.wire_enabled && (
+              <>
+                <span>•</span>
+                <span className="text-blue-600">wire: {apiKey.wire_username}</span>
+              </>
+            )}
             <span>•</span>
             <span>Last used: {apiKey.last_used_at ? new Date(apiKey.last_used_at).toLocaleString() : 'never'}</span>
           </div>

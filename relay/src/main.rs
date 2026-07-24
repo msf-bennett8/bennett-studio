@@ -23,6 +23,8 @@ mod server;
 mod signaling;
 mod transport;
 mod tunnel_registry;
+mod wire_frame;
+mod wire_registry;
 
 use axum::{
     extract::{
@@ -395,11 +397,15 @@ async fn start_http_proxy_api(
     // defense here since durable keys have no expiry to bound abuse
     let rate_limiter = Arc::new(crate::rate_limit::ApiV1RateLimiter::new(api_v1_rate_rps, api_v1_rate_burst));
 
+    // Initialize wire-protocol (MySQL/Postgres) tunneled stream registry (Phase 2)
+    let wire_stream_registry = crate::wire_registry::WireStreamRegistry::new();
+
     let app_state = ProxyApiState {
         router,
         tunnel_registry: tunnel_registry.clone(),
         api_key_registry,
         rate_limiter,
+        wire_stream_registry,
     };
 
     // CORS middleware for external web app access
@@ -492,6 +498,7 @@ pub struct ProxyApiState {
     tunnel_registry: Arc<crate::tunnel_registry::TunnelRegistry>,
     api_key_registry: Arc<crate::api_key_registry::ApiKeyRegistry>,
     rate_limiter: Arc<crate::rate_limit::ApiV1RateLimiter>,
+    wire_stream_registry: Arc<crate::wire_registry::WireStreamRegistry>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -879,6 +886,14 @@ enum TunnelEngineMessage {
         request_id: String,
         key_hash: String,
     },
+    WireStreamOpen {
+        stream_id: String,
+        wire_username: String,
+        wire_password_hash: String,
+    },
+    WireStreamClose {
+        stream_id: String,
+    },
     Ping,
 }
 
@@ -922,6 +937,15 @@ enum TunnelEngineResponse {
     ApiKeySchemaResponse {
         request_id: String,
         schema: serde_json::Value,
+    },
+    /// Engine confirms a tunneled wire-protocol stream opened successfully
+    WireStreamOpened {
+        stream_id: String,
+    },
+    /// Engine reports a tunneled wire-protocol stream failed to open
+    WireStreamError {
+        stream_id: String,
+        message: String,
     },
     Pong,
 }
@@ -969,6 +993,12 @@ async fn handle_tunnel_ws(
                 crate::tunnel_registry::TunnelMessageToEngine::ApiKeySchemaRequest { request_id, key_hash } => {
                     TunnelEngineMessage::ApiKeySchemaRequest { request_id, key_hash }
                 }
+                crate::tunnel_registry::TunnelMessageToEngine::WireStreamOpen { stream_id, wire_username, wire_password_hash } => {
+                    TunnelEngineMessage::WireStreamOpen { stream_id, wire_username, wire_password_hash }
+                }
+                crate::tunnel_registry::TunnelMessageToEngine::WireStreamClose { stream_id } => {
+                    TunnelEngineMessage::WireStreamClose { stream_id }
+                }
                 crate::tunnel_registry::TunnelMessageToEngine::Ping => TunnelEngineMessage::Ping,
             };
             let _ = tx_clone.send(engine_msg);
@@ -977,6 +1007,11 @@ async fn handle_tunnel_ws(
 
     state.tunnel_registry.register_tunnel(host_id.clone(), wrap_tx).await;
     info!("Registered tunnel in registry for host: {}", host_id);
+
+    // Phase 2: dedicated channel for raw binary wire-protocol frames
+    // (MySQL/Postgres bytes), kept separate from the JSON control channel
+    let (wire_bin_tx, mut wire_bin_rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
+    state.tunnel_registry.register_wire_tunnel(host_id.clone(), wire_bin_tx).await;
 
     // Send welcome ping
     let _ = sender.send(Message::Text(
@@ -1031,6 +1066,14 @@ async fn handle_tunnel_ws(
                                     debug!("Engine API key schema response: {}", request_id);
                                     state.tunnel_registry.complete_request(&request_id, schema).await;
                                 }
+                                TunnelEngineResponse::WireStreamOpened { stream_id } => {
+                                    debug!("Engine confirmed wire stream opened: {}", stream_id);
+                                    state.wire_stream_registry.complete_open(&stream_id, Ok(()));
+                                }
+                                TunnelEngineResponse::WireStreamError { stream_id, message } => {
+                                    warn!("Engine reported wire stream error for {}: {}", stream_id, message);
+                                    state.wire_stream_registry.complete_open(&stream_id, Err(message));
+                                }
                                 TunnelEngineResponse::QueryResponse { request_id, result } => {
                                     debug!("Engine query response: {}", request_id);
                                     state.tunnel_registry.complete_request(&request_id, result).await;
@@ -1041,6 +1084,15 @@ async fn handle_tunnel_ws(
                                 }
                                 TunnelEngineResponse::Pong => {
                                     debug!("Engine tunnel pong received");
+                                }
+                            }
+                        }
+                    }
+                    Some(Ok(Message::Binary(data))) => {
+                        if let Some((msg_type, stream_id, payload)) = crate::wire_frame::decode_wire_frame(&data) {
+                            if msg_type == crate::wire_frame::WIRE_FRAME_TYPE_DATA {
+                                if !state.wire_stream_registry.route_to_client(stream_id, payload.to_vec()) {
+                                    debug!("Wire frame for unknown/closed client stream {}", stream_id);
                                 }
                             }
                         }
@@ -1066,6 +1118,14 @@ async fn handle_tunnel_ws(
                 }
             }
 
+            // Binary wire-protocol frames to forward to engine (Phase 2)
+            Some(frame) = wire_bin_rx.recv() => {
+                if let Err(e) = sender.send(Message::Binary(frame)).await {
+                    warn!("Failed to send wire binary frame to engine: {}", e);
+                    break;
+                }
+            }
+
             // Keepalive
             _ = tokio::time::sleep(tokio::time::Duration::from_secs(30)) => {
                 let _ = sender.send(Message::Text(
@@ -1078,6 +1138,7 @@ async fn handle_tunnel_ws(
     info!("Engine tunnel closed: host_id={}", host_id);
     // Cleanup tunnel registry
     state.tunnel_registry.unregister_tunnel(&host_id).await;
+    state.tunnel_registry.unregister_wire_tunnel(&host_id).await;
     // Cleanup ALL routes from this host
     state.router.remove_all_host_routes(&host_id).await;
     // Cleanup ALL API keys registered by this host

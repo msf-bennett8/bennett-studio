@@ -12,3 +12,5 @@ pub mod server;
 pub mod signaling;
 pub mod transport;
 pub mod tunnel_registry;
+pub mod wire_frame;
+pub mod wire_registry;

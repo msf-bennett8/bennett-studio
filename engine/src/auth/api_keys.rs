@@ -21,7 +21,22 @@ pub fn generate_api_key() -> (String, String) {
 pub fn hash_api_key(key: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(key.as_bytes());
-    hasher.finalize().iter().map(|b| format!("{:02x}", b)).collect()
+    format!("{:x}", hasher.finalize())
+}
+
+/// Generate a human-friendly wire-protocol password (no prefix — meant to
+/// look like a normal database password in a MySQL/Postgres connection
+/// string, e.g. in a .env file, indistinguishable from a managed DB credential).
+pub fn generate_wire_password() -> String {
+    let mut rng = rand::thread_rng();
+    let bytes: [u8; 18] = rand::Rng::gen(&mut rng);
+    base62_encode(&bytes)
+}
+
+/// Hash a wire-protocol password for storage/lookup. Same algorithm as
+/// hash_api_key (sha256 hex) — kept as a separate name for call-site clarity.
+pub fn hash_wire_password(password: &str) -> String {
+    hash_api_key(password)
 }
 
 fn base62_encode(bytes: &[u8]) -> String {

@@ -1,6 +1,6 @@
 {
   "name": "@bennettstudio/sdk",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Bennett Studio SDK — query shared databases via P2P or relay",
   "type": "module",
   "main": "./dist/index.cjs.js",
@@ -24,7 +24,7 @@
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
-    "@bennettstudio/shared": "^0.4.0",
+    "@bennettstudio/shared": "^0.5.0",
     "@bufbuild/protobuf": "^1.10.0",
     "@connectrpc/connect": "^1.4.0",
     "@connectrpc/connect-node": "^1.4.0",
